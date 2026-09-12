@@ -1,9 +1,26 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(5);
+select plan(22);
 select has_table('public','help_requests','schema reproduced');
 select row_security_active('public.help_requests'::regclass,'requests RLS active');
 select row_security_active('public.messages'::regclass,'messages RLS active');
 select has_index('public','service_locations','service_locations_geo_idx','geo index exists');
 select function_privs_are('public','bootstrap_first_admin',array['uuid'],null,array[]::text[],'bootstrap unavailable via API');
+select ok(not has_function_privilege('anon', 'public.is_admin(uuid)', 'execute'), 'is_admin rejects anon');
+select ok(has_function_privilege('authenticated', 'public.is_admin(uuid)', 'execute'), 'is_admin permits authenticated');
+select ok(not has_function_privilege('anon', 'public.is_active_coordinator(uuid,uuid)', 'execute'), 'is_active_coordinator rejects anon');
+select ok(has_function_privilege('authenticated', 'public.is_active_coordinator(uuid,uuid)', 'execute'), 'is_active_coordinator permits authenticated');
+select ok(not has_function_privilege('anon', 'public.can_access_case(uuid,uuid)', 'execute'), 'can_access_case rejects anon');
+select ok(has_function_privilege('authenticated', 'public.can_access_case(uuid,uuid)', 'execute'), 'can_access_case permits authenticated');
+select ok(not has_function_privilege('anon', 'public.create_help_request(jsonb,text)', 'execute'), 'create_help_request rejects anon');
+select ok(has_function_privilege('authenticated', 'public.create_help_request(jsonb,text)', 'execute'), 'create_help_request permits authenticated');
+select ok(not has_function_privilege('anon', 'public.assign_case(uuid,uuid,text)', 'execute'), 'assign_case rejects anon');
+select ok(has_function_privilege('authenticated', 'public.assign_case(uuid,uuid,text)', 'execute'), 'assign_case permits authenticated');
+select ok(not has_function_privilege('anon', 'public.assignment_queue(integer,integer)', 'execute'), 'assignment_queue rejects anon');
+select ok(has_function_privilege('authenticated', 'public.assignment_queue(integer,integer)', 'execute'), 'assignment_queue permits authenticated');
+select ok(not has_function_privilege('anon', 'public.revoke_case_assignment(uuid,text)', 'execute'), 'revoke_case_assignment rejects anon');
+select ok(not has_function_privilege('anon', 'public.change_case_status(uuid,request_status)', 'execute'), 'change_case_status rejects anon');
+select ok(not has_function_privilege('anon', 'public.enforce_message()', 'execute'), 'trigger helper rejects anon');
+select ok(not has_function_privilege('authenticated', 'public.enforce_message()', 'execute'), 'trigger helper rejects authenticated');
+select ok(has_function_privilege('anon', 'public.nearby_service_locations(double precision,double precision,integer,integer,integer)', 'execute'), 'nearby search permits anon');
 select * from finish();rollback;

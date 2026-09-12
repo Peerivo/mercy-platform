@@ -7,7 +7,7 @@
 Модульный монолит Next.js 16 / React 19, Supabase Auth/PostgreSQL/PostGIS/Realtime, SQL-only migrations, Docker. Production Supabase внешний; секретов в репозитории нет. Remote migrations intentionally not applied.
 
 ## IMPLEMENTED
-Публичная главная, каталог/гео-RPC, Auth flows, приватная форма обращения, кабинет, история/Realtime чат с idempotency, просмотр плана, предложение помощи, быстрый выход; строгая схема, RLS/grants, assignment/status RPC, audit, consent and IdentityLink contract; CI, controlled migration deployment, docs and Docker.
+Публичная главная, каталог/гео-RPC, Auth flows, приватная форма обращения, кабинет, история/Realtime чат с idempotency, просмотр плана, предложение помощи, быстрый выход; строгая схема, RLS/grants, явное разделение EXECUTE для anon/authenticated, assignment/status RPC, audit, consent and IdentityLink contract; CI, controlled migration deployment, docs and Docker.
 
 ## IN_PROGRESS
 Полный браузерный UI рабочего места администратора/координатора и полноценный Supabase integration suite требуют подключённого временного Docker/Supabase при приёмке.
