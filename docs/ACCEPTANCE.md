@@ -3,10 +3,10 @@
 ## Automated status
 - Unit validation: implemented.
 - Clean temporary Supabase migration/RLS/Realtime integration: implemented as mandatory CI job without cloud credentials or silent skips; awaiting an actual Docker runner result for the latest SHA.
-- pgTAP: 13 schema/RLS/grant/publication assertions configured.
-- Auth/API/Realtime: 9 behavioral tests configured with real user sessions, including DB rate limit and an open-socket revocation scenario.
+- pgTAP: 20 schema/RLS/grant/default-privilege/publication assertions configured; NOT_RUN locally because Docker is unavailable.
+- Auth/API/Realtime: 9 behavioral tests configured with real user sessions, including nonce conflicts, concurrent per-author quota, anonymous EXECUTE denial, and separate open-socket reassignment and staff-role revocation scenarios; NOT_RUN locally because Docker is unavailable.
 - Chromium: 2 browser scenarios configured, including two contexts, 360 px and Quick Exit/Back/BFCache.
-- Local lint/typecheck/unit/build results belong in the final run report; Docker availability is reported separately and never turns off CI coverage.
+- Local lint (no errors, two existing warnings), typecheck, 3 unit tests and build are VERIFIED on 2026-09-12. The local runtime was Node 20 rather than the required CI Node 22; Docker-backed checks remain NOT_RUN and CI coverage is not weakened.
 
 ## Required behavioral run
 On disposable Supabase create two users, two coordinators, one admin and explicitly fictional data. User A registers/signs in, creates request; admin queue exposes only number/category/city/urgency/status/time, assigns C1 with reason; A/C1 exchange idempotent messages; C1 adds step and valid status transition. User B direct/UI/API reads and mutations fail. Forged owner/author/role/assignment/status fail. Unassigned C2 fails. Reassign to C2: C1 history SELECT/message INSERT and subsequent Realtime delivery fail; C2 works. Reconnect queries after cursor and deduplicates nonce.
