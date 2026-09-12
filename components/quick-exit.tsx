@@ -1,0 +1,2 @@
+"use client";
+export function QuickExit(){function leave(){try{document.cookie.split(";").forEach(c=>{const n=c.split("=")[0].trim();if(n.startsWith("sb-"))document.cookie=`${n}=; Max-Age=0; path=/; SameSite=Lax`});sessionStorage.clear();localStorage.clear()}finally{window.location.replace("/safe")}}return <button className="btn secondary" onClick={leave} aria-label="Быстро скрыть приватную страницу">Быстрый выход</button>}

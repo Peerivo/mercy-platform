@@ -1,0 +1,20 @@
+name: Migrate selected Supabase
+on:
+  workflow_dispatch:
+    inputs:
+      project_ref: {description: 'Exact target project ref', required: true, type: string}
+      confirm: {description: 'Type APPLY', required: true, type: string}
+concurrency: {group: "supabase-${{ inputs.project_ref }}", cancel-in-progress: false}
+jobs:
+  migrate:
+    if: inputs.confirm == 'APPLY'
+    environment: supabase-${{ inputs.project_ref }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with: {version: 2.39.2}
+      - run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+        env: {PROJECT_REF: "${{ inputs.project_ref }}", SUPABASE_ACCESS_TOKEN: "${{ secrets.SUPABASE_ACCESS_TOKEN }}", SUPABASE_DB_PASSWORD: "${{ secrets.SUPABASE_DB_PASSWORD }}"}
+      - run: supabase db push --include-all --password "$SUPABASE_DB_PASSWORD"
+        env: {SUPABASE_ACCESS_TOKEN: "${{ secrets.SUPABASE_ACCESS_TOKEN }}", SUPABASE_DB_PASSWORD: "${{ secrets.SUPABASE_DB_PASSWORD }}"}

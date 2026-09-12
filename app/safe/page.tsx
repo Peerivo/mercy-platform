@@ -1,0 +1,1 @@
+export default function Safe(){return <section className="container section"><h1>Нейтральная страница</h1><p>Локальная сессия интерфейса очищена. Это действие не удаляет историю браузера — при необходимости очистите её в настройках устройства.</p><a className="btn secondary" href="https://www.wikipedia.org">Перейти к энциклопедии</a></section>}
