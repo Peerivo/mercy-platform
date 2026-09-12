@@ -1,5 +1,11 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
 jobs:
   app:
     runs-on: ubuntu-latest
@@ -12,15 +18,64 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-        env: {NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci_placeholder_123456789"}
-      - run: docker build --build-arg NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci_placeholder_123456789 .
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: local-build-placeholder-key-123456789
+      - run: docker build --build-arg NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=local-build-placeholder-key-123456789 .
+
   supabase-integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm}
       - uses: supabase/setup-cli@v1
         with: {version: 2.39.2}
-      - run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor
-      - run: supabase db reset --no-seed
-      - run: psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/access.sql
-        env: {DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"}
+      - run: npm ci
+      - name: Start disposable full Supabase stack
+        run: supabase start
+      - name: Reproduce migrations from an empty database
+        run: supabase db reset --no-seed
+      - name: Wait for Auth, REST and Realtime readiness
+        run: |
+          set -euo pipefail
+          for endpoint in /auth/v1/health; do
+            ready=false
+            for _ in $(seq 1 60); do
+              if curl --fail --silent --max-time 2 "http://127.0.0.1:54321${endpoint}" >/dev/null; then ready=true; break; fi
+              sleep 1
+            done
+            test "$ready" = true || { echo "Local service readiness timed out: $endpoint"; exit 1; }
+          done
+          supabase status >/dev/null
+          anon_key="$(supabase status -o env | sed -n 's/^ANON_KEY=//p' | tr -d '\"')"
+          test -n "$anon_key"
+          curl --fail --silent --max-time 5 -H "apikey: $anon_key" \
+            'http://127.0.0.1:54321/rest/v1/published_service_locations?select=id&limit=1' >/dev/null
+      - name: PostgreSQL access contract (pgTAP)
+        run: supabase test db supabase/tests/access.sql
+      - name: Obtain ephemeral local keys and run API/Auth/Realtime tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | sed -n -e 's/^API_URL=/SUPABASE_TEST_URL=/p' -e 's/^ANON_KEY=/SUPABASE_TEST_ANON_KEY=/p' -e 's/^SERVICE_ROLE_KEY=/SUPABASE_TEST_SERVICE_ROLE_KEY=/p')"
+          export SUPABASE_TEST_URL SUPABASE_TEST_ANON_KEY SUPABASE_TEST_SERVICE_ROLE_KEY
+          export MERCY_DISPOSABLE_SUPABASE=true
+          npm run test:integration
+      - name: Install browser and operating-system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Browser acceptance against the disposable stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | sed -n -e 's/^API_URL=/NEXT_PUBLIC_SUPABASE_URL=/p' -e 's/^ANON_KEY=/NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=/p')"
+          export NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+          export NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000
+          npm run test:e2e
+      - name: Safe diagnostics
+        if: failure()
+        run: docker ps --format 'table {{.Names}}\t{{.Status}}' || true
+      - name: Stop disposable Supabase
+        if: always()
+        run: supabase stop --no-backup || true

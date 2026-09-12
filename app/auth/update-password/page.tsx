@@ -1,0 +1,2 @@
+import {updatePassword} from "../actions";
+export default async function UpdatePassword({searchParams}:{searchParams:Promise<Record<string,string>>}){const q=await searchParams;return <section className="container section"><h1>Новый пароль</h1>{q.error&&<p role="alert">Не удалось обновить пароль. Запросите новую ссылку.</p>}<form action={updatePassword} className="card grid"><label>Новый пароль<input name="password" type="password" minLength={10} maxLength={128} required autoComplete="new-password"/></label><button className="btn">Сохранить пароль</button></form></section>}

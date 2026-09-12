@@ -2,8 +2,11 @@
 
 ## Automated status
 - Unit validation: implemented.
-- Clean temporary Supabase migration/RLS/Realtime integration: mandatory CI job; not silently skipped.
-- Lint/typecheck/unit/build: passed locally; Docker and Supabase integration unavailable because this environment has no Docker.
+- Clean temporary Supabase migration/RLS/Realtime integration: implemented as mandatory CI job without cloud credentials or silent skips; awaiting an actual Docker runner result for the latest SHA.
+- pgTAP: 13 schema/RLS/grant/publication assertions configured.
+- Auth/API/Realtime: 9 behavioral tests configured with real user sessions, including DB rate limit and an open-socket revocation scenario.
+- Chromium: 2 browser scenarios configured, including two contexts, 360 px and Quick Exit/Back/BFCache.
+- Local lint/typecheck/unit/build results belong in the final run report; Docker availability is reported separately and never turns off CI coverage.
 
 ## Required behavioral run
 On disposable Supabase create two users, two coordinators, one admin and explicitly fictional data. User A registers/signs in, creates request; admin queue exposes only number/category/city/urgency/status/time, assigns C1 with reason; A/C1 exchange idempotent messages; C1 adds step and valid status transition. User B direct/UI/API reads and mutations fail. Forged owner/author/role/assignment/status fail. Unassigned C2 fails. Reassign to C2: C1 history SELECT/message INSERT and subsequent Realtime delivery fail; C2 works. Reconnect queries after cursor and deduplicates nonce.

@@ -7,7 +7,7 @@ Codex готовит SQL → Git/CI воспроизводит clean DB → уп
 Build/app public: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (legacy `...ANON_KEY` fallback), `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_MAP_TILE_URL`, `NEXT_PUBLIC_MAP_ATTRIBUTION`. CI cloud-only: `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, input `project_ref`. Не печатать значения. Publishable variables must exist before Next/Docker build.
 
 ## Порядок
-1. Create staging Supabase and backup policy; configure Site URL/callback, email confirmation/SMTP.
+1. Для integration CI используйте disposable Supabase на GitHub runner по `docs/TESTING.md`; облачный staging для этого job не нужен. Перед операционной приёмкой отдельно создайте staging Supabase и backup policy, настройте Site URL/callback и email confirmation/SMTP.
 2. `supabase link --project-ref ...`; inspect diff; `supabase db push` only in protected workflow/environment.
 3. Realtime publication is migration-controlled. Execute `select public.bootstrap_first_admin('<verified auth UUID>');` once via trusted SQL connection; function has no API EXECUTE.
 4. Build image with public build args, deploy, verify `/health`, Auth and acceptance suite. Configure CSP/egress and tile attribution/provider quota.
