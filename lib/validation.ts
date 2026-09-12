@@ -1,0 +1,3 @@
+import {z} from "zod";
+export const requestSchema=z.object({category:z.enum(["PREGNANCY","FAMILY","HOUSING","FOOD_GOODS","LEGAL_DOCUMENTS","WORK_EDUCATION","OTHER"]),country:z.string().trim().min(2).max(80),city:z.string().trim().min(2).max(120),description:z.string().trim().min(20).max(5000),urgency:z.enum(["NORMAL","SOON","URGENT"]),can_message:z.boolean(),can_call:z.boolean(),contact_window:z.string().max(120),external_contact:z.string().max(200),consent:z.literal(true)});
+export const offerSchema=z.object({category:z.string().min(2).max(80),city:z.string().min(2).max(120),online:z.boolean(),description:z.string().min(20).max(3000),contact_method:z.string().min(2).max(200)});
