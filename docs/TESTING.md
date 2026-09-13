@@ -4,6 +4,8 @@
 
 `npm run check` запускает lint, строгую TypeScript-проверку, unit-тесты и production build. `supabase test db supabase/tests/access.sql` проверяет наличие схемы, RLS, grants, publication и отсутствие `REPLICA IDENTITY FULL` у сообщений. `npm run test:integration` работает через настоящие Auth-сессии и Supabase API. `npm run test:e2e` запускает Chromium против настоящего Next.js и локального Supabase.
 
+Integration suite принудительно выполняется в Node environment. Каждый Auth-клиент имеет отдельные session/storage настройки (`persistSession:false`, без browser URL detection и auto-refresh), а полученный пользовательский JWT явно передаётся поддерживаемому Realtime-клиенту. Диагностика выводит только имя этапа, SDK status и безопасное сообщение об ошибке — не токены, пароли или ключи.
+
 Integration harness создаёт только вымышленные `U1`, `U2`, `U3`, `C1`, `C2`, `A1` с адресами домена `.invalid`. Service-role локального проекта используется исключительно для создания Auth fixtures, исходных ролей и подсчёта сохранённых строк. Все утверждения о доступе выполняются клиентами с JWT соответствующего пользователя; приложение service-role key не получает.
 
 ## Полностью локальный запуск
@@ -40,7 +42,7 @@ npx supabase stop --no-backup
 - допустимые/недопустимые переходы, неизменяемость сообщений, нормализация retry, явный nonce-конфликт между телами/обращениями и уникальное конкурентное назначение;
 - сериализованная по автору квота: после 19 сообщений из двух параллельных попыток проходит ровно одна, а retry принятого nonce остаётся доступен при заполненной квоте;
 - явный запрет EXECUTE приватных RPC анониму, сохранение публичного геопоиска и закрытые default privileges для новой функции;
-- настоящие `postgres_changes` подписки без client-side фильтра: подтверждённая доставка разрешённым клиентам и отсутствие доставки U2/C1 после переназначения при сохранённом сокете; повторное подключение и отзыв staff-role;
+- настоящие `postgres_changes` подписки без client-side фильтра и без REST polling/моков: подтверждённая доставка разрешённым клиентам и отсутствие доставки U2/C1 после переназначения при сохранённом сокете; повторное подключение и отзыв staff-role;
 - два независимых browser context, регистрация/вход, обращение, чат, refresh, чужой UUID, ширина 360 px, Quick Exit/Back/BFCache и безопасный callback.
 
 Realtime отрицательные утверждения выполняются только после статуса `SUBSCRIBED`; окно отсутствия события следует за доставкой уникального контрольного сообщения разрешённому получателю. Reconnect приложения догружает строки из БД и сливает их по UUID, поэтому разрыв не создаёт пропуски/дубли. Publication содержит только INSERT/UPDATE/DELETE протокол таблицы `messages`, но таблица не использует FULL replica identity: приватное тело не попадает в старый DELETE row. Публичные Broadcast-каналы не используются.
@@ -59,5 +61,5 @@ CI не сохраняет `.env`, auth `storageState`, токены, коорд
 
 - **VERIFIED:** lint завершён без ошибок (два существующих style warning), strict typecheck, 3 unit-теста и production build.
 - **FAILED:** обязательных проверок, завершившихся ошибкой из-за изменения кода, нет.
-- **NOT_RUN:** clean reset, 20 pgTAP assertions, Auth/API/Realtime integration и Playwright/Chromium — Docker daemon недоступен. Наличие этих тестов и обязательного CI job не считается подтверждением поведения до успешного disposable запуска.
+- **NOT_RUN для исправленного head:** clean reset, 20 pgTAP assertions, Auth/API/Realtime integration и Playwright/Chromium — команда `docker` отсутствует. Наличие этих тестов и обязательного CI job не считается подтверждением поведения до успешного disposable запуска.
 - Локальный runtime сообщает Node 20; обязательный CI остаётся закреплён на Node 22.

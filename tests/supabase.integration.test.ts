@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 
@@ -19,20 +20,62 @@ function assertDisposableLocalConfig() {
   if (!anonKey || !serviceKey || anonKey === serviceKey) throw new Error("local API keys are required");
 }
 
+function diagnostic(label: string, detail: unknown) {
+  const safe = detail instanceof Error
+    ? { name: detail.name, message: detail.message }
+    : typeof detail === "string" ? detail : JSON.stringify(detail);
+  console.error(`[integration] ${label}:`, safe);
+}
+
 async function waitSubscribed(channel: RealtimeChannel) {
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("Realtime subscription timeout")), 15_000);
-    channel.subscribe(status => {
+    channel.subscribe((status, error) => {
       if (status === "SUBSCRIBED") { clearTimeout(timer); resolve(); }
-      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") { clearTimeout(timer); reject(new Error(status)); }
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        clearTimeout(timer);
+        diagnostic(`Realtime channel ${status}`, error ?? "no SDK error detail");
+        reject(new Error(`Realtime channel ${status}`));
+      }
     });
   });
 }
 
 async function signIn(name: string) {
-  const client = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { error } = await client.auth.signInWithPassword({ email: `${name}@mercy.invalid`, password });
-  expect(error).toBeNull(); clients[name] = client;
+  const client = createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey: `mercy-integration-${name}-${crypto.randomUUID()}`,
+    },
+  });
+  const { data, error } = await client.auth.signInWithPassword({ email: `${name}@mercy.invalid`, password });
+  if (error || !data.session) {
+    diagnostic(`Auth sign-in failed for ${name}`, error ?? "session missing");
+    throw error ?? new Error(`Auth session missing for ${name}`);
+  }
+  await client.realtime.setAuth(data.session.access_token);
+  clients[name] = client;
+}
+
+async function createAssignedCase(owner: string, coordinator: string, label: string) {
+  const made = await clients[owner].rpc("create_help_request", {
+    payload: { category: "OTHER", country: "XX", city: "Test", description: `${label} sufficiently long fictional request`, urgency: "NORMAL" },
+    consent_version: "request-v1",
+  });
+  if (made.error || typeof made.data !== "string") {
+    diagnostic(`${label} fixture request failed`, made.error ?? "request id missing");
+    throw made.error ?? new Error("fixture request id missing");
+  }
+  const assigned = await clients.a1.rpc("assign_case", { case_id: made.data, new_coordinator: ids[coordinator], reason_text: `${label} fixture assignment` });
+  if (assigned.error) {
+    diagnostic(`${label} fixture assignment failed`, assigned.error);
+    throw assigned.error;
+  }
+  expect((await clients[owner].from("help_requests").select("id").eq("id", made.data)).data).toHaveLength(1);
+  expect((await clients[coordinator].from("help_requests").select("id").eq("id", made.data)).data).toHaveLength(1);
+  return made.data;
 }
 
 describe.sequential("disposable Supabase security boundary", () => {
@@ -64,10 +107,10 @@ describe.sequential("disposable Supabase security boundary", () => {
     ]).select();
     expect(error).toBeNull();
     const locations = await svc.from("service_locations").insert([
-      { organization_id: orgs![0].id, name: "Тестовая ближняя точка", categories: ["FOOD"], country: "XX", city: "Test", cost_type: "FREE", review_status: "VERIFIED", verified_at: now, published_at: now, location: "POINT(30 60)" },
-      { organization_id: orgs![0].id, name: "Тестовая дальняя точка", categories: ["FOOD"], country: "XX", city: "Test", cost_type: "FREE", review_status: "VERIFIED", verified_at: now, published_at: now, location: "POINT(30.1 60)" },
-      { organization_id: orgs![1].id, name: "Тестовая скрытая точка", country: "XX", city: "Test", cost_type: "FREE", review_status: "PENDING", location: "POINT(30 60)" },
-      { organization_id: orgs![0].id, name: "Тестовое убежище", country: "XX", city: "Test", cost_type: "FREE", review_status: "VERIFIED", verified_at: now, published_at: now, is_confidential_address: true },
+      { organization_id: orgs![0].id, name: "Тестовая ближняя точка", categories: ["FOOD"], country: "XX", city: "Test", cost_type: "FREE", review_status: "VERIFIED", verified_at: now, published_at: now, location: "POINT(30 60)", is_confidential_address: false, languages: [], formats: [] },
+      { organization_id: orgs![0].id, name: "Тестовая дальняя точка", categories: ["FOOD"], country: "XX", city: "Test", cost_type: "FREE", review_status: "VERIFIED", verified_at: now, published_at: now, location: "POINT(30.1 60)", is_confidential_address: false, languages: [], formats: [] },
+      { organization_id: orgs![1].id, name: "Тестовая скрытая точка", categories: [], country: "XX", city: "Test", cost_type: "FREE", review_status: "PENDING", location: "POINT(30 60)", is_confidential_address: false, languages: [], formats: [] },
+      { organization_id: orgs![0].id, name: "Тестовое убежище", categories: [], country: "XX", city: "Test", cost_type: "FREE", review_status: "VERIFIED", verified_at: now, published_at: now, is_confidential_address: true, languages: [], formats: [] },
     ]);
     expect(locations.error).toBeNull();
     const anon = createClient(url, anonKey, { auth: { persistSession: false } });
@@ -136,65 +179,119 @@ describe.sequential("disposable Supabase security boundary", () => {
   });
 
   test("open Realtime subscription loses access after reassignment and reconnect", async () => {
+    const realtimeCase = await createAssignedCase("u1", "c1", "reassignment");
     const seen = { u1: [] as string[], c1: [] as string[], c2: [] as string[], u2: [] as string[] };
-    const channels = Object.fromEntries(Object.keys(seen).map(name => [name, clients[name].channel(`access-${name}-${crypto.randomUUID()}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, p => seen[name as keyof typeof seen].push((p.new as {body:string}).body))])) as Record<string, RealtimeChannel>;
-    await Promise.all(Object.values(channels).map(waitSubscribed));
-    const control1 = `before-${crypto.randomUUID()}`;
-    await clients.u1.rpc("send_message", { case_id: case1, message_body: control1, message_nonce: crypto.randomUUID() });
-    await expect.poll(() => seen.u1.includes(control1) && seen.c1.includes(control1), { timeout: 10_000 }).toBe(true);
-    expect(seen.u2).not.toContain(control1);
-    await clients.a1.rpc("assign_case", { case_id: case1, new_coordinator: ids.c2, reason_text: "reassignment test" });
-    const control2 = `after-${crypto.randomUUID()}`;
-    await clients.u1.rpc("send_message", { case_id: case1, message_body: control2, message_nonce: crypto.randomUUID() });
-    await expect.poll(() => seen.u1.includes(control2) && seen.c2.includes(control2), { timeout: 10_000 }).toBe(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    expect(seen.c1).not.toContain(control2); expect(seen.u2).not.toContain(control2);
-    expect((await clients.c1.from("messages").select("id").eq("help_request_id", case1)).data).toEqual([]);
-    expect((await clients.c1.rpc("send_message", { case_id: case1, message_body: "denied", message_nonce: crypto.randomUUID() })).error).not.toBeNull();
-    await clients.c1.removeChannel(channels.c1);
-    const reconnectSeen: string[] = [];
-    const reconnect = clients.c1.channel(`revoked-reconnect-${crypto.randomUUID()}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `help_request_id=eq.${case1}` }, p => reconnectSeen.push((p.new as {body:string}).body));
-    await waitSubscribed(reconnect);
-    const control3 = `reconnect-${crypto.randomUUID()}`;
-    await clients.u1.rpc("send_message", { case_id: case1, message_body: control3, message_nonce: crypto.randomUUID() });
-    await expect.poll(() => seen.u1.includes(control3), { timeout: 10_000 }).toBe(true);
-    await new Promise(resolve => setTimeout(resolve, 1000)); expect(reconnectSeen).toEqual([]);
+    const channels = Object.fromEntries(Object.keys(seen).map(name => [name, clients[name]
+      .channel(`reassignment-${name}-${crypto.randomUUID()}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, payload => {
+        const body = (payload.new as {body?: unknown}).body;
+        if (typeof body === "string") seen[name as keyof typeof seen].push(body);
+        else diagnostic(`Realtime payload without a body for ${name}`, { eventType: payload.eventType });
+      })])) as Record<string, RealtimeChannel>;
+    let reconnect: RealtimeChannel | undefined;
+    try {
+      await Promise.all(Object.entries(channels).map(async ([name, channel]) => {
+        await waitSubscribed(channel);
+        expect((await clients[name].auth.getSession()).data.session).not.toBeNull();
+      }));
+      const before = `reassignment-before-${crypto.randomUUID()}`;
+      const initial = await clients.u1.rpc("send_message", { case_id: realtimeCase, message_body: before, message_nonce: crypto.randomUUID() });
+      if (initial.error) diagnostic("reassignment control send failed", initial.error);
+      expect(initial.error).toBeNull(); expect(initial.data?.id).toBeTruthy();
+      expect((await clients.u1.from("messages").select("id").eq("id", initial.data.id)).data).toHaveLength(1);
+      expect((await clients.c1.from("messages").select("id").eq("id", initial.data.id)).data).toHaveLength(1);
+      await expect.poll(() => ({ u1: seen.u1.includes(before), c1: seen.c1.includes(before) }), { timeout: 10_000 })
+        .toEqual({ u1: true, c1: true });
+      expect(seen.u2).not.toContain(before);
+
+      const reassigned = await clients.a1.rpc("assign_case", { case_id: realtimeCase, new_coordinator: ids.c2, reason_text: "reassignment access test" });
+      if (reassigned.error) diagnostic("reassignment RPC failed", reassigned.error);
+      expect(reassigned.error).toBeNull(); expect(reassigned.data).toBeNull();
+      const after = `reassignment-after-${crypto.randomUUID()}`;
+      const allowed = await clients.u1.rpc("send_message", { case_id: realtimeCase, message_body: after, message_nonce: crypto.randomUUID() });
+      if (allowed.error) diagnostic("post-reassignment control send failed", allowed.error);
+      expect(allowed.error).toBeNull(); expect(allowed.data?.id).toBeTruthy();
+      expect((await clients.c2.from("messages").select("id").eq("id", allowed.data.id)).data).toHaveLength(1);
+      await expect.poll(() => ({ owner: seen.u1.includes(after), assigned: seen.c2.includes(after) }), { timeout: 10_000 })
+        .toEqual({ owner: true, assigned: true });
+      expect(seen.c1).not.toContain(after); expect(seen.u2).not.toContain(after);
+      expect((await clients.c1.from("messages").select("id").eq("help_request_id", realtimeCase)).data).toEqual([]);
+      expect((await clients.u2.from("messages").select("id").eq("help_request_id", realtimeCase)).data).toEqual([]);
+      expect((await clients.c1.rpc("send_message", { case_id: realtimeCase, message_body: "denied", message_nonce: crypto.randomUUID() })).error?.message).toContain("access denied");
+      expect((await clients.u2.rpc("send_message", { case_id: realtimeCase, message_body: "outsider denied", message_nonce: crypto.randomUUID() })).error?.message).toContain("access denied");
+
+      await clients.c1.removeChannel(channels.c1);
+      const reconnectSeen: string[] = [];
+      reconnect = clients.c1.channel(`reassignment-reconnect-${crypto.randomUUID()}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `help_request_id=eq.${realtimeCase}` }, payload => {
+          const body = (payload.new as {body?: unknown}).body;
+          if (typeof body === "string") reconnectSeen.push(body);
+        });
+      await waitSubscribed(reconnect);
+      const afterReconnect = `reassignment-reconnect-after-${crypto.randomUUID()}`;
+      const reconnectControl = await clients.u1.rpc("send_message", { case_id: realtimeCase, message_body: afterReconnect, message_nonce: crypto.randomUUID() });
+      expect(reconnectControl.error).toBeNull();
+      await expect.poll(() => seen.u1.includes(afterReconnect), { timeout: 10_000 }).toBe(true);
+      expect(reconnectSeen).toEqual([]);
+      expect((await clients.c1.from("messages").select("id").eq("help_request_id", realtimeCase)).data).toEqual([]);
+    } finally {
+      await Promise.all(Object.values(channels).map(channel => channel.unsubscribe()));
+      if (reconnect) await reconnect.unsubscribe();
+    }
   }, 45_000);
 
   test("open Realtime subscription loses access after staff-role revocation and reconnect", async () => {
-    const seen = { u1: [] as string[], c2: [] as string[] };
-    const channels = {
-      u1: clients.u1.channel(`role-owner-${crypto.randomUUID()}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, p => seen.u1.push((p.new as {body:string}).body)),
-      c2: clients.c2.channel(`role-staff-${crypto.randomUUID()}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, p => seen.c2.push((p.new as {body:string}).body)),
-    };
+    const roleCase = await createAssignedCase("u1", "c2", "role revocation");
+    const seen = { u1: [] as string[], c2: [] as string[], u2: [] as string[] };
+    const channels = Object.fromEntries(Object.keys(seen).map(name => [name, clients[name]
+      .channel(`role-${name}-${crypto.randomUUID()}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, payload => {
+        const body = (payload.new as {body?: unknown}).body;
+        if (typeof body === "string") seen[name as keyof typeof seen].push(body);
+      })])) as Record<string, RealtimeChannel>;
     let reconnect: RealtimeChannel | undefined;
     try {
       await Promise.all(Object.values(channels).map(waitSubscribed));
       const retryNonce = crypto.randomUUID();
       const before = `role-before-${crypto.randomUUID()}`;
-      const accepted = await clients.c2.rpc("send_message", { case_id: case1, message_body: before, message_nonce: retryNonce });
-      expect(accepted.error).toBeNull();
-      await expect.poll(() => seen.u1.includes(before) && seen.c2.includes(before), { timeout: 10_000 }).toBe(true);
-      expect((await clients.a1.rpc("set_staff_role", { target_user: ids.c2, target_role: "COORDINATOR", enabled: false, reason_text: "revoke test" })).error).toBeNull();
+      const accepted = await clients.c2.rpc("send_message", { case_id: roleCase, message_body: before, message_nonce: retryNonce });
+      if (accepted.error) diagnostic("role control send failed", accepted.error);
+      expect(accepted.error).toBeNull(); expect(accepted.data?.id).toBeTruthy();
+      expect((await clients.u1.from("messages").select("id").eq("id", accepted.data.id)).data).toHaveLength(1);
+      expect((await clients.c2.from("messages").select("id").eq("id", accepted.data.id)).data).toHaveLength(1);
+      await expect.poll(() => ({ owner: seen.u1.includes(before), coordinator: seen.c2.includes(before) }), { timeout: 10_000 })
+        .toEqual({ owner: true, coordinator: true });
+      expect(seen.u2).not.toContain(before);
+
+      const revoked = await clients.a1.rpc("set_staff_role", { target_user: ids.c2, target_role: "COORDINATOR", enabled: false, reason_text: "role revocation access test" });
+      if (revoked.error) diagnostic("staff-role revocation failed", revoked.error);
+      expect(revoked.error).toBeNull();
       const after = `role-after-${crypto.randomUUID()}`;
-      expect((await clients.u1.rpc("send_message", { case_id: case1, message_body: after, message_nonce: crypto.randomUUID() })).error).toBeNull();
+      const allowed = await clients.u1.rpc("send_message", { case_id: roleCase, message_body: after, message_nonce: crypto.randomUUID() });
+      expect(allowed.error).toBeNull(); expect(allowed.data?.id).toBeTruthy();
       await expect.poll(() => seen.u1.includes(after), { timeout: 10_000 }).toBe(true);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      expect(seen.c2).not.toContain(after);
-      expect((await clients.c2.from("messages").select("id").eq("help_request_id", case1)).data).toEqual([]);
-      expect((await clients.c2.rpc("send_message", { case_id: case1, message_body: before, message_nonce: retryNonce })).error?.message).toContain("access denied");
+      expect(seen.c2).not.toContain(after); expect(seen.u2).not.toContain(after);
+      expect((await clients.c2.from("messages").select("id").eq("help_request_id", roleCase)).data).toEqual([]);
+      expect((await clients.u2.from("messages").select("id").eq("help_request_id", roleCase)).data).toEqual([]);
+      expect((await clients.c2.rpc("send_message", { case_id: roleCase, message_body: before, message_nonce: retryNonce })).error?.message).toContain("access denied");
+      expect((await clients.u2.rpc("send_message", { case_id: roleCase, message_body: "outsider denied", message_nonce: crypto.randomUUID() })).error?.message).toContain("access denied");
+
       await clients.c2.removeChannel(channels.c2);
       const reconnectSeen: string[] = [];
-      reconnect = clients.c2.channel(`role-reconnect-${crypto.randomUUID()}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, p => reconnectSeen.push((p.new as {body:string}).body));
+      reconnect = clients.c2.channel(`role-reconnect-${crypto.randomUUID()}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `help_request_id=eq.${roleCase}` }, payload => {
+          const body = (payload.new as {body?: unknown}).body;
+          if (typeof body === "string") reconnectSeen.push(body);
+        });
       await waitSubscribed(reconnect);
       const afterReconnect = `role-reconnect-after-${crypto.randomUUID()}`;
-      expect((await clients.u1.rpc("send_message", { case_id: case1, message_body: afterReconnect, message_nonce: crypto.randomUUID() })).error).toBeNull();
+      expect((await clients.u1.rpc("send_message", { case_id: roleCase, message_body: afterReconnect, message_nonce: crypto.randomUUID() })).error).toBeNull();
       await expect.poll(() => seen.u1.includes(afterReconnect), { timeout: 10_000 }).toBe(true);
-      await new Promise(resolve => setTimeout(resolve, 1000));
       expect(reconnectSeen).toEqual([]);
-      expect((await clients.c2.from("messages").select("id").eq("help_request_id", case1)).data).toEqual([]);
+      expect((await clients.c2.from("messages").select("id").eq("help_request_id", roleCase)).data).toEqual([]);
     } finally {
-      await Promise.all([clients.u1.removeChannel(channels.u1), clients.c2.removeChannel(channels.c2), reconnect ? clients.c2.removeChannel(reconnect) : Promise.resolve()]);
+      await Promise.all(Object.values(channels).map(channel => channel.unsubscribe()));
+      if (reconnect) await reconnect.unsubscribe();
       const restored = await clients.a1.rpc("set_staff_role", { target_user: ids.c2, target_role: "COORDINATOR", enabled: true, reason_text: "restore after role test" });
       expect(restored.error).toBeNull();
     }
