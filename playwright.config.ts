@@ -10,6 +10,7 @@ export default defineConfig({
     name: "chromium",
     use: {
       browserName: "chromium",
+      channel: "chromium",
       launchOptions: { ignoreDefaultArgs: ["--disable-back-forward-cache"] },
     },
   }],
