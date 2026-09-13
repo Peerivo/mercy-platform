@@ -9,6 +9,14 @@ Read `PROJECT.md` before changing code. Keep it current and separate implemented
 - Tests must exercise behavior and access boundaries. Run lint, typecheck, tests, build, and migration tests where supported.
 - Update relevant docs, `PROJECT.md`, and `docs/ACCEPTANCE.md` with every behavior change.
 
+## Delivery workflow
+
+- Each stage must be small and complete, pass all required checks, and reach the primary branch through its own pull request before the next stage begins.
+- Start the next task from an updated `main`/`master`. A new pull request is allowed; a Follow-up task is not required.
+- Do not create dependent pull-request chains between development branches. Pull requests target the primary branch directly.
+- Never bypass a red CI run, required checks, or branch protection to finish a stage.
+- The current Supabase integration consolidation is a one-time combination of accumulated work. Staff UI, maps, and new product capabilities belong to later, separate stages.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
