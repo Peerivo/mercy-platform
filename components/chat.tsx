@@ -30,14 +30,29 @@ export function Chat({requestId,initial,userId}:{requestId:string;initial:ChatMe
       }catch{if(current)setState("Чат недоступен. Проверьте доступ и повторите попытку.")}finally{syncing=undefined}})();
       return syncing;
     };
-    const channel=s.channel(`case-${requestId}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"messages",filter:`help_request_id=eq.${requestId}`},(p:{new:unknown})=>{
-      const parsed=messageSchema.safeParse(p.new);if(current&&parsed.success)merge([parsed.data]);
-    });
-    const subscription=subscribeWhenPostgresReady(channel,{onReady:catchUp});
-    void subscription.ready.catch(()=>{if(current)setState("Соединение с чатом потеряно.")});
-    void subscription.failure.catch(()=>{if(current)setState("Соединение с чатом потеряно.")});
+    let subscription:ReturnType<typeof subscribeWhenPostgresReady>|undefined;
+    const disconnect=()=>{const old=subscription;subscription=undefined;if(old)void old.unsubscribe()};
+    const connect=()=>{
+      if(!current||subscription)return;
+      const channel=s.channel(`case-${requestId}-${crypto.randomUUID()}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"messages",filter:`help_request_id=eq.${requestId}`},(p:{new:unknown})=>{
+        const parsed=messageSchema.safeParse(p.new);if(current&&parsed.success)merge([parsed.data]);
+      });
+      const next=subscribeWhenPostgresReady(channel,{onReady:catchUp});subscription=next;
+      void next.ready.catch(()=>{if(current&&subscription===next)setState("Соединение с чатом потеряно.")});
+      void next.failure.catch(()=>{if(current&&subscription===next)setState("Соединение с чатом потеряно.")});
+    };
+    const onPageHide=()=>{disconnect();void s.realtime.disconnect()};
+    const onPageShow=(event:PageTransitionEvent)=>{if(!event.persisted)return;void (async()=>{
+      const {data}=await s.auth.getUser();
+      if(!current)return;
+      if(!data.user){location.replace("/auth");return}
+      connect();void catchUp();
+    })()};
+    addEventListener("pagehide",onPageHide);
+    addEventListener("pageshow",onPageShow);
+    connect();
     const auth=s.auth.onAuthStateChange((_event:AuthChangeEvent,session:Session|null)=>{if(session)void catchUp();else current=false});
-    return()=>{current=false;void subscription.unsubscribe();auth.data.subscription.unsubscribe()};
+    return()=>{current=false;removeEventListener("pagehide",onPageHide);removeEventListener("pageshow",onPageShow);disconnect();auth.data.subscription.unsubscribe()};
   },[requestId,initial,merge]);
   async function send(){if(!body.trim())return;setState("Отправка…");const nonce=crypto.randomUUID(),s=browserSupabase();const {data,error}=await s.rpc("send_message",{case_id:requestId,message_body:body.trim(),message_nonce:nonce});const parsed=messageSchema.safeParse(data);if(error||!parsed.success){setState("Не отправлено. Повторите попытку.");return}merge([parsed.data]);setBody("");setState("")}
   return <div className="card"><h2>Приватный чат</h2><div aria-live="polite">{messages.map(m=><p key={m.id}><strong>{m.author_id===userId?"Вы":"Координатор"}:</strong> {m.body}</p>)}</div><label>Сообщение<textarea value={body} maxLength={4000} onChange={e=>setBody(e.target.value)}/></label><button className="btn" onClick={send}>Отправить</button> <span>{state}</span></div>
