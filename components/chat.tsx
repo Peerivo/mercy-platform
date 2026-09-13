@@ -14,6 +14,7 @@ export function Chat({requestId,initial,userId}:{requestId:string;initial:ChatMe
   const merge=useCallback((rows:ChatMessage[])=>setMessages(old=>Array.from(new Map([...old,...rows].map(x=>[x.id,x])).values()).sort(compareMessages)),[]);
   useEffect(()=>{
     let current=true;
+    let lifecycleGeneration=0;
     let historyCursor:ChatCursor|undefined=[...initial].sort(compareMessages).at(-1);
     let syncing:Promise<void>|undefined;
     const s=browserSupabase();
@@ -41,17 +42,23 @@ export function Chat({requestId,initial,userId}:{requestId:string;initial:ChatMe
       void next.ready.catch(()=>{if(current&&subscription===next)setState("Соединение с чатом потеряно.")});
       void next.failure.catch(()=>{if(current&&subscription===next)setState("Соединение с чатом потеряно.")});
     };
-    const onPageHide=()=>{disconnect();void s.realtime.disconnect()};
+    const quickExitActive=()=>{try{return sessionStorage.getItem("mercy_quick_exit")==="1"}catch{return true}};
+    const onPageHide=()=>{lifecycleGeneration++;disconnect();void s.realtime.disconnect()};
     const onPageShow=(event:PageTransitionEvent)=>{if(!event.persisted)return;void (async()=>{
+      if(quickExitActive())return;
+      const generation=++lifecycleGeneration;
       const {data}=await s.auth.getUser();
-      if(!current)return;
+      if(!current||generation!==lifecycleGeneration||quickExitActive())return;
       if(!data.user){location.replace("/auth");return}
-      connect();void catchUp();
+      const {data:request,error}=await s.from("help_requests").select("id").eq("id",requestId).maybeSingle();
+      if(!current||generation!==lifecycleGeneration||quickExitActive())return;
+      if(error||!request){location.replace("/cabinet");return}
+      connect();
     })()};
     addEventListener("pagehide",onPageHide);
     addEventListener("pageshow",onPageShow);
     connect();
-    const auth=s.auth.onAuthStateChange((_event:AuthChangeEvent,session:Session|null)=>{if(session)void catchUp();else current=false});
+    const auth=s.auth.onAuthStateChange((_event:AuthChangeEvent,session:Session|null)=>{if(!session)current=false});
     return()=>{current=false;removeEventListener("pagehide",onPageHide);removeEventListener("pageshow",onPageShow);disconnect();auth.data.subscription.unsubscribe()};
   },[requestId,initial,merge]);
   async function send(){if(!body.trim())return;setState("Отправка…");const nonce=crypto.randomUUID(),s=browserSupabase();const {data,error}=await s.rpc("send_message",{case_id:requestId,message_body:body.trim(),message_nonce:nonce});const parsed=messageSchema.safeParse(data);if(error||!parsed.success){setState("Не отправлено. Повторите попытку.");return}merge([parsed.data]);setBody("");setState("")}

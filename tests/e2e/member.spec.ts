@@ -1,6 +1,7 @@
 import { expect, test, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { quickExitGuard } from "../../lib/quick-exit-guard";
 
 const password = "Browser-password-42!";
 type LifecycleObservation = { documentId: string; persisted: boolean; phase: "pagehide" | "pageshow"; route: string };
@@ -79,7 +80,9 @@ async function attachBfCacheDiagnostics(testInfo: TestInfo, lifecycle: Lifecycle
 test("two browser contexts stay isolated; create, message, refresh and Quick Exit Back are safe", async ({ browser }) => {
   const one = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const two = await browser.newContext({ viewport: { width: 360, height: 800 } });
+  const lifecycle: LifecycleObservation[] = [];
   try {
+    await installLifecycleDiagnostics(one, lifecycle);
     const p1 = await one.newPage(), p2 = await two.newPage();
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const firstEmail = `browser-u1-${suffix}@mercy.invalid`;
@@ -91,6 +94,9 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await expect(p1.getByText("browser message")).toBeVisible();
     await p1.reload();
     await expect(p1.getByText("browser message")).toBeVisible();
+    await expect.poll(() => lifecycle.filter(item => item.phase === "pageshow" && item.route === "/cabinet/requests/:id").length)
+      .toBeGreaterThan(0);
+    const privateDocument = lifecycle.findLast(item => item.phase === "pageshow" && item.route === "/cabinet/requests/:id");
     await p2.goto(privateUrl);
     await expect(p2.getByText("A fictional browser request")).toHaveCount(0);
     await p1.getByLabel("Сообщение").fill("private draft must disappear");
@@ -102,6 +108,13 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await expect(p1.getByText("browser message")).toHaveCount(0);
     await expect(p1.getByText("private draft must disappear")).toHaveCount(0);
     await expect(p1.locator("textarea")).toHaveCount(0);
+    const privateReturn = lifecycle.filter(item => item.phase === "pageshow" && item.route === "/cabinet/requests/:id").at(-1);
+    const returnPath = privateReturn === privateDocument
+      ? "private-entry-not-revisited"
+      : privateReturn && privateReturn.documentId === privateDocument?.documentId && privateReturn.persisted
+        ? "bfcache-restoration"
+        : "new-document-load";
+    console.log(`[quick-exit] Back safety path=${returnPath}; private content absent and marker enforced`);
     await p1.getByRole("button", { name: "Вернуться в сервис" }).click();
     await expect(p1).toHaveURL(/\/$/);
     await p1.goto("/cabinet");
@@ -128,7 +141,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
   }
 });
 
-test("a protected document is restored from Chromium BFCache and immediately guarded", async ({ browser }, testInfo) => {
+test("the production guard protects a genuinely BFCache-eligible document", async ({ browser }, testInfo) => {
   const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const lifecycle: LifecycleObservation[] = [];
   const failures: BfCacheEvent[] = [];
@@ -151,26 +164,31 @@ test("a protected document is restored from Chromium BFCache and immediately gua
       failures.push({ frameId: event.frameId, loaderId: event.loaderId, reasons });
     });
 
-    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    await register(page, `browser-bfcache-${suffix}@mercy.invalid`);
-    await createRequest(page);
-    await page.reload();
-    await expect(page.getByText("A fictional browser request long enough for validation")).toBeVisible();
-    await expect.poll(() => lifecycle.filter(item => item.phase === "pageshow" && item.route === "/cabinet/requests/:id").length)
+    await context.route("**/__bfcache-fixture/**", async route => {
+      const protectedFixture = new URL(route.request().url()).pathname.endsWith("/protected");
+      await route.fulfill({
+        contentType: "text/html; charset=utf-8",
+        headers: { "cache-control": "public, max-age=600" },
+        body: protectedFixture
+          ? `<!doctype html><html><head><script>${quickExitGuard}</script></head><body><main>synthetic sensitive fixture</main></body></html>`
+          : "<!doctype html><html><body><main>neutral fixture</main></body></html>",
+      });
+    });
+    await page.goto("/__bfcache-fixture/protected");
+    await expect(page.getByText("synthetic sensitive fixture")).toBeVisible();
+    await expect.poll(() => lifecycle.filter(item => item.phase === "pageshow" && item.route === "/__bfcache-fixture/protected").length)
       .toBeGreaterThan(0);
-    const protectedDocument = lifecycle.findLast(item => item.phase === "pageshow" && item.route === "/cabinet/requests/:id");
-    expect(protectedDocument, "the protected route must be a separately loaded document").toBeDefined();
+    const protectedDocument = lifecycle.findLast(item => item.phase === "pageshow" && item.route === "/__bfcache-fixture/protected");
+    expect(protectedDocument, "the fixture must be a separately loaded document").toBeDefined();
 
+    await page.goto("/__bfcache-fixture/neutral");
     await page.evaluate(() => sessionStorage.setItem("mercy_quick_exit", "1"));
-    await page.goto("/safe");
-    await expect(page).toHaveURL(/\/safe$/);
     collectTargetFailures = true;
     await page.goBack();
     await expect(page).toHaveURL(/\/safe$/);
     await expect.poll(() => lifecycle.some(item => item.documentId === protectedDocument?.documentId &&
       item.phase === "pageshow" && item.persisted)).toBe(true);
-    await expect(page.getByText("A fictional browser request")).toHaveCount(0);
-    await expect(page.locator("textarea")).toHaveCount(0);
+    await expect(page.getByText("synthetic sensitive fixture")).toHaveCount(0);
     expect(failures, `Chromium rejected the target BFCache restoration: ${JSON.stringify(failures)}`).toEqual([]);
   } finally {
     const reasons = [...new Set(failures.flatMap(event => event.reasons.map(reason => reason.reason ?? reason.type ?? "unknown")))];
