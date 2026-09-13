@@ -15,6 +15,8 @@ async function register(page: Page, email: string) {
   await form.getByLabel("Email").fill(email);
   await form.getByLabel("Пароль от 10 символов").fill(password);
   await form.getByRole("button", { name: "Зарегистрироваться" }).click();
+  // Wait for the signUp action to complete before navigating away or signing in.
+  await expect(page).toHaveURL(/\/auth\?check=email$/);
   await page.goto("/auth");
   const login = page.locator("form").filter({ hasText: "Войти" });
   await login.getByLabel("Email").fill(email);

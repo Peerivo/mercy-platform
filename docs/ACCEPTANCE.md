@@ -1,6 +1,7 @@
 # Acceptance
 
 ## Automated status
+- Registration fixtures wait for the successful `/auth?check=email` redirect before opening the sign-in form. A click alone does not confirm completion of the sign-up server action; signup errors fail at this preparation step.
 - Unit validation: implemented.
 - Clean temporary Supabase migration/RLS/Realtime integration: implemented as mandatory CI job without cloud credentials or silent skips; previously passed clean migrations and all 20 pgTAP assertions at `15b2a8e`, but requires a new full run for the corrected head.
 - pgTAP: 20 schema/RLS/grant/default-privilege/publication assertions configured; NOT_RUN locally because Docker is unavailable.
