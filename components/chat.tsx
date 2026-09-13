@@ -1,4 +1,44 @@
 "use client";
-import {useCallback,useEffect,useRef,useState} from "react";import {browserSupabase} from "@/lib/supabase/client";import {subscribeWhenPostgresReady} from "@/lib/supabase/realtime-ready";
-type M={id:string;body:string;created_at:string;author_id:string;client_nonce:string};
-export function Chat({requestId,initial,userId}:{requestId:string;initial:M[];userId:string}){const [messages,setMessages]=useState(initial),[body,setBody]=useState(""),[state,setState]=useState("");const latest=useRef(initial.at(-1)?.created_at);const merge=useCallback((rows:M[])=>setMessages(old=>{const next=Array.from(new Map([...old,...rows].map(x=>[x.id,x])).values()).sort((a,b)=>a.created_at.localeCompare(b.created_at));latest.current=next.at(-1)?.created_at;return next}),[]);useEffect(()=>{const s=browserSupabase();const catchUp=async()=>{let q=s.from("messages").select("id,body,created_at,author_id,client_nonce").eq("help_request_id",requestId).order("created_at").limit(100);if(latest.current)q=q.gte("created_at",latest.current);const {data,error}=await q;if(error){setState("Чат недоступен. Проверьте доступ и повторите попытку.");return}if(data)merge(data as M[])};const channel=s.channel(`case-${requestId}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"messages",filter:`help_request_id=eq.${requestId}`},(p:{new:unknown})=>merge([p.new as M]));const subscription=subscribeWhenPostgresReady(channel,{onReady:catchUp});void subscription.ready.catch(()=>setState("Соединение с чатом потеряно."));void subscription.failure.catch(()=>setState("Соединение с чатом потеряно."));const auth=s.auth.onAuthStateChange(()=>{void catchUp()});return()=>{void subscription.unsubscribe();auth.data.subscription.unsubscribe()}},[requestId,merge]);async function send(){if(!body.trim())return;setState("Отправка…");const nonce=crypto.randomUUID(),s=browserSupabase();const {data,error}=await s.rpc("send_message",{case_id:requestId,message_body:body.trim(),message_nonce:nonce});if(error){setState("Не отправлено. Повторите попытку.");return}merge([data as M]);setBody("");setState("")}return <div className="card"><h2>Приватный чат</h2><div aria-live="polite">{messages.map(m=><p key={m.id}><strong>{m.author_id===userId?"Вы":"Координатор"}:</strong> {m.body}</p>)}</div><label>Сообщение<textarea value={body} maxLength={4000} onChange={e=>setBody(e.target.value)}/></label><button className="btn" onClick={send}>Отправить</button> <span>{state}</span></div>}
+import {useCallback,useEffect,useState} from "react";
+import {z} from "zod";
+import type {AuthChangeEvent,Session} from "@supabase/supabase-js";
+import {browserSupabase} from "@/lib/supabase/client";
+import {CHAT_PAGE_SIZE,ChatCursor,ChatMessage,compareMessages,drainChatHistory} from "@/lib/chat-history";
+import {subscribeWhenPostgresReady} from "@/lib/supabase/realtime-ready";
+
+const messageSchema=z.object({id:z.string().uuid(),body:z.string(),created_at:z.string(),author_id:z.string().uuid(),client_nonce:z.string().uuid()});
+const messagesSchema=z.array(messageSchema);
+
+export function Chat({requestId,initial,userId}:{requestId:string;initial:ChatMessage[];userId:string}){
+  const [messages,setMessages]=useState(initial),[body,setBody]=useState(""),[state,setState]=useState("");
+  const merge=useCallback((rows:ChatMessage[])=>setMessages(old=>Array.from(new Map([...old,...rows].map(x=>[x.id,x])).values()).sort(compareMessages)),[]);
+  useEffect(()=>{
+    let current=true;
+    let historyCursor:ChatCursor|undefined=[...initial].sort(compareMessages).at(-1);
+    let syncing:Promise<void>|undefined;
+    const s=browserSupabase();
+    const catchUp=()=>{
+      if(syncing)return syncing;
+      syncing=(async()=>{try{
+        historyCursor=await drainChatHistory({cursor:historyCursor,isCurrent:()=>current,acceptPage:merge,loadPage:async cursor=>{
+          let q=s.from("messages").select("id,body,created_at,author_id,client_nonce").eq("help_request_id",requestId).order("created_at").order("id").limit(CHAT_PAGE_SIZE);
+          if(cursor)q=q.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+          const {data,error}=await q;
+          if(error)throw error;
+          return messagesSchema.parse(data??[]);
+        }});
+      }catch{if(current)setState("Чат недоступен. Проверьте доступ и повторите попытку.")}finally{syncing=undefined}})();
+      return syncing;
+    };
+    const channel=s.channel(`case-${requestId}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"messages",filter:`help_request_id=eq.${requestId}`},(p:{new:unknown})=>{
+      const parsed=messageSchema.safeParse(p.new);if(current&&parsed.success)merge([parsed.data]);
+    });
+    const subscription=subscribeWhenPostgresReady(channel,{onReady:catchUp});
+    void subscription.ready.catch(()=>{if(current)setState("Соединение с чатом потеряно.")});
+    void subscription.failure.catch(()=>{if(current)setState("Соединение с чатом потеряно.")});
+    const auth=s.auth.onAuthStateChange((_event:AuthChangeEvent,session:Session|null)=>{if(session)void catchUp();else current=false});
+    return()=>{current=false;void subscription.unsubscribe();auth.data.subscription.unsubscribe()};
+  },[requestId,initial,merge]);
+  async function send(){if(!body.trim())return;setState("Отправка…");const nonce=crypto.randomUUID(),s=browserSupabase();const {data,error}=await s.rpc("send_message",{case_id:requestId,message_body:body.trim(),message_nonce:nonce});const parsed=messageSchema.safeParse(data);if(error||!parsed.success){setState("Не отправлено. Повторите попытку.");return}merge([parsed.data]);setBody("");setState("")}
+  return <div className="card"><h2>Приватный чат</h2><div aria-live="polite">{messages.map(m=><p key={m.id}><strong>{m.author_id===userId?"Вы":"Координатор"}:</strong> {m.body}</p>)}</div><label>Сообщение<textarea value={body} maxLength={4000} onChange={e=>setBody(e.target.value)}/></label><button className="btn" onClick={send}>Отправить</button> <span>{state}</span></div>
+}

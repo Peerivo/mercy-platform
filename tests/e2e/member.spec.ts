@@ -18,6 +18,9 @@ async function register(page: Page, email: string) {
 test("two browser contexts stay isolated; create, message, refresh and Quick Exit are safe", async ({ browser }) => {
   const one = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const two = await browser.newContext({ viewport: { width: 360, height: 800 } });
+  await one.addInitScript(() => addEventListener("pageshow", event => {
+    if (event.persisted) sessionStorage.setItem("test_bfcache_persisted", "1");
+  }));
   const p1 = await one.newPage(), p2 = await two.newPage();
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   await register(p1, `browser-u1-${suffix}@mercy.invalid`);
@@ -33,7 +36,12 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
   await p1.reload(); await expect(p1.getByText("browser message")).toBeVisible();
   await p2.goto(privateUrl); await expect(p2.getByText("A fictional browser request")).toHaveCount(0);
   await p1.getByRole("button", { name: "Быстро скрыть приватную страницу" }).click(); await expect(p1).toHaveURL(/\/safe$/);
+  await expect(p1.getByRole("button", { name: "Вернуться в сервис" })).toBeVisible();
   await p1.goBack(); await expect(p1).toHaveURL(/\/safe$/); await expect(p1.getByText("browser message")).toHaveCount(0);
+  await expect(p1.locator("textarea")).toHaveCount(0);
+  await expect.poll(() => p1.evaluate(() => sessionStorage.getItem("test_bfcache_persisted"))).toBe("1");
+  await p1.getByRole("button", { name: "Вернуться в сервис" }).click(); await expect(p1).toHaveURL(/\/$/);
+  await p1.goto("/help"); await expect(p1).toHaveURL(/\/auth/);
   await one.close(); await two.close();
 });
 
