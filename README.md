@@ -8,9 +8,9 @@ cp .env.example .env.local
 npm ci
 npm run dev
 ```
-Откройте `/`, `/nearby`, `/specialists`, `/specialist/profile`, `/auth`, `/help`, `/cabinet`, `/volunteer`. Очередь ADMIN находится в `/staff/specialists`. Проверки: `npm run check`; миграции локально: `npx supabase start && npx supabase db reset`. Seed намеренно требует `app.mercy_allow_test_seed=true` и предназначен только для disposable DB.
+Откройте `/`, `/nearby`, `/specialists`, `/specialist/profile`, `/auth`, `/help`, `/cabinet`, `/volunteer`. Рабочее место находится в `/staff/cases`; ADMIN-модерация предложений — `/staff/volunteers`, специалистов — `/staff/specialists`. Проверки: `npm run check`; миграции локально: `npx supabase start && npx supabase db reset`. Seed намеренно требует `app.mercy_allow_test_seed=true` и предназначен только для disposable DB.
 
-`NEXT_PUBLIC_SUPABASE_URL` и `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` обязательны и безопасны для клиента в сочетании с RLS. Legacy anon key — только fallback. `NEXT_PUBLIC_SITE_URL` задаёт Auth redirects. Все `NEXT_PUBLIC_*` встраиваются во время build: передавайте их как Docker build args, не ожидайте runtime-подмены. Privileged keys приложению не нужны. Полная локальная и CI-процедура, роли и защита от удалённой БД описаны в [`docs/TESTING.md`](docs/TESTING.md).
+`NEXT_PUBLIC_SUPABASE_URL` и `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` обязательны и безопасны для клиента в сочетании с RLS. Legacy anon key — только fallback. `NEXT_PUBLIC_SITE_URL` обязателен и задаёт Auth redirects; production значение должно быть canonical HTTPS URL. Все `NEXT_PUBLIC_*` встраиваются во время build: передавайте их как Docker build args, не ожидайте runtime-подмены. Privileged keys приложению не нужны. Полная локальная и CI-процедура, роли и защита от удалённой БД описаны в [`docs/TESTING.md`](docs/TESTING.md).
 
 ## Supabase/Auth/Realtime
 Добавьте Site URL и `/auth/callback` в allowed redirect URLs, настройте SMTP/email confirmation по политике среды. Миграция добавляет только `messages` в Realtime publication; подписка ограничена кейсом, а RLS остаётся авторизацией. Не включайте DELETE payload. Bootstrap описан в deployment docs.

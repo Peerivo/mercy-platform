@@ -1,10 +1,13 @@
 # Roadmap
 
-1. Staff workspace polish, organization CRUD, external throttling and operational readiness.
-2. Verified provider accounts and appointments; guest case with safe return and abuse controls.
-3. Moderated mutual aid (things, transport, food, short childcare, education/work), volunteer assignment; no public contacts.
-4. Moderated support groups with separate consent; post-birth support through stable practical resolution.
-5. Opt-in neutral Telegram notifications (no group private data), safe attachments, video, languages, donations.
-6. Peerivo integration as separate verified/consented phase; AI draft/navigation gateway with coordinator approval and AI Constitution/AI Critical review.
+## MVP v1
+Приватное обращение и работа назначенного координатора; приватное предложение добровольной помощи и ADMIN-модерация; Auth/recovery, privacy guards, проверенный каталог, operational launch controls.
 
-Metrics: first-response time, completed steps, organization availability and user feedback. Never infer “prevented abortions” or “saved marriages” from closure.
+## POST-MVP
+1. Организационные кабинеты, deletion operations, abuse controls, безопасные вложения/уведомления и локализации.
+2. Только как отдельный продуктовый и legal/security increment: запрос «нужен укол на дому», professional/medical providers, проверка qualifications/licences, availability, matching, booking и выполнение услуги.
+3. Marketplace economics: payments, commissions, ratings и reviews — после отдельного threat model и regulatory review.
+4. Модерируемая взаимопомощь между пользователями, группы и volunteer assignment без публичных контактов.
+5. Peerivo integration и AI assistance — только versioned consent contract и coordinator approval.
+
+Существующее предложение добровольной помощи не является регистрацией COORDINATOR, provider profile, matching или booking. Метрики: first-response time, completed steps, moderation time и user feedback; нельзя выводить «предотвращённые аборты» или «спасённые браки».
