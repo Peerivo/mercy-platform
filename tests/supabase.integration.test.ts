@@ -157,6 +157,19 @@ describe.sequential("disposable Supabase security boundary", () => {
     for (const actor of ["u2", "c1", "a1"]) expect((await clients[actor].from("help_requests").select("id,description").eq("id", case1)).data).toEqual([]);
   });
 
+  test("volunteer offer is consented, owner-isolated and moderated without staff elevation", async () => {
+    const created=await clients.u1.rpc("create_volunteer_offer",{payload:{category:"FOOD",country:"XX",city:"Test",online:false,description:"A sufficiently long fictional volunteer offer",contact_method:"private chat"},consent_version:"volunteer-offer-v1"});
+    expect(created.error).toBeNull();const offerId=created.data as string;
+    expect((await clients.u1.from("volunteer_offers").select("id,review_status").eq("id",offerId)).data).toEqual([{id:offerId,review_status:"PENDING"}]);
+    expect((await clients.u2.from("volunteer_offers").select("id").eq("id",offerId)).data).toEqual([]);
+    expect((await clients.u2.from("volunteer_offers").insert({owner_id:ids.u1,category:"FOOD",country:"XX",city:"Test",description:"A forged sufficiently long offer",contact_method:"none"})).error).not.toBeNull();
+    expect((await clients.u2.rpc("moderate_volunteer_offer",{offer_id:offerId,new_status:"VERIFIED",reason_text:"forged review"})).error).not.toBeNull();
+    expect((await clients.a1.rpc("moderate_volunteer_offer",{offer_id:offerId,new_status:"VERIFIED",reason_text:"fictional acceptance"})).error).toBeNull();
+    expect((await clients.u1.from("volunteer_offers").select("review_status").eq("id",offerId)).data).toEqual([{review_status:"VERIFIED"}]);
+    expect((await clients.u1.rpc("current_staff_role")).data).toBeNull();
+    expect((await clients.u1.rpc("assignment_queue",{queue_limit:10,queue_offset:0})).data).toEqual([]);
+  });
+
   test("known UUID, forged ownership/author/assignment, audit and admin RPC attacks fail", async () => {
     expect((await clients.u2.from("help_requests").update({ owner_id: ids.u2 }).eq("id", case1)).error).not.toBeNull();
     expect((await clients.u2.from("messages").insert({ help_request_id: case1, author_id: ids.u1, client_nonce: crypto.randomUUID(), body: "forged" })).error).not.toBeNull();

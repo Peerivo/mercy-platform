@@ -9,3 +9,5 @@
 Quick exit синхронно очищает local/session storage и делает `location.replace('/safe')`; network logout не задерживает уход. Neutral page предупреждает об истории браузера. Back/BFCache проверяется дополнительно при browser acceptance.
 
 Deletion request — заявка администратору, не свершившееся удаление. До реального запуска владелец утверждает jurisdiction-specific retention/SLA. Удаление выполняется проверенным runbook; encrypted backups истекают по backup lifecycle, мгновенное selective deletion не обещается.
+
+Предложения добровольцев не публикуются. Владелец видит только свои строки; ADMIN получает приватное содержание и контакт только в отдельной moderation queue. Создание атомарно связывает owner из JWT и отдельное согласие; клиент не может подставить owner/review status. Решение ADMIN ограничено переходом PENDING → VERIFIED/REJECTED и журналируется без текста предложения или контакта. Статус помощника не связан с `staff_roles` и не открывает обращения, сообщения или назначения.

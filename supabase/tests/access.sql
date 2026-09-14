@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(34);
+select plan(38);
 select has_table('public','help_requests','schema reproduced');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.messages'::regclass),'messages: RLS enabled');
@@ -10,6 +10,10 @@ select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.prof
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.case_assignments'::regclass),'case_assignments: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.consents'::regclass),'consents: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.audit_events'::regclass),'audit_events: RLS enabled');
+select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.volunteer_offers'::regclass),'volunteer offers use RLS');
+select ok(not has_table_privilege('authenticated','public.volunteer_offers','INSERT'),'offer identity and consent cannot bypass the atomic RPC');
+select ok(has_function_privilege('authenticated','public.create_volunteer_offer(jsonb,text)','EXECUTE') and not has_function_privilege('anon','public.create_volunteer_offer(jsonb,text)','EXECUTE'),'offer creation requires a user JWT');
+select ok(has_function_privilege('authenticated','public.moderate_volunteer_offer(uuid,public.review_status,text)','EXECUTE') and not has_function_privilege('anon','public.moderate_volunteer_offer(uuid,public.review_status,text)','EXECUTE'),'offer moderation requires a user JWT and checks admin internally');
 select ok(has_function_privilege('authenticated','public.send_message(uuid,text,uuid)','EXECUTE') and not has_function_privilege('anon','public.send_message(uuid,text,uuid)','EXECUTE'),'message RPC is authenticated only');
 select ok(has_function_privilege('authenticated','public.assign_case(uuid,uuid,text)','EXECUTE') and not has_function_privilege('anon','public.assign_case(uuid,uuid,text)','EXECUTE'),'assignment RPC is authenticated only and enforces admin internally');
 select ok(not has_function_privilege('anon','public.set_staff_role(uuid,public.staff_role,boolean,text)','EXECUTE') and has_function_privilege('authenticated','public.set_staff_role(uuid,public.staff_role,boolean,text)','EXECUTE'),'staff-role RPC is authenticated only');

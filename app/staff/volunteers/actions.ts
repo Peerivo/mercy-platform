@@ -1,0 +1,3 @@
+"use server";
+import {redirect} from "next/navigation";import {serverSupabase} from "@/lib/supabase/server";import {volunteerReviewSchema} from "@/lib/validation";
+export async function moderateOffer(fd:FormData){const parsed=volunteerReviewSchema.safeParse({id:fd.get("id"),status:fd.get("status"),reason:fd.get("reason")});if(!parsed.success)redirect("/staff/volunteers?error=validation");const s=await serverSupabase(),{data:{user}}=await s.auth.getUser();if(!user)redirect("/auth");const {error}=await s.rpc("moderate_volunteer_offer",{offer_id:parsed.data.id,new_status:parsed.data.status,reason_text:parsed.data.reason});if(error)redirect("/staff/volunteers?error=review");redirect("/staff/volunteers?reviewed=1")}

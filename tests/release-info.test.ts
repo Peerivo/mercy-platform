@@ -1,0 +1,2 @@
+import {describe,expect,it} from "vitest";import {releaseInfo} from "../lib/release-info";
+describe("production-safe release metadata",()=>{it("returns the deployed revision without secrets",()=>expect(releaseInfo({NODE_ENV:"production",GIT_SHA:"abc123"})).toEqual({status:"ok",environment:"production",version:"abc123"}));it("rejects unsafe revision text",()=>expect(releaseInfo({GIT_SHA:"secret\nvalue"}).version).toBe("unknown"))});
