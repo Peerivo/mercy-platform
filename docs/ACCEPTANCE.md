@@ -22,3 +22,12 @@ At 360px and keyboard-only verify labels, focus, contrast, loading/error/empty s
 
 ## Before real cases
 Not accepted until staging integration/e2e, staff CRUD UI, deletion operational SLA, verified local emergency/catalog data, coordinator staffing/hours/response expectation, incident response, security/privacy/legal review, backups and monitoring are approved.
+
+## Staff workspace v1 access matrix
+| Действие | Роль | UI/server validation | RPC/RLS | Ожидаемый результат |
+|---|---|---|---|---|
+| Открыть очередь | ADMIN | bounded page 1–1000, 20 строк | `assignment_queue`; ADMIN внутри RPC | Только номер, категория, город, срочность, статус, дата и текущее назначение; без содержания/чата |
+| Назначить / переназначить | ADMIN | UUID, новый исполнитель, основание 3–500; pending блокирует submit | `staff_coordinators`, атомарный `assign_case` | Одно активное назначение; прежний координатор теряет RLS/Realtime-доступ |
+| Открыть назначенные | COORDINATOR | bounded pagination | `coordinator_cases` по `auth.uid()` | Только активные назначения вызывающего координатора |
+| Открыть карточку и чат | COORDINATOR | UUID маршрута | `can_access_case`, RLS сообщений/плана | Приватное содержание доступно только текущему координатору и владельцу |
+| Изменить статус | COORDINATOR | UUID и DB enum; pending блокирует submit | атомарный `change_case_status` | Только разрешённый переход; ошибка ничего не изменяет |

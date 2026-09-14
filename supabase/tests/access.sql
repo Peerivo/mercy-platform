@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(31);
+select plan(34);
 select has_table('public','help_requests','schema reproduced');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.messages'::regclass),'messages: RLS enabled');
@@ -15,6 +15,9 @@ select ok(has_function_privilege('authenticated','public.assign_case(uuid,uuid,t
 select ok(not has_function_privilege('anon','public.set_staff_role(uuid,public.staff_role,boolean,text)','EXECUTE') and has_function_privilege('authenticated','public.set_staff_role(uuid,public.staff_role,boolean,text)','EXECUTE'),'staff-role RPC is authenticated only');
 select ok(not has_function_privilege('anon','public.create_help_request(jsonb,text)','EXECUTE') and has_function_privilege('authenticated','public.create_help_request(jsonb,text)','EXECUTE'),'request RPC is authenticated only');
 select ok(not has_function_privilege('anon','public.assignment_queue(integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.assignment_queue(integer,integer)','EXECUTE'),'queue RPC is authenticated only');
+select ok(not has_function_privilege('anon','public.staff_coordinators(integer)','EXECUTE') and has_function_privilege('authenticated','public.staff_coordinators(integer)','EXECUTE'),'coordinator directory is authenticated and checks admin internally');
+select ok(not has_function_privilege('anon','public.coordinator_cases(integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.coordinator_cases(integer,integer)','EXECUTE'),'coordinator case list requires a user JWT');
+select ok(not has_function_privilege('anon','public.current_staff_role()','EXECUTE') and has_function_privilege('authenticated','public.current_staff_role()','EXECUTE'),'current staff role requires a user JWT');
 select ok(not has_function_privilege('anon','public.enforce_message()','EXECUTE') and not has_function_privilege('authenticated','public.enforce_message()','EXECUTE'),'message trigger is not API callable');
 select ok(not has_function_privilege('anon','public.enforce_catalog_review()','EXECUTE') and not has_function_privilege('authenticated','public.enforce_catalog_review()','EXECUTE'),'catalog trigger is not API callable');
 select ok(has_function_privilege('anon','public.nearby_service_locations(double precision,double precision,integer,integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.nearby_service_locations(double precision,double precision,integer,integer,integer)','EXECUTE'),'public geo RPC remains callable');

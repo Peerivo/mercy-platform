@@ -165,12 +165,18 @@ describe.sequential("disposable Supabase security boundary", () => {
     expect((await clients.u2.rpc("assign_case", { case_id: case1, new_coordinator: ids.c1, reason_text: "forged" })).error).not.toBeNull();
     await clients.u2.auth.updateUser({ data: { role: "ADMIN", staff_role: "ADMIN" } });
     expect((await clients.u2.rpc("assignment_queue", { queue_limit: 10, queue_offset: 0 })).data).toEqual([]);
+    expect((await clients.u2.rpc("staff_coordinators", { coordinator_limit: 10 })).data).toEqual([]);
+    expect((await clients.u2.rpc("coordinator_cases", { case_limit: 10, case_offset: 0 })).data).toEqual([]);
   });
 
   test("admin sees the minimal queue, assigns C1, but cannot read private content", async () => {
     const queue = await clients.a1.rpc("assignment_queue", { queue_limit: 10, queue_offset: 0 });
     expect(queue.error).toBeNull(); expect(queue.data?.some((r: {id:string}) => r.id === case1)).toBe(true); expect(JSON.stringify(queue.data)).not.toContain("sufficiently long");
+    const staff = await clients.a1.rpc("staff_coordinators", { coordinator_limit: 100 });
+    expect(staff.error).toBeNull(); expect(staff.data?.some((r: {id:string}) => r.id === ids.c1)).toBe(true);
+    expect((await clients.a1.rpc("assign_case", { case_id: case1, new_coordinator: ids.u2, reason_text: "invalid assignee" })).error).not.toBeNull();
     expect((await clients.a1.rpc("assign_case", { case_id: case1, new_coordinator: ids.c1, reason_text: "test assignment" })).error).toBeNull();
+    expect((await clients.c1.rpc("coordinator_cases", { case_limit: 10, case_offset: 0 })).data?.some((r: {id:string}) => r.id === case1)).toBe(true);
     expect((await clients.a1.from("help_requests").select("description").eq("id", case1)).data).toEqual([]);
     expect((await clients.c1.from("help_requests").select("id,description").eq("id", case1)).data).toHaveLength(1);
   });
@@ -233,6 +239,8 @@ describe.sequential("disposable Supabase security boundary", () => {
       const reassigned = await clients.a1.rpc("assign_case", { case_id: realtimeCase, new_coordinator: ids.c2, reason_text: "reassignment access test" });
       if (reassigned.error) diagnostic("reassignment RPC failed", reassigned.error);
       expect(reassigned.error).toBeNull(); expect(reassigned.data).toBeNull();
+      expect((await clients.c1.rpc("coordinator_cases", { case_limit: 100, case_offset: 0 })).data?.some((r: {id:string}) => r.id === realtimeCase)).toBe(false);
+      expect((await clients.c2.rpc("coordinator_cases", { case_limit: 100, case_offset: 0 })).data?.some((r: {id:string}) => r.id === realtimeCase)).toBe(true);
       const deniedRetry = await clients.c1.rpc("send_message", { case_id: realtimeCase, message_body: before, message_nonce: retryNonce });
       expect(deniedRetry.error?.message).toContain("access denied"); expect(deniedRetry.data).toBeNull();
       const after = `reassignment-after-${crypto.randomUUID()}`;
