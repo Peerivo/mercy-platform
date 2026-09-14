@@ -241,7 +241,7 @@ test("mobile specialist submits, ADMIN moderates, and only the safe public card 
     await specialist.getByLabel("Услуги через запятую").fill("консультация");
     await specialist.getByLabel("Языки через запятую").fill("русский");
     await specialist.getByLabel("Форматы работы через запятую").fill("онлайн");
-    await specialist.getByLabel("Контакты").fill("private-browser@example.invalid");
+    await specialist.getByLabel("Контакты", { exact: true }).fill("private-browser@example.invalid");
     await specialist.getByRole("button", { name: "Сохранить черновик" }).click();
     await expect(specialist).toHaveURL(/saved=1/);
     await specialist.getByRole("button", { name: "Отправить на модерацию" }).click();
