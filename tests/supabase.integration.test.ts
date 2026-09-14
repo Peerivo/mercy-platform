@@ -358,7 +358,7 @@ describe.sequential("disposable Supabase security boundary", () => {
       city: "Test",
       travel_area: "Online",
       specializations: ["family"],
-      services: ["medical:consultation"],
+      services: [" Medical:Consultation ", "medical:therapy"],
       languages: ["ru"],
       work_formats: ["online"],
       contact_details: "private@example.invalid",
@@ -375,11 +375,39 @@ describe.sequential("disposable Supabase security boundary", () => {
     expect((await clients.u2.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "forged review" })).error).not.toBeNull();
 
     expect((await clients.u1.rpc("submit_specialist_profile")).error).toBeNull();
+    const svc = createClient(url, serviceKey, { auth: { persistSession: false } });
+    const beforeFailures = await svc.from("specialist_status_events").select("id", { count: "exact", head: true }).eq("specialist_id", specialistId);
     const noRule = await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "medical review" });
     expect(noRule.error?.message).toContain("requirements are not configured");
 
-    const svc = createClient(url, serviceKey, { auth: { persistSession: false } });
-    expect((await svc.from("qualification_requirements").insert({ country: "XX", service_category: "medical:consultation", requirement_text: "Disposable test requirement" })).error).toBeNull();
+    expect((await svc.from("qualification_requirements").insert([
+      { country: " xx ", service_category: "medical:CONSULTATION", requirement_text: "First active medical rule" },
+      { country: "XX", service_category: "family", requirement_text: "Non-medical rule" },
+      { country: "YY", service_category: "medical:therapy", requirement_text: "Wrong-country rule" },
+      { country: "XX", service_category: "medical:therapy", requirement_text: "Inactive rule", active: false },
+    ])).error).toBeNull();
+    const oneOfTwo = await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "only one medical rule" });
+    expect(oneOfTwo.error?.message).toContain("requirements are not configured");
+
+    expect((await clients.u1.rpc("save_specialist_profile", { payload: { ...profile, services: ["medical:therapy", "family"] } })).error).toBeNull();
+    const nonMedicalOnly = await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "non-medical rule cannot cover" });
+    expect(nonMedicalOnly.error?.message).toContain("requirements are not configured");
+    expect((await clients.u1.rpc("save_specialist_profile", { payload: profile })).error).toBeNull();
+    const beforeNullFailures = await svc.from("specialist_status_events").select("id", { count: "exact", head: true }).eq("specialist_id", specialistId);
+
+    for (const args of [
+      { specialist: null, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "null specialist" },
+      { specialist: specialistId, new_publication: null, new_qualification: "VERIFIED", reason_text: "null publication" },
+      { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: null, reason_text: "null qualification" },
+      { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: null },
+    ]) expect((await clients.a1.rpc("review_specialist", args)).error).not.toBeNull();
+    const afterFailures = await svc.from("specialist_status_events").select("id", { count: "exact", head: true }).eq("specialist_id", specialistId);
+    expect(afterFailures.count).toBe(beforeNullFailures.count);
+    expect(beforeNullFailures.count).toBe((beforeFailures.count ?? 0) + 2);
+    expect((await clients.u1.from("specialist_profiles").select("publication_status,qualification_status").eq("id", specialistId).single()).data)
+      .toEqual({ publication_status: "PENDING", qualification_status: "UNVERIFIED" });
+
+    expect((await svc.from("qualification_requirements").insert({ country: "XX", service_category: " MEDICAL:THERAPY ", requirement_text: "Second active medical rule" })).error).toBeNull();
     expect((await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "requirements checked" })).error).toBeNull();
 
     const anon = createClient(url, anonKey, { auth: { persistSession: false } });
@@ -390,6 +418,26 @@ describe.sequential("disposable Supabase security boundary", () => {
     expect((await anon.from("published_specialists").select("*")).error).not.toBeNull();
     expect((await anon.rpc("get_published_specialist", { specialist_id: specialistId })).data).toHaveLength(1);
 
+    expect((await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "BLOCKED", new_qualification: "VERIFIED", reason_text: "published profile blocked" })).error).toBeNull();
+    expect((await anon.rpc("search_specialists", { search_text: "Тестовый" })).data).toEqual([]);
+    expect((await anon.rpc("get_published_specialist", { specialist_id: specialistId })).data).toEqual([]);
+    expect((await clients.u1.rpc("save_specialist_profile", { payload: { ...profile, city: "Changed" } })).error).toBeNull();
+    expect((await clients.u1.rpc("submit_specialist_profile")).error).not.toBeNull();
+    expect((await clients.u1.from("specialist_profiles").select("publication_status").eq("id", specialistId).single()).data)
+      .toEqual({ publication_status: "BLOCKED" });
+
+    const revokeProfile = { ...profile, display_name: "Отзыв квалификации", services: ["family"] };
+    const revokeId = (await clients.u2.rpc("save_specialist_profile", { payload: revokeProfile })).data as string;
+    expect((await clients.u2.rpc("submit_specialist_profile")).error).toBeNull();
+    expect((await clients.a1.rpc("review_specialist", { specialist: revokeId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "initial qualification decision" })).error).toBeNull();
+    expect((await clients.a1.rpc("review_specialist", { specialist: revokeId, new_publication: "PENDING", new_qualification: "UNVERIFIED", reason_text: "qualification withdrawn" })).error).toBeNull();
+    expect((await clients.u2.from("specialist_profiles").select("publication_status,qualification_status,published_at").eq("id", revokeId).single()).data)
+      .toEqual({ publication_status: "PENDING", qualification_status: "UNVERIFIED", published_at: null });
+    expect((await anon.rpc("get_published_specialist", { specialist_id: revokeId })).data).toEqual([]);
+
+    const draftId = (await clients.u3.rpc("save_specialist_profile", { payload: { ...profile, display_name: "Неотправленный черновик", services: ["family"] } })).data as string;
+    expect((await clients.a1.rpc("review_specialist", { specialist: draftId, new_publication: "PUBLISHED", new_qualification: "UNVERIFIED", reason_text: "must not publish draft" })).error).not.toBeNull();
+
     const path = `${ids.u1}/${crypto.randomUUID()}.pdf`;
     expect((await clients.u1.storage.from("qualification-documents").upload(path, new Blob(["fictional qualification"]), { contentType: "application/pdf" })).error).toBeNull();
     expect((await clients.u1.storage.from("qualification-documents").download(path)).error).toBeNull();
@@ -397,8 +445,8 @@ describe.sequential("disposable Supabase security boundary", () => {
     expect((await clients.a1.storage.from("qualification-documents").download(path)).error).toBeNull();
     expect((await clients.u2.storage.from("qualification-documents").upload(`${ids.u1}/forged.pdf`, new Blob(["forged"]), { contentType: "application/pdf" })).error).not.toBeNull();
 
-    expect((await clients.u1.rpc("save_specialist_profile", { payload: { ...profile, services: ["family"] } })).error).toBeNull();
-    const privateAfterChange = await clients.u1.from("specialist_profiles").select("publication_status,qualification_status").eq("id", specialistId).single();
+    expect((await clients.u2.rpc("save_specialist_profile", { payload: { ...revokeProfile, services: ["other"] } })).error).toBeNull();
+    const privateAfterChange = await clients.u2.from("specialist_profiles").select("publication_status,qualification_status").eq("id", revokeId).single();
     expect(privateAfterChange.data).toEqual({ publication_status: "PENDING", qualification_status: "UNVERIFIED" });
     expect((await anon.rpc("search_specialists", { search_text: "Тестовый" })).data).toEqual([]);
     expect((await anon.rpc("get_published_specialist", { specialist_id: specialistId })).data).toEqual([]);

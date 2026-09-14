@@ -263,6 +263,17 @@ test("mobile specialist submits, ADMIN moderates, and only the safe public card 
     await expect(specialist.getByRole("heading", { name: "Браузерный специалист" })).toBeVisible();
     await expect(specialist.getByText("private-browser@example.invalid")).toHaveCount(0);
     expect((await specialist.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth))).toBe(true);
+
+    await admin.goto("/staff/specialists");
+    const publishedCard = admin.locator("article").filter({ hasText: "Браузерный специалист" });
+    await expect(publishedCard).toBeVisible();
+    await expect(publishedCard.getByLabel("Публикация").locator('option[value="BLOCKED"]')).toHaveCount(1);
+    await publishedCard.getByLabel("Публикация").selectOption("BLOCKED");
+    await publishedCard.getByLabel("Основание").fill("Блокировка опубликованного профиля");
+    await publishedCard.getByRole("button", { name: "Сохранить решение" }).click();
+    await expect(admin).toHaveURL(/reviewed=1/);
+    await specialist.goto("/specialists?q=Браузерный");
+    await expect(specialist.getByRole("link", { name: "Браузерный специалист" })).toHaveCount(0);
   } finally {
     await Promise.all([specialistContext.close(), adminContext.close()]);
   }
