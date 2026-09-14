@@ -251,29 +251,37 @@ test("mobile specialist submits, ADMIN moderates, and only the safe public card 
     const card = admin.locator("article").filter({ hasText: "Браузерный специалист" });
     await expect(card).toBeVisible();
     await card.getByLabel("Публикация").selectOption("PUBLISHED");
-    await card.getByLabel("Квалификация").selectOption("UNVERIFIED");
+    await card.getByLabel("Квалификация").selectOption("VERIFIED");
     await card.getByLabel("Основание").fill("Проверено в disposable browser test");
     await card.getByRole("button", { name: "Сохранить решение" }).click();
     await expect(admin).toHaveURL(/reviewed=1/);
 
     await specialistContext.clearCookies();
     await specialist.goto("/specialists?q=Браузерный");
-    await expect(specialist.getByRole("link", { name: "Браузерный специалист" })).toBeVisible();
-    await specialist.getByRole("link", { name: "Браузерный специалист" }).click();
+    const publicCardLink = specialist.getByRole("link", { name: "Браузерный специалист" });
+    await expect(publicCardLink).toBeVisible();
+    const publicCardUrl = await publicCardLink.getAttribute("href");
+    expect(publicCardUrl).toMatch(/^\/specialists\/[0-9a-f-]+$/);
+    await publicCardLink.click();
     await expect(specialist.getByRole("heading", { name: "Браузерный специалист" })).toBeVisible();
+    await expect(specialist.getByText("Квалификация подтверждена")).toBeVisible();
     await expect(specialist.getByText("private-browser@example.invalid")).toHaveCount(0);
     expect((await specialist.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth))).toBe(true);
 
     await admin.goto("/staff/specialists");
     const publishedCard = admin.locator("article").filter({ hasText: "Браузерный специалист" });
     await expect(publishedCard).toBeVisible();
-    await expect(publishedCard.getByLabel("Публикация").locator('option[value="BLOCKED"]')).toHaveCount(1);
-    await publishedCard.getByLabel("Публикация").selectOption("BLOCKED");
-    await publishedCard.getByLabel("Основание").fill("Блокировка опубликованного профиля");
+    await publishedCard.getByLabel("Публикация").selectOption("PENDING");
+    await expect(publishedCard.getByLabel("Квалификация")).toHaveValue("PENDING");
+    await publishedCard.getByLabel("Основание").fill("Отзыв подтверждения квалификации");
     await publishedCard.getByRole("button", { name: "Сохранить решение" }).click();
     await expect(admin).toHaveURL(/reviewed=1/);
+    const { data: revoked } = await service.from("specialist_profiles").select("publication_status,qualification_status").eq("display_name", "Браузерный специалист").single();
+    expect(revoked).toEqual({ publication_status: "PENDING", qualification_status: "PENDING" });
     await specialist.goto("/specialists?q=Браузерный");
     await expect(specialist.getByRole("link", { name: "Браузерный специалист" })).toHaveCount(0);
+    const missingCard = await specialist.goto(publicCardUrl!);
+    expect(missingCard?.status()).toBe(404);
   } finally {
     await Promise.all([specialistContext.close(), adminContext.close()]);
   }

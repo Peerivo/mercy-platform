@@ -418,6 +418,7 @@ describe.sequential("disposable Supabase security boundary", () => {
     expect((await anon.from("published_specialists").select("*")).error).not.toBeNull();
     expect((await anon.rpc("get_published_specialist", { specialist_id: specialistId })).data).toHaveLength(1);
 
+    expect((await svc.from("qualification_requirements").update({ active: false }).eq("country", "XX").ilike("service_category", "%medical:therapy%")).error).toBeNull();
     expect((await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "BLOCKED", new_qualification: "VERIFIED", reason_text: "published profile blocked" })).error).toBeNull();
     expect((await anon.rpc("search_specialists", { search_text: "Тестовый" })).data).toEqual([]);
     expect((await anon.rpc("get_published_specialist", { specialist_id: specialistId })).data).toEqual([]);
@@ -438,12 +439,13 @@ describe.sequential("disposable Supabase security boundary", () => {
     const draftId = (await clients.u3.rpc("save_specialist_profile", { payload: { ...profile, display_name: "Неотправленный черновик", services: ["family"] } })).data as string;
     expect((await clients.a1.rpc("review_specialist", { specialist: draftId, new_publication: "PUBLISHED", new_qualification: "UNVERIFIED", reason_text: "must not publish draft" })).error).not.toBeNull();
 
+    const pdf = new Blob(["%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"], { type: "application/pdf" });
     const path = `${ids.u1}/${crypto.randomUUID()}.pdf`;
-    expect((await clients.u1.storage.from("qualification-documents").upload(path, new Blob(["fictional qualification"]), { contentType: "application/pdf" })).error).toBeNull();
+    expect((await clients.u1.storage.from("qualification-documents").upload(path, pdf, { contentType: pdf.type })).error).toBeNull();
     expect((await clients.u1.storage.from("qualification-documents").download(path)).error).toBeNull();
     expect((await clients.u2.storage.from("qualification-documents").download(path)).error).not.toBeNull();
     expect((await clients.a1.storage.from("qualification-documents").download(path)).error).toBeNull();
-    expect((await clients.u2.storage.from("qualification-documents").upload(`${ids.u1}/forged.pdf`, new Blob(["forged"]), { contentType: "application/pdf" })).error).not.toBeNull();
+    expect((await clients.u2.storage.from("qualification-documents").upload(`${ids.u1}/forged.pdf`, pdf, { contentType: pdf.type })).error).not.toBeNull();
 
     expect((await clients.u2.rpc("save_specialist_profile", { payload: { ...revokeProfile, services: ["other"] } })).error).toBeNull();
     const privateAfterChange = await clients.u2.from("specialist_profiles").select("publication_status,qualification_status").eq("id", revokeId).single();
