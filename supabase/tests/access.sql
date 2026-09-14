@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(20);
+select plan(28);
 select has_table('public','help_requests','schema reproduced');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.messages'::regclass),'messages: RLS enabled');
@@ -22,4 +22,12 @@ create function public.pgtap_default_privilege_probe() returns boolean language 
 select ok(not has_function_privilege('anon','public.pgtap_default_privilege_probe()','EXECUTE') and not has_function_privilege('authenticated','public.pgtap_default_privilege_probe()','EXECUTE'),'new functions do not acquire API execution by default');
 select isnt((select relreplident from pg_class where oid='public.messages'::regclass),'f','messages do not expose FULL old rows on DELETE');
 select results_eq($$select count(*)::bigint from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='messages'$$,array[1::bigint],'messages publication configured exactly once');
+select ok((select relrowsecurity from pg_class where oid='public.specialist_profiles'::regclass),'specialist profiles use RLS');
+select ok((select relrowsecurity from pg_class where oid='public.qualification_documents'::regclass),'qualification documents use RLS');
+select ok((select relrowsecurity from pg_class where oid='public.specialist_status_events'::regclass),'review events use RLS');
+select ok(has_function_privilege('authenticated','public.save_specialist_profile(jsonb)','EXECUTE') and not has_function_privilege('anon','public.save_specialist_profile(jsonb)','EXECUTE'),'profile write requires a user JWT');
+select ok(has_function_privilege('authenticated','public.review_specialist(uuid,public.specialist_publication_status,public.qualification_status,text)','EXECUTE') and not has_function_privilege('anon','public.review_specialist(uuid,public.specialist_publication_status,public.qualification_status,text)','EXECUTE'),'review is authenticated and checks admin internally');
+select ok(has_function_privilege('anon','public.search_specialists(text,text,text,text,boolean,integer,integer)','EXECUTE'),'bounded public search is available');
+select ok(not has_table_privilege('anon','public.specialist_profiles','SELECT'),'anonymous users cannot read source profiles');
+select ok(not (select public from storage.buckets where id='qualification-documents'),'qualification document bucket is private');
 select * from finish();rollback;

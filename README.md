@@ -8,7 +8,7 @@ cp .env.example .env.local
 npm ci
 npm run dev
 ```
-Откройте `/`, `/nearby`, `/auth`, `/help`, `/cabinet`, `/volunteer`. Проверки: `npm run check`; миграции локально: `npx supabase start && npx supabase db reset`. Seed намеренно требует `app.mercy_allow_test_seed=true` и предназначен только для disposable DB.
+Откройте `/`, `/nearby`, `/specialists`, `/specialist/profile`, `/auth`, `/help`, `/cabinet`, `/volunteer`. Очередь ADMIN находится в `/staff/specialists`. Проверки: `npm run check`; миграции локально: `npx supabase start && npx supabase db reset`. Seed намеренно требует `app.mercy_allow_test_seed=true` и предназначен только для disposable DB.
 
 `NEXT_PUBLIC_SUPABASE_URL` и `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` обязательны и безопасны для клиента в сочетании с RLS. Legacy anon key — только fallback. `NEXT_PUBLIC_SITE_URL` задаёт Auth redirects. Все `NEXT_PUBLIC_*` встраиваются во время build: передавайте их как Docker build args, не ожидайте runtime-подмены. Privileged keys приложению не нужны. Полная локальная и CI-процедура, роли и защита от удалённой БД описаны в [`docs/TESTING.md`](docs/TESTING.md).
 
