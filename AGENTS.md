@@ -11,11 +11,11 @@ Read `PROJECT.md` before changing code. Keep it current and separate implemented
 
 ## Delivery workflow
 
-- Each stage must be small and complete, pass all required checks, and reach the primary branch through its own pull request before the next stage begins.
-- Start the next task from an updated `main`/`master`. A new pull request is allowed; a Follow-up task is not required.
+- One task includes implementation, verification of UI → server action → RPC/RLS, correction of all discovered causes in one coordinated pass, one pull request, and its normal merge.
+- Start each task from an updated `main`/`master`; if it advanced, preserve its changes and verify ancestry. Do not continue obsolete pull requests or feature branches.
 - Do not create dependent pull-request chains between development branches. Pull requests target the primary branch directly.
-- Never bypass a red CI run, required checks, or branch protection to finish a stage.
-- The current Supabase integration consolidation is a one-time combination of accumulated work. Staff UI, maps, and new product capabilities belong to later, separate stages.
+- A red CI result alone does not prohibit an MVP merge when the failure is non-blocking or infrastructural, but record the exact cause, impact, and debt; never claim it passed.
+- Fix or remove any new capability that breaks the primary scenario, loses data, or exposes another person's case. Never bypass required GitHub checks or branch protection.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
