@@ -380,10 +380,11 @@ describe.sequential("disposable Supabase security boundary", () => {
     const noRule = await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "medical review" });
     expect(noRule.error?.message).toContain("requirements are not configured");
 
+    // Bulk PostgREST rows must all set active; omitted fields otherwise become NULL.
     expect((await svc.from("qualification_requirements").insert([
-      { country: " xx ", service_category: "medical:CONSULTATION", requirement_text: "First active medical rule" },
-      { country: "XX", service_category: "family", requirement_text: "Non-medical rule" },
-      { country: "YY", service_category: "medical:therapy", requirement_text: "Wrong-country rule" },
+      { country: " xx ", service_category: "medical:CONSULTATION", requirement_text: "First active medical rule", active: true },
+      { country: "XX", service_category: "family", requirement_text: "Non-medical rule", active: true },
+      { country: "YY", service_category: "medical:therapy", requirement_text: "Wrong-country rule", active: true },
       { country: "XX", service_category: "medical:therapy", requirement_text: "Inactive rule", active: false },
     ])).error).toBeNull();
     const oneOfTwo = await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "only one medical rule" });
