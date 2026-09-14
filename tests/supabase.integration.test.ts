@@ -350,6 +350,66 @@ describe.sequential("disposable Supabase security boundary", () => {
     expect(active.data).toHaveLength(1);
   });
 
+  test("specialist ownership, moderation, publication, search and documents enforce real API boundaries", async () => {
+    const profile = {
+      display_name: "Тестовый специалист",
+      description: "Публичное описание без приватных сведений",
+      country: "XX",
+      city: "Test",
+      travel_area: "Online",
+      specializations: ["family"],
+      services: ["medical:consultation"],
+      languages: ["ru"],
+      work_formats: ["online"],
+      contact_details: "private@example.invalid",
+      show_contacts: false,
+    };
+    const saved = await clients.u1.rpc("save_specialist_profile", { payload: profile });
+    expect(saved.error).toBeNull();
+    const specialistId = saved.data as string;
+
+    expect((await clients.u1.from("specialist_profiles").select("id").eq("id", specialistId)).data).toHaveLength(1);
+    expect((await clients.u2.from("specialist_profiles").select("*").eq("id", specialistId)).data).toEqual([]);
+    expect((await clients.u2.from("specialist_profiles").update({ account_id: ids.u2, publication_status: "PUBLISHED", qualification_status: "VERIFIED", network_identity_id: "forged" }).eq("id", specialistId)).error).not.toBeNull();
+    expect((await clients.u2.from("specialist_status_events").insert({ specialist_id: specialistId, actor_id: ids.u2, publication_status: "PUBLISHED", reason: "forged" })).error).not.toBeNull();
+    expect((await clients.u2.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "forged review" })).error).not.toBeNull();
+
+    expect((await clients.u1.rpc("submit_specialist_profile")).error).toBeNull();
+    const noRule = await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "medical review" });
+    expect(noRule.error?.message).toContain("requirements are not configured");
+
+    const svc = createClient(url, serviceKey, { auth: { persistSession: false } });
+    expect((await svc.from("qualification_requirements").insert({ country: "XX", service_category: "medical:consultation", requirement_text: "Disposable test requirement" })).error).toBeNull();
+    expect((await clients.a1.rpc("review_specialist", { specialist: specialistId, new_publication: "PUBLISHED", new_qualification: "VERIFIED", reason_text: "requirements checked" })).error).toBeNull();
+
+    const anon = createClient(url, anonKey, { auth: { persistSession: false } });
+    const publicSearch = await anon.rpc("search_specialists", { search_text: "Тестовый", result_limit: 1000, result_offset: -10 });
+    expect(publicSearch.error).toBeNull();
+    expect(publicSearch.data).toHaveLength(1);
+    expect(publicSearch.data![0].contact_details).toBeNull();
+    expect((await anon.from("published_specialists").select("*")).error).not.toBeNull();
+    expect((await anon.rpc("get_published_specialist", { specialist_id: specialistId })).data).toHaveLength(1);
+
+    const path = `${ids.u1}/${crypto.randomUUID()}.pdf`;
+    expect((await clients.u1.storage.from("qualification-documents").upload(path, new Blob(["fictional qualification"]), { contentType: "application/pdf" })).error).toBeNull();
+    expect((await clients.u1.storage.from("qualification-documents").download(path)).error).toBeNull();
+    expect((await clients.u2.storage.from("qualification-documents").download(path)).error).not.toBeNull();
+    expect((await clients.a1.storage.from("qualification-documents").download(path)).error).toBeNull();
+    expect((await clients.u2.storage.from("qualification-documents").upload(`${ids.u1}/forged.pdf`, new Blob(["forged"]), { contentType: "application/pdf" })).error).not.toBeNull();
+
+    expect((await clients.u1.rpc("save_specialist_profile", { payload: { ...profile, services: ["family"] } })).error).toBeNull();
+    const privateAfterChange = await clients.u1.from("specialist_profiles").select("publication_status,qualification_status").eq("id", specialistId).single();
+    expect(privateAfterChange.data).toEqual({ publication_status: "PENDING", qualification_status: "UNVERIFIED" });
+    expect((await anon.rpc("search_specialists", { search_text: "Тестовый" })).data).toEqual([]);
+    expect((await anon.rpc("get_published_specialist", { specialist_id: specialistId })).data).toEqual([]);
+
+    for (const args of [
+      { search_text: "Тестовый", result_limit: 0, result_offset: 0 },
+      { search_text: "Тестовый", result_limit: 51, result_offset: 0 },
+      { search_text: "Тестовый", result_limit: 20, result_offset: -1 },
+    ]) expect((await anon.rpc("search_specialists", args)).error).toBeNull();
+  }, 30_000);
+
   test("concurrent sends serialize the per-author quota while retry remains free", async () => {
     const made = await clients.u3.rpc("create_help_request", { payload: { category: "OTHER", country: "XX", city: "Test", description: "A quota-only sufficiently long fictional request", urgency: "NORMAL" }, consent_version: "request-v1" });
     expect(made.error).toBeNull(); case3 = made.data as string;

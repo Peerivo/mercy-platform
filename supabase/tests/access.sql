@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(28);
+select plan(31);
 select has_table('public','help_requests','schema reproduced');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.messages'::regclass),'messages: RLS enabled');
@@ -29,5 +29,8 @@ select ok(has_function_privilege('authenticated','public.save_specialist_profile
 select ok(has_function_privilege('authenticated','public.review_specialist(uuid,public.specialist_publication_status,public.qualification_status,text)','EXECUTE') and not has_function_privilege('anon','public.review_specialist(uuid,public.specialist_publication_status,public.qualification_status,text)','EXECUTE'),'review is authenticated and checks admin internally');
 select ok(has_function_privilege('anon','public.search_specialists(text,text,text,text,boolean,integer,integer)','EXECUTE'),'bounded public search is available');
 select ok(not has_table_privilege('anon','public.specialist_profiles','SELECT'),'anonymous users cannot read source profiles');
+select ok(has_function_privilege('anon','public.get_published_specialist(uuid)','EXECUTE'),'single published card lookup is available');
+select ok(not has_table_privilege('anon','public.published_specialists','SELECT'),'anonymous users cannot enumerate the public projection directly');
+select ok(not has_table_privilege('authenticated','public.published_specialists','SELECT'),'authenticated users cannot enumerate the public projection directly');
 select ok(not (select public from storage.buckets where id='qualification-documents'),'qualification document bucket is private');
 select * from finish();rollback;
