@@ -83,7 +83,7 @@ async function attachBfCacheDiagnostics(testInfo: TestInfo, lifecycle: Lifecycle
 
 test("two browser contexts stay isolated; create, message, refresh and Quick Exit Back are safe", async ({ browser }) => {
   test.setTimeout(90_000);
-  
+
   const one = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const two = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const lifecycle: LifecycleObservation[] = [];
@@ -118,7 +118,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
 
     await expect(p1.getByText("browser message")).toHaveCount(0);
     await expect(p1.getByText("private draft must disappear")).toHaveCount(0);
-    await expect(p1.locator("textarea")).toHaveCount(0);
+    await expect(p1.getByLabel("Сообщение")).toHaveCount(0);
     const privateReturn = lifecycle.filter(item => item.phase === "pageshow" && item.route === "/cabinet/requests/:id").at(-1);
     const returnPath = privateReturn === privateDocument
       ? "private-entry-not-revisited"
