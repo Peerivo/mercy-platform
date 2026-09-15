@@ -1,7 +1,6 @@
 import { expect, test, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createClient } from "@supabase/supabase-js";
 import { quickExitGuard } from "../../lib/quick-exit-guard";
 
 const password = "Browser-password-42!";

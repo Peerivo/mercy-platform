@@ -9,3 +9,46 @@ export const specialistReviewSchema=z.object({id:z.string().uuid(),publication:z
 export const staffPageSchema=z.coerce.number().int().min(1).max(1000).default(1);
 export const assignmentSchema=z.object({caseId:z.string().uuid(),coordinatorId:z.string().uuid(),currentCoordinatorId:z.union([z.string().uuid(),z.literal("")]),reason:z.string().trim().min(3).max(500)}).superRefine((value,ctx)=>{if(value.currentCoordinatorId&&value.currentCoordinatorId===value.coordinatorId)ctx.addIssue({code:"custom",path:["coordinatorId"],message:"already assigned"})});
 export const caseStatusSchema=z.object({caseId:z.string().uuid(),status:z.enum(["ASSIGNED","IN_PROGRESS","WAITING","RESOLVED","CLOSED"])});
+export const helpRequestReportSchema = z
+  .object({
+    caseId: z.string().uuid(),
+
+    reason: z.enum([
+      "FRAUD",
+      "DANGEROUS",
+      "PERSONAL_DATA",
+      "OUTDATED",
+      "OTHER",
+    ]),
+
+    details: z.string().trim().max(1000),
+
+    reporterToken: z.string().uuid(),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.reason === "OTHER" &&
+      value.details.length < 3
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["details"],
+        message: "details required",
+      });
+    }
+  });
+
+export const helpRequestReportReviewSchema = z.object({
+  id: z.string().uuid(),
+
+  status: z.enum([
+    "RESOLVED",
+    "DISMISSED",
+  ]),
+
+  note: z
+    .string()
+    .trim()
+    .min(3)
+    .max(500),
+});
