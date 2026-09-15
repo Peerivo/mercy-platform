@@ -105,10 +105,10 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await expect(p2.getByText("A fictional browser request")).toHaveCount(0);
     await p1.getByLabel("Сообщение").fill("private draft must disappear");
     await p1.getByRole("button", { name: "Быстро скрыть приватную страницу" }).click();
-    await expect(p1).toHaveURL(/\/safe$/);
-    await expect(p1.getByRole("button", { name: "Вернуться в сервис" })).toBeVisible();
+    await expect(p1).toHaveURL(/\/auth$/);
+    await expect(p1.getByRole("heading", { name: "Вход и регистрация" })).toBeVisible();
     await p1.goBack();
-    await expect(p1).toHaveURL(/\/safe$/);
+    await expect(p1).toHaveURL(/\/auth$/);
     await expect(p1.getByText("browser message")).toHaveCount(0);
     await expect(p1.getByText("private draft must disappear")).toHaveCount(0);
     await expect(p1.locator("textarea")).toHaveCount(0);
@@ -119,8 +119,6 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
         ? "bfcache-restoration"
         : "new-document-load";
     console.log(`[quick-exit] Back safety path=${returnPath}; private content absent and marker enforced`);
-    await p1.getByRole("button", { name: "Вернуться в сервис" }).click();
-    await expect(p1).toHaveURL(/\/$/);
     await p1.goto("/cabinet");
     await expect(p1).toHaveURL(/\/auth/);
     await p1.goto(privateUrl);
@@ -189,7 +187,7 @@ test("the production guard protects a genuinely BFCache-eligible document", asyn
     await page.evaluate(() => sessionStorage.setItem("mercy_quick_exit", "1"));
     collectTargetFailures = true;
     await page.goBack();
-    await expect(page).toHaveURL(/\/safe$/);
+    await expect(page).toHaveURL(/\/auth$/);
     await expect.poll(() => lifecycle.some(item => item.documentId === protectedDocument?.documentId &&
       item.phase === "pageshow" && item.persisted)).toBe(true);
     await expect(page.getByText("synthetic sensitive fixture")).toHaveCount(0);
@@ -228,11 +226,15 @@ test("main pages share the responsive shell and Peerivo icon", async ({ page }) 
   }
 
   await page.setViewportSize({ width: 390, height: 900 });
-  for (const route of ["/", "/nearby", "/auth", "/help", "/volunteer", "/safe"]) {
+  for (const route of ["/", "/nearby", "/auth", "/help", "/volunteer"]) {
     await page.goto(route);
     await expect(page.locator("main .page-shell").first()).toBeVisible();
     expect(await page.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
   }
+
+  await page.goto("/safe");
+  await expect(page).toHaveURL(/\/auth$/);
+  await expect(page.getByRole("heading", { name: "Вход и регистрация" })).toBeVisible();
 });
 
 test("mobile specialist submits, ADMIN moderates, and only the safe public card is exposed", async ({ browser }) => {
