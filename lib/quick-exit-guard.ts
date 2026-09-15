@@ -1,1 +1,24 @@
-export const quickExitGuard = String.raw`(()=>{const marker="mercy_quick_exit";const isSafe=()=>location.pathname==="/safe";const marked=()=>{try{return sessionStorage.getItem(marker)==="1"}catch{return false}};const protect=()=>{if(!marked()||isSafe()){document.documentElement.removeAttribute("data-mercy-quick-exit-guard");return}document.documentElement.setAttribute("data-mercy-quick-exit-guard","1");location.replace("/safe")};addEventListener("pageshow",protect);addEventListener("popstate",protect);for(const name of ["pushState","replaceState"]){const original=history[name];history[name]=function(...args){const result=original.apply(this,args);queueMicrotask(protect);return result}}protect()})();`;
+export const quickExitGuard = String.raw`
+(() => {
+  const marker = "mercy_quick_exit";
+
+  const marked = () => {
+    try {
+      return sessionStorage.getItem(marker) === "1";
+    } catch {
+      return false;
+    }
+  };
+
+  addEventListener("pageshow", (event) => {
+    if (
+      event.persisted &&
+      marked() &&
+      location.pathname !== "/auth" &&
+      location.pathname !== "/safe"
+    ) {
+      location.replace("/auth");
+    }
+  });
+})();
+`;
