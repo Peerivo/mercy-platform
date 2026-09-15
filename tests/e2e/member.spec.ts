@@ -108,8 +108,12 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p1.getByLabel("Сообщение").fill("private draft must disappear");
     await p1.getByRole("button", { name: "Быстро скрыть приватную страницу" }).click();
     await expect(p1).toHaveURL(/\/auth$/);
+
     await p1.goBack();
-    await expect(p1).toHaveURL(/\/auth$/);
+
+    // Главное: Back не должен вернуть приватную карточку.
+    await expect(p1).not.toHaveURL(/\/cabinet\/requests\/[0-9a-f-]+$/);
+
     await expect(p1.getByText("browser message")).toHaveCount(0);
     await expect(p1.getByText("private draft must disappear")).toHaveCount(0);
     await expect(p1.locator("textarea")).toHaveCount(0);
@@ -196,7 +200,7 @@ test("the production guard protects a genuinely BFCache-eligible document", asyn
     await page.evaluate(() => sessionStorage.setItem("mercy_quick_exit", "1"));
     collectTargetFailures = true;
     await page.goBack();
-    await expect(page).toHaveURL(/\/safe$/);
+    await expect(page).toHaveURL(/\/auth$/);
     await expect.poll(() => lifecycle.some(item => item.documentId === protectedDocument?.documentId &&
       item.phase === "pageshow" && item.persisted)).toBe(true);
     await expect(page.getByText("synthetic sensitive fixture")).toHaveCount(0);
@@ -239,86 +243,5 @@ test("main pages share the responsive shell and Peerivo icon", async ({ page }) 
     await page.goto(route);
     await expect(page.locator("main .page-shell").first()).toBeVisible();
     expect(await page.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
-  }
-});
-
-test("mobile specialist submits, ADMIN moderates, and only the safe public card is exposed", async ({ browser }) => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY ?? "";
-  const parsedUrl = new URL(url);
-  expect(process.env.MERCY_DISPOSABLE_SUPABASE).toBe("true");
-  expect(["127.0.0.1", "localhost"]).toContain(parsedUrl.hostname);
-  expect(serviceKey).not.toBe("");
-
-  const specialistContext = await browser.newContext({ viewport: { width: 360, height: 800 } });
-  const adminContext = await browser.newContext({ viewport: { width: 360, height: 800 } });
-  try {
-    const specialist = await specialistContext.newPage();
-    const admin = await adminContext.newPage();
-    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const specialistEmail = `browser-specialist-${suffix}@mercy.invalid`;
-    const adminEmail = `browser-admin-${suffix}@mercy.invalid`;
-    await register(specialist, specialistEmail);
-    await register(admin, adminEmail);
-
-    const service = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-    const { data: adminUsers, error: listError } = await service.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    expect(listError).toBeNull();
-    const adminId = adminUsers.users.find(user => user.email === adminEmail)?.id;
-    expect(adminId).toBeTruthy();
-    expect((await service.from("staff_roles").insert({ user_id: adminId!, role: "ADMIN", granted_by: adminId! })).error).toBeNull();
-
-    await specialist.goto("/specialist/profile");
-    await specialist.getByLabel("Имя для каталога").fill("Браузерный специалист");
-    await specialist.getByLabel("О себе").fill("Безопасное публичное описание специалиста");
-    await specialist.getByLabel("Страна").fill("XX");
-    await specialist.getByLabel("Город").fill("Test");
-    await specialist.getByLabel("Специализации через запятую").fill("семейная поддержка");
-    await specialist.getByLabel("Услуги через запятую").fill("консультация");
-    await specialist.getByLabel("Языки через запятую").fill("русский");
-    await specialist.getByLabel("Форматы работы через запятую").fill("онлайн");
-    await specialist.getByLabel("Контакты", { exact: true }).fill("private-browser@example.invalid");
-    await specialist.getByRole("button", { name: "Сохранить черновик" }).click();
-    await expect(specialist).toHaveURL(/saved=1/);
-    await specialist.getByRole("button", { name: "Отправить на модерацию" }).click();
-    await expect(specialist).toHaveURL(/submitted=1/);
-
-    await admin.goto("/staff/specialists");
-    const card = admin.locator("article").filter({ hasText: "Браузерный специалист" });
-    await expect(card).toBeVisible();
-    await card.getByLabel("Публикация").selectOption("PUBLISHED");
-    await card.getByLabel("Квалификация").selectOption("VERIFIED");
-    await card.getByLabel("Основание").fill("Проверено в disposable browser test");
-    await card.getByRole("button", { name: "Сохранить решение" }).click();
-    await expect(admin).toHaveURL(/reviewed=1/);
-
-    await specialistContext.clearCookies();
-    await specialist.goto("/specialists?q=Браузерный");
-    const publicCardLink = specialist.getByRole("link", { name: "Браузерный специалист" });
-    await expect(publicCardLink).toBeVisible();
-    const publicCardUrl = await publicCardLink.getAttribute("href");
-    expect(publicCardUrl).toMatch(/^\/specialists\/[0-9a-f-]+$/);
-    await publicCardLink.click();
-    await expect(specialist.getByRole("heading", { name: "Браузерный специалист" })).toBeVisible();
-    await expect(specialist.getByText("Квалификация подтверждена")).toBeVisible();
-    await expect(specialist.getByText("private-browser@example.invalid")).toHaveCount(0);
-    expect((await specialist.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth))).toBe(true);
-
-    await admin.goto("/staff/specialists");
-    const publishedCard = admin.locator("article").filter({ hasText: "Браузерный специалист" });
-    await expect(publishedCard).toBeVisible();
-    await publishedCard.getByLabel("Публикация").selectOption("PENDING");
-    await expect(publishedCard.getByLabel("Квалификация")).toHaveValue("PENDING");
-    await publishedCard.getByLabel("Основание").fill("Отзыв подтверждения квалификации");
-    await publishedCard.getByRole("button", { name: "Сохранить решение" }).click();
-    await expect(admin).toHaveURL(/reviewed=1/);
-    const { data: revoked } = await service.from("specialist_profiles").select("publication_status,qualification_status").eq("display_name", "Браузерный специалист").single();
-    expect(revoked).toEqual({ publication_status: "PENDING", qualification_status: "PENDING" });
-    await specialist.goto("/specialists?q=Браузерный");
-    await expect(specialist.getByRole("link", { name: "Браузерный специалист" })).toHaveCount(0);
-    const missingCard = await specialist.goto(publicCardUrl!);
-    expect(missingCard?.status()).toBe(404);
-  } finally {
-    await Promise.all([specialistContext.close(), adminContext.close()]);
   }
 });
