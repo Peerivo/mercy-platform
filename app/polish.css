@@ -1,0 +1,50 @@
+.btn {
+  border-radius: 999px;
+}
+
+.hero .nav {
+  margin-top: 28px;
+}
+
+.hero .nav .btn {
+  min-width: 150px;
+}
+
+.section > form.card > .nav {
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+article.card h2 {
+  font-size: clamp(1.2rem, 2vw, 1.55rem);
+}
+
+.nearby-empty {
+  grid-column: 1 / -1;
+}
+
+.nearby-actions {
+  margin: 18px 0 8px;
+}
+
+.site-footer-inner > div > p,
+.footer-safety {
+  font-weight: 400;
+}
+
+@media (max-width: 720px) {
+  .hero .nav {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .hero .nav .btn,
+  .section > form.card > .nav .btn {
+    width: 100%;
+  }
+
+  .section > form.card > .nav {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
