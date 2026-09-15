@@ -32,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <span className="spacer" />
             <Link href="/nearby">Помощь рядом</Link>
+            <Link href="/requests">Просьбы</Link>
             <Link href="/help">Нужна помощь</Link>
             <Link href="/volunteer">Хочу помочь</Link>
             <Link href="/cabinet">Кабинет</Link>
@@ -40,7 +41,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
         <main>{children}</main>
         <footer className="page-shell section muted">
-          © Проект поддержки. Не медицинская организация и не круглосуточная экстренная служба.
+          © Язык милосердия · добровольная помощь людей людям.
+          При непосредственной угрозе жизни или безопасности
+          обращайтесь в местную экстренную службу.
         </footer>
       </body>
     </html>
