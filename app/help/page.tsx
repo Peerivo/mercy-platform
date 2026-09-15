@@ -1,10 +1,33 @@
-import {createRequest} from "./actions";
-export const metadata={robots:{index:false,follow:false}};
-export default async function Help({searchParams}:{searchParams:Promise<Record<string,string>>}){const q=await searchParams;return <section className="page-shell section"><h1>Расскажите, какая помощь нужна</h1>
-<p>
-  Текст просьбы о помощи будет опубликован и доступен без регистрации.
-  Не указывайте в описании телефон, email, точный адрес, паспортные данные
-  и другие сведения, которые не должны быть публичными. Контактные данные,
-  указанные в отдельных полях ниже, публично не показываются.
-</p>
-{q.error&&<p role="alert">Не удалось сохранить. Проверьте поля или повторите позже.</p>}<form action={createRequest} className="card grid"><label>Категория<select name="category" required><option value="PREGNANCY">Беременность и материнство</option><option value="FAMILY">Семья</option><option value="HOUSING">Жильё</option><option value="FOOD_GOODS">Продукты и вещи</option><option value="LEGAL_DOCUMENTS">Документы и право</option><option value="WORK_EDUCATION">Работа и обучение</option><option value="OTHER">Другое</option></select></label><div className="grid cols2"><label>Страна<input name="country" required maxLength={80}/></label><label>Город<input name="city" required maxLength={120}/></label></div><label>Описание<textarea name="description" required minLength={20} maxLength={5000} rows={7}/></label><label>Срочность<select name="urgency"><option value="NORMAL">Обычная</option><option value="SOON">Желательно скоро</option><option value="URGENT">Срочно</option></select></label><label><input name="can_message" type="checkbox" defaultChecked/> Можно писать</label><label><input name="can_call" type="checkbox"/> Можно звонить</label><label>Подходящее время<input name="contact_window" maxLength={120}/></label><label>Внешний контакт (необязательно)<input name="external_contact" maxLength={200}/></label><label><input name="consent" type="checkbox" required/> Я согласен(-на) на обработку этого обращения по тексту версии request-v1</label><button className="btn">Опубликовать просьбу</button></form></section>}
+import { HelpForm } from "./help-form";
+
+export const metadata = {
+  robots: { index: false, follow: false },
+};
+
+export default async function Help({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string>>;
+}) {
+  const q = await searchParams;
+
+  return (
+    <section className="page-shell section">
+      <h1>Расскажите, какая помощь нужна</h1>
+
+      <p>
+        Это приватное обращение. Вы сами отмечаете срочность — это помогает
+        сортировке, но не является медицинской оценкой. По умолчанию ответ будет
+        в кабинете.
+      </p>
+
+      {q.error && (
+        <p role="alert">
+          Не удалось сохранить. Проверьте поля или повторите позже.
+        </p>
+      )}
+
+      <HelpForm />
+    </section>
+  );
+}

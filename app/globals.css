@@ -24,3 +24,23 @@ html[data-mercy-quick-exit-guard="1"] body{visibility:hidden}
 @media(min-width:640px){.page-shell{padding-left:24px;padding-right:24px}}
 @media(min-width:1024px){.page-shell{padding-left:40px;padding-right:40px}}
 @media(min-width:1440px){.page-shell{padding-left:56px;padding-right:56px}}
+.consent-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 10px;
+  font-weight: 400;
+}
+
+.consent-row input[type="checkbox"] {
+  width: auto;
+  margin-top: 3px;
+}
+
+.legal-page {
+  max-width: 900px;
+}
+
+.legal-page h2 {
+  margin-top: 32px;
+}
