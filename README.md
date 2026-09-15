@@ -2,6 +2,7 @@
 
 MVP приватной координации помощи. Требования: Node 22+, npm, внешний Supabase; Docker/Supabase CLI для integration.
 
+
 ## Запуск с нуля
 ```bash
 cp .env.example .env.local
