@@ -50,9 +50,27 @@ export function Chat({requestId,initial,userId}:{requestId:string;initial:ChatMe
       const {data}=await s.auth.getUser();
       if(!current||generation!==lifecycleGeneration||quickExitActive())return;
       if(!data.user){location.replace("/auth");return}
-      const {data:request,error}=await s.from("help_requests").select("id").eq("id",requestId).maybeSingle();
-      if(!current||generation!==lifecycleGeneration||quickExitActive())return;
-      if(error||!request){location.replace("/cabinet");return}
+      const { data: canAccess, error } = await s.rpc(
+        "can_access_case",
+        {
+          case_id: requestId,
+          uid: data.user.id,
+        }
+      );
+
+      if (
+        !current ||
+        generation !== lifecycleGeneration ||
+        quickExitActive()
+      ) {
+        return;
+      }
+
+      if (error || !canAccess) {
+        location.replace(`/cabinet/requests/${requestId}`);
+        return;
+      }
+
       connect();
     })()};
     addEventListener("pagehide",onPageHide);

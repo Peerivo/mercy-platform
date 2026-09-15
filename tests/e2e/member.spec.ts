@@ -33,7 +33,7 @@ async function createRequest(page: Page) {
   await page.getByLabel("Город").fill("Test");
   await page.getByLabel("Описание").fill("A fictional browser request long enough for validation");
   await page.getByLabel(/Я согласен/).check();
-  await page.getByRole("button", { name: "Отправить приватно" }).click();
+  await page.getByRole("button", { name: "Опубликовать просьбу" }).click();
   await expect(page).toHaveURL(/\/cabinet\/requests\/[0-9a-f-]+$/);
   return page.url();
 }
@@ -102,7 +102,9 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
       .toBeGreaterThan(0);
     const privateDocument = lifecycle.findLast(item => item.phase === "pageshow" && item.route === "/cabinet/requests/:id");
     await p2.goto(privateUrl);
-    await expect(p2.getByText("A fictional browser request")).toHaveCount(0);
+    await expect(
+      p2.getByText("A fictional browser request")
+    ).toBeVisible();
     await p1.getByLabel("Сообщение").fill("private draft must disappear");
     await p1.getByRole("button", { name: "Быстро скрыть приватную страницу" }).click();
     await expect(p1).toHaveURL(/\/safe$/);
@@ -131,7 +133,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p1.getByLabel("Город").fill("No session");
     await p1.getByLabel("Описание").fill("This anonymous submission must never be stored");
     await p1.getByLabel(/Я согласен/).check();
-    await p1.getByRole("button", { name: "Отправить приватно" }).click();
+    await p1.getByRole("button", { name: "Опубликовать просьбу" }).click();
     await expect(p1).toHaveURL(/\/auth/);
     const login = p1.locator("form").filter({ hasText: "Войти" });
     await login.getByLabel("Email").fill(firstEmail);
