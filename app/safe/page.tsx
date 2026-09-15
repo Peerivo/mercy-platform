@@ -1,2 +1,5 @@
-import {ReturnToService} from "@/components/return-to-service";
-export default function Safe(){return <section className="page-shell section"><h1>Нейтральная страница</h1><p>Локальная сессия интерфейса очищена. Это действие не удаляет историю браузера — при необходимости очистите её в настройках устройства.</p><div className="nav"><a className="btn secondary" href="https://www.wikipedia.org">Перейти к энциклопедии</a><ReturnToService/></div></section>}
+import { redirect } from "next/navigation";
+
+export default function SafePage() {
+  redirect("/auth");
+}
