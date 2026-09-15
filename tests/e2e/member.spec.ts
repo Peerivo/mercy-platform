@@ -24,6 +24,7 @@ async function register(page: Page, email: string) {
   await login.getByLabel("Пароль").fill(password);
   await login.getByRole("button", { name: "Войти" }).click();
   await expect(page).toHaveURL(/\/cabinet$/);
+  await expect(page.locator("main .page-shell")).toBeVisible();
 }
 
 async function createRequest(page: Page) {
@@ -204,6 +205,34 @@ test("the production guard protects a genuinely BFCache-eligible document", asyn
 test("callback rejects missing code and external next URL", async ({ page }) => {
   await page.goto("/auth/callback?next=https://example.com");
   await expect(page).toHaveURL(/\/auth\?error=callback$/);
+});
+
+test("main pages share the responsive shell and Peerivo icon", async ({ page }) => {
+  const widths = [
+    { width: 390, padding: "16px" },
+    { width: 768, padding: "24px" },
+    { width: 1200, padding: "40px" },
+    { width: 1600, padding: "56px" },
+  ];
+
+  for (const viewport of widths) {
+    await page.setViewportSize({ width: viewport.width, height: 900 });
+    await page.goto("/");
+    await expect(page.locator("header .page-shell")).toHaveCSS("padding-left", viewport.padding);
+    await expect(page.locator("main .page-shell").first()).toHaveCSS("padding-right", viewport.padding);
+    await expect(page.locator("header img")).toHaveAttribute("src", /icon\.svg/);
+    await expect.poll(() => page.locator('link[rel="icon"]').first().getAttribute("href"))
+      .toMatch(/icon\.svg/);
+    expect(await page.locator("main .page-shell").first().evaluate(element => element.getBoundingClientRect().width))
+      .toBeLessThanOrEqual(1280);
+  }
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  for (const route of ["/", "/nearby", "/auth", "/help", "/volunteer", "/safe"]) {
+    await page.goto(route);
+    await expect(page.locator("main .page-shell").first()).toBeVisible();
+    expect(await page.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
+  }
 });
 
 test("mobile specialist submits, ADMIN moderates, and only the safe public card is exposed", async ({ browser }) => {
