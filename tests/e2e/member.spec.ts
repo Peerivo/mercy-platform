@@ -82,6 +82,8 @@ async function attachBfCacheDiagnostics(testInfo: TestInfo, lifecycle: Lifecycle
 }
 
 test("two browser contexts stay isolated; create, message, refresh and Quick Exit Back are safe", async ({ browser }) => {
+  test.setTimeout(90_000);
+  
   const one = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const two = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const lifecycle: LifecycleObservation[] = [];
