@@ -32,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <span className="spacer" />
             <Link href="/nearby">Помощь рядом</Link>
+            <Link href="/requests">Просьбы</Link>
             <Link href="/help">Нужна помощь</Link>
             <Link href="/volunteer">Хочу помочь</Link>
             <Link href="/cabinet">Кабинет</Link>

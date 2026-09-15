@@ -52,3 +52,48 @@ export const helpRequestReportReviewSchema = z.object({
     .min(3)
     .max(500),
 });
+
+export const publicRequestSearchSchema = z.object({
+  category: z
+    .enum([
+      "",
+      "PREGNANCY",
+      "FAMILY",
+      "HOUSING",
+      "FOOD_GOODS",
+      "LEGAL_DOCUMENTS",
+      "WORK_EDUCATION",
+      "OTHER",
+    ])
+    .default(""),
+
+  city: z
+    .string()
+    .trim()
+    .max(120)
+    .default(""),
+
+  urgency: z
+    .enum([
+      "",
+      "NORMAL",
+      "SOON",
+      "URGENT",
+    ])
+    .default(""),
+
+  state: z
+    .enum([
+      "ACTIVE",
+      "COMPLETED",
+      "ALL",
+    ])
+    .default("ACTIVE"),
+
+  page: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .default(1),
+});
