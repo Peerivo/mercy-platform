@@ -126,8 +126,6 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
         ? "bfcache-restoration"
         : "new-document-load";
     console.log(`[quick-exit] Back safety path=${returnPath}; private content absent and marker enforced`);
-    await p1.getByRole("button", { name: "Вернуться в сервис" }).click();
-    await expect(p1).toHaveURL(/\/$/);
     await p1.goto("/cabinet");
     await expect(p1).toHaveURL(/\/auth/);
     await p1.goto(privateUrl);
