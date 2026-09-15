@@ -6,7 +6,8 @@ export default defineConfig({
   retries: 0,
   use: { baseURL: "http://127.0.0.1:3000", trace: "off", screenshot: "off" },
   webServer: {
-    command: "npm run build && node .next/standalone/server.js",
+    command:
+  "npm run build && node scripts/prepare-standalone.mjs && node .next/standalone/server.js",
     url: "http://127.0.0.1:3000/health",
     timeout: 180_000,
     reuseExistingServer: false,

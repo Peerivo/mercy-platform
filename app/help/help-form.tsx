@@ -104,7 +104,7 @@ export function HelpForm() {
         </span>
       </label>
 
-      <button className="btn">Отправить приватно</button>
+      <button className="btn">Опубликовать просьбу</button>
     </form>
   );
 }
