@@ -107,10 +107,9 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     ).toBeVisible();
     await p1.getByLabel("Сообщение").fill("private draft must disappear");
     await p1.getByRole("button", { name: "Быстро скрыть приватную страницу" }).click();
-    await expect(p1).toHaveURL(/\/safe$/);
-    await expect(p1.getByRole("button", { name: "Вернуться в сервис" })).toBeVisible();
+    await expect(p1).toHaveURL(/\/auth$/);
     await p1.goBack();
-    await expect(p1).toHaveURL(/\/safe$/);
+    await expect(p1).toHaveURL(/\/auth$/);
     await expect(p1.getByText("browser message")).toHaveCount(0);
     await expect(p1.getByText("private draft must disappear")).toHaveCount(0);
     await expect(p1.locator("textarea")).toHaveCount(0);
@@ -126,8 +125,14 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p1.goto("/cabinet");
     await expect(p1).toHaveURL(/\/auth/);
     await p1.goto(privateUrl);
-    await expect(p1).toHaveURL(/\/auth/);
-    await expect(p1.getByText("A fictional browser request")).toHaveCount(0);
+
+    await expect(
+      p1.getByText("A fictional browser request")
+    ).toBeVisible();
+
+    await expect(
+      p1.getByLabel("Сообщение")
+    ).toHaveCount(0);
     await p1.goto("/help");
     await p1.getByLabel("Страна").fill("XX");
     await p1.getByLabel("Город").fill("No session");
