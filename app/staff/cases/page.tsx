@@ -9,9 +9,5 @@ export default async function StaffCases({searchParams}:{searchParams:Promise<Re
     <Link href="/staff/volunteers">
       Предложения помощи
     </Link>
-
-    <Link href="/staff/specialists">
-      Модерация специалистов
-    </Link>
   </>
 )}</nav><h1>{isAdmin?"Очередь обращений":"Мои обращения в работе"}</h1><p className="muted">{isAdmin?"Только сведения для маршрутизации: содержание и переписка администратору автоматически не открываются.":"Откройте приватную карточку, чтобы продолжить чат или изменить статус."}</p><div className="grid">{rows.length?rows.map(r=><article className="card" key={r.id}><div className="case-heading"><div><h2>Обращение № {r.case_number}</h2><p>{r.category} · {r.city}</p><p><strong>{r.urgency}</strong> · {r.status} · <time dateTime={r.created_at}>{new Date(r.created_at).toLocaleDateString("ru-RU")}</time></p>{isAdmin&&<p>Координатор: {r.coordinator_name??"не назначен"}</p>}</div>{!isAdmin&&<Link className="btn" href={`/cabinet/requests/${r.id}`}>Открыть карточку</Link>}</div>{isAdmin&&<AssignmentForm caseId={r.id} currentCoordinatorId={r.coordinator_id??null} coordinators={coordinators}/>}</article>):<div className="card">{isAdmin?"Очередь пуста.":"Назначенных обращений пока нет."}</div>}</div><nav className="pagination" aria-label="Страницы">{page>1&&<Link className="btn secondary" href={`/staff/cases?page=${page-1}`}>Назад</Link>}<span>Страница {page}</span>{hasNext&&<Link className="btn secondary" href={`/staff/cases?page=${page+1}`}>Далее</Link>}</nav></section>}
