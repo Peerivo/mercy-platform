@@ -26,13 +26,14 @@ export default async function Case({
     data: { user },
   } = await s.auth.getUser();
 
-  const { data: r, error } = await s
-    .from("help_requests")
-    .select(
-      "id,case_number,category,country,city,description,urgency,status,created_at"
-    )
-    .eq("id", id)
-    .maybeSingle();
+  const { data: publicRows, error } = await s.rpc(
+    "get_public_help_request",
+    {
+      case_id: id,
+    }
+  );
+
+  const r = publicRows?.[0];
 
   if (error || !r) {
     notFound();
