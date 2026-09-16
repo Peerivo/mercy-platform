@@ -45,10 +45,10 @@ export default async function ReportsPage({
     redirect("/auth");
   }
 
-  const { data: isAdmin } =
-    await s.rpc("is_admin");
+  const { data: staffRole } =
+    await s.rpc("current_staff_role");
 
-  if (!isAdmin) {
+  if (staffRole !== "ADMIN") {
     redirect("/cabinet");
   }
 
