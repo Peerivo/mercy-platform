@@ -1,16 +1,12 @@
 -- Mercy no longer owns professional/medical provider workflows.
 -- Historical specialist migrations remain so clean database replay is deterministic;
--- this migration removes their resulting runtime objects.
+-- this migration removes their resulting Postgres runtime objects.
+-- The private Storage bucket is removed separately via the Storage API in GitHub Actions,
+-- because hosted Supabase forbids direct writes to storage.objects/storage.buckets.
 
--- Remove storage policies before deleting the now-unused private bucket.
+-- Remove obsolete Storage policies owned by the specialist contour.
 drop policy if exists qualification_storage_owner_insert on storage.objects;
 drop policy if exists qualification_storage_authorized_read on storage.objects;
-
-delete from storage.objects
-where bucket_id = 'qualification-documents';
-
-delete from storage.buckets
-where id = 'qualification-documents';
 
 -- Functions must be dropped before the view/types they depend on.
 drop function if exists public.get_published_specialist(uuid);
