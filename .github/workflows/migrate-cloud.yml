@@ -18,3 +18,50 @@ jobs:
         env: {PROJECT_REF: "${{ inputs.project_ref }}", SUPABASE_ACCESS_TOKEN: "${{ secrets.SUPABASE_ACCESS_TOKEN }}", SUPABASE_DB_PASSWORD: "${{ secrets.SUPABASE_DB_PASSWORD }}"}
       - run: supabase db push --include-all --password "$SUPABASE_DB_PASSWORD"
         env: {SUPABASE_ACCESS_TOKEN: "${{ secrets.SUPABASE_ACCESS_TOKEN }}", SUPABASE_DB_PASSWORD: "${{ secrets.SUPABASE_DB_PASSWORD }}"}
+      - name: Remove obsolete qualification documents bucket
+        shell: bash
+        env:
+          PROJECT_REF: "${{ inputs.project_ref }}"
+          SUPABASE_ACCESS_TOKEN: "${{ secrets.SUPABASE_ACCESS_TOKEN }}"
+        run: |
+          set -euo pipefail
+
+          keys_json="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            "https://api.supabase.com/v1/projects/${PROJECT_REF}/api-keys?reveal=true")"
+
+          server_key="$(printf '%s' "$keys_json" | jq -r '
+            ([.[] | select(.type == "secret") | .api_key]
+             + [.[] | select(.name == "service_role") | .api_key])
+            | .[0] // empty
+          ')"
+
+          test -n "$server_key" || {
+            echo "No secret/service_role key available for Storage API cleanup" >&2
+            exit 1
+          }
+
+          bucket_url="https://${PROJECT_REF}.supabase.co/storage/v1/bucket/qualification-documents"
+          status="$(curl --silent --show-error --output /tmp/mercy-bucket.json --write-out '%{http_code}' \
+            -H "apikey: ${server_key}" \
+            -H "Authorization: Bearer ${server_key}" \
+            "$bucket_url")"
+
+          if [ "$status" = "404" ]; then
+            echo "qualification-documents bucket is already absent"
+            exit 0
+          fi
+
+          if [ "$status" != "200" ]; then
+            cat /tmp/mercy-bucket.json >&2 || true
+            echo "Unexpected Storage API status while checking bucket: ${status}" >&2
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            -X DELETE \
+            -H "apikey: ${server_key}" \
+            -H "Authorization: Bearer ${server_key}" \
+            "$bucket_url" >/dev/null
+
+          echo "qualification-documents bucket removed through Storage API"
