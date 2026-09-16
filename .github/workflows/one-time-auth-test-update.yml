@@ -1,0 +1,72 @@
+name: One-time magic-link test update
+
+on:
+  push:
+    branches:
+      - feat/simple-auth-request-response
+    paths:
+      - .github/workflows/one-time-auth-test-update.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/simple-auth-request-response
+          fetch-depth: 0
+      - name: Replace password registration fixture with local magic-link flow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/e2e/member.spec.ts')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('const password = "Browser-password-42!";\n', '')
+          start = text.index('async function register(page: Page, email: string) {')
+          end = text.index('async function createRequest(page: Page) {', start)
+          replacement = r'''async function getLatestMagicLink(email: string) {
+            const mailbox = encodeURIComponent(email.split("@")[0]);
+            let link = "";
+            await expect.poll(async () => {
+              const response = await fetch(`http://127.0.0.1:54324/api/v1/mailbox/${mailbox}/latest/source`);
+              if (!response.ok) return "";
+              const source = (await response.text())
+                .replace(/=\r?\n/g, "")
+                .replace(/=3D/gi, "=")
+                .replace(/=26/gi, "&")
+                .replace(/&amp;/g, "&");
+              const match = source.match(/http:\/\/127\.0\.0\.1:54321\/auth\/v1\/verify\?[^\s<>"']+/);
+              link = match?.[0] ?? "";
+              return link;
+            }, { timeout: 15_000 }).not.toBe("");
+            return link;
+          }
+
+          async function register(page: Page, email: string) {
+            await page.goto("/auth");
+            await page.getByLabel("Email").fill(email);
+            await page.getByRole("button", { name: "Получить ссылку для входа" }).click();
+            await expect(page).toHaveURL(/\/auth\?sent=1/);
+            await expect(page.getByText("Письмо отправлено")).toBeVisible();
+            const magicLink = await getLatestMagicLink(email);
+            await page.goto(magicLink);
+            await expect(page).toHaveURL(/\/cabinet$/);
+            await expect(page.locator("main .page-shell")).toBeVisible();
+          }
+
+          '''
+          path.write_text(text[:start] + replacement + text[end:], encoding='utf-8')
+          Path('.github/workflows/one-time-auth-test-update.yml').unlink()
+          PY
+      - name: Commit updated browser fixture
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/e2e/member.spec.ts .github/workflows/one-time-auth-test-update.yml
+          git commit -m "test: exercise passwordless email login"
+          git push origin HEAD:feat/simple-auth-request-response
