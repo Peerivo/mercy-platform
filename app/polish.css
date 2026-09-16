@@ -1,0 +1,81 @@
+.btn {
+  border-radius: 999px;
+}
+
+.page-shell,
+.container {
+  padding-inline: 20px;
+}
+
+@media (min-width: 640px) {
+  .page-shell,
+  .container {
+    padding-inline: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .page-shell,
+  .container {
+    padding-inline: 40px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .page-shell,
+  .container {
+    padding-inline: 56px;
+  }
+}
+
+.hero .nav {
+  margin-top: 28px;
+}
+
+.hero .nav .btn {
+  min-width: 150px;
+}
+
+.section > form.card > .nav {
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+article.card h2 {
+  font-size: clamp(1.2rem, 2vw, 1.55rem);
+}
+
+.nearby-empty {
+  grid-column: 1 / -1;
+}
+
+.nearby-actions {
+  margin: 18px 0 8px;
+}
+
+.site-footer-inner > div > p,
+.footer-safety {
+  font-weight: 400;
+}
+
+@media (max-width: 720px) {
+  .page-shell,
+  .container {
+    padding-inline: 16px;
+  }
+
+  .hero .nav {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .hero .nav .btn,
+  .section > form.card > .nav .btn {
+    width: 100%;
+  }
+
+  .section > form.card > .nav {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
