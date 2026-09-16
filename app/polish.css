@@ -129,6 +129,11 @@ article.card h2 {
   text-underline-offset: 3px;
 }
 
+.auth-help-link a:hover,
+.auth-help-link a:focus-visible {
+  text-decoration-thickness: 2px;
+}
+
 .request-response {
   max-width: 760px;
   margin-top: 24px;
