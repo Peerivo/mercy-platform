@@ -3,25 +3,37 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { quickExitGuard } from "../../lib/quick-exit-guard";
 
-const password = "Browser-password-42!";
 type LifecycleObservation = { documentId: string; persisted: boolean; phase: "pagehide" | "pageshow"; route: string };
 type BfCacheFailure = { reason?: string; type?: string };
 type BfCacheEvent = { frameId: string; loaderId: string; reasons: BfCacheFailure[] };
 const bfcacheDiagnosticsPath = path.join(process.cwd(), "test-results", "bfcache-diagnostics.json");
 
+async function getLatestMagicLink(email: string) {
+  const mailbox = encodeURIComponent(email.split("@")[0]);
+  let link = "";
+  await expect.poll(async () => {
+    const response = await fetch(`http://127.0.0.1:54324/api/v1/mailbox/${mailbox}/latest/source`);
+    if (!response.ok) return "";
+    const source = (await response.text())
+      .replace(/=\r?\n/g, "")
+      .replace(/=3D/gi, "=")
+      .replace(/=26/gi, "&")
+      .replace(/&amp;/g, "&");
+    const match = source.match(/http:\/\/127\.0\.0\.1:54321\/auth\/v1\/verify\?[^\s<>"']+/);
+    link = match?.[0] ?? "";
+    return link;
+  }, { timeout: 15_000 }).not.toBe("");
+  return link;
+}
+
 async function register(page: Page, email: string) {
   await page.goto("/auth");
-  const form = page.locator("form").filter({ hasText: "Создать аккаунт" });
-  await form.getByLabel("Email").fill(email);
-  await form.getByLabel("Пароль от 10 символов").fill(password);
-  await form.getByRole("button", { name: "Зарегистрироваться" }).click();
-  // Wait for the signUp action to complete before navigating away or signing in.
-  await expect(page).toHaveURL(/\/auth\?check=email$/);
-  await page.goto("/auth");
-  const login = page.locator("form").filter({ hasText: "Войти" });
-  await login.getByLabel("Email").fill(email);
-  await login.getByLabel("Пароль").fill(password);
-  await login.getByRole("button", { name: "Войти" }).click();
+  await page.getByLabel("Email").fill(email);
+  await page.getByRole("button", { name: "Получить ссылку для входа" }).click();
+  await expect(page).toHaveURL(/\/auth\?sent=1/);
+  await expect(page.getByText("Письмо отправлено")).toBeVisible();
+  const magicLink = await getLatestMagicLink(email);
+  await page.goto(magicLink);
   await expect(page).toHaveURL(/\/cabinet$/);
   await expect(page.locator("main .page-shell")).toBeVisible();
 }
