@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   assignmentSchema,
   caseStatusSchema,
+  feedbackSchema,
   offerSchema,
+  requestResponseSchema,
   requestSchema,
   staffPageSchema,
   volunteerReviewSchema,
@@ -68,6 +70,50 @@ describe("volunteer offer validation", () => {
         reason: "Проверено",
       }).success
     ).toBe(true);
+  });
+});
+
+describe("request response validation", () => {
+  const valid = {
+    caseId: "00000000-0000-4000-8000-000000000001",
+    message: "Могу помочь сегодня вечером.",
+    contactMethod: "Telegram @helper",
+    consent: true,
+  };
+
+  it("accepts a private response with explicit consent", () => {
+    expect(requestResponseSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("rejects missing consent and short contact data", () => {
+    expect(
+      requestResponseSchema.safeParse({ ...valid, consent: false }).success
+    ).toBe(false);
+    expect(
+      requestResponseSchema.safeParse({ ...valid, contactMethod: "x" }).success
+    ).toBe(false);
+  });
+});
+
+describe("feedback validation", () => {
+  it("allows anonymous feedback without reply email", () => {
+    expect(
+      feedbackSchema.safeParse({
+        message: "Регистрация была непонятной",
+        replyEmail: "",
+        pagePath: "/auth",
+      }).success
+    ).toBe(true);
+  });
+
+  it("validates optional reply email", () => {
+    expect(
+      feedbackSchema.safeParse({
+        message: "Есть проблема",
+        replyEmail: "not-an-email",
+        pagePath: "",
+      }).success
+    ).toBe(false);
   });
 });
 
