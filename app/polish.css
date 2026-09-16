@@ -118,6 +118,17 @@ article.card h2 {
   font-size: 0.9rem;
 }
 
+.auth-help-link {
+  margin: 10px 0 0;
+  font-weight: 700;
+}
+
+.auth-help-link a {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .request-response {
   max-width: 760px;
   margin-top: 24px;
