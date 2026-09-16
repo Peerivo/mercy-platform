@@ -163,13 +163,20 @@ describe.sequential("direct help responses and public feedback", () => {
     });
     expect(ownerAttempt.error?.message).toContain("owner cannot respond");
 
-    const consent = await clients["response-helper"]
+    const service = createClient(url, serviceKey, {
+      auth: { persistSession: false },
+    });
+    const consent = await service
       .from("consents")
-      .select("kind,help_response_id")
+      .select("user_id,kind,help_response_id")
       .eq("help_response_id", responseId);
     expect(consent.error).toBeNull();
     expect(consent.data).toEqual([
-      { kind: "HELP_RESPONSE", help_response_id: responseId },
+      {
+        user_id: ids["response-helper"],
+        kind: "HELP_RESPONSE",
+        help_response_id: responseId,
+      },
     ]);
   });
 
