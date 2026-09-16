@@ -118,6 +118,11 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await expect(
       p2.getByText("A fictional browser request")
     ).toBeVisible();
+    await p2.getByLabel("Чем вы можете помочь").fill("Могу привезти продукты сегодня вечером");
+    await p2.getByLabel("Как с вами связаться").fill("Telegram @browser-helper");
+    await p2.getByLabel(/Я согласен.*сообщение/).check();
+    await p2.getByRole("button", { name: "Отправить отклик" }).click();
+    await expect(p2.getByText(/Отклик отправлен/)).toBeVisible();
     await p1.getByLabel("Сообщение").fill("private draft must disappear");
     await p1.getByRole("button", { name: "Быстро скрыть приватную страницу" }).click();
     await expect(p1).toHaveURL(/\/auth$/);
