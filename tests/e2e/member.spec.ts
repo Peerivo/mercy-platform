@@ -9,17 +9,13 @@ type BfCacheEvent = { frameId: string; loaderId: string; reasons: BfCacheFailure
 const bfcacheDiagnosticsPath = path.join(process.cwd(), "test-results", "bfcache-diagnostics.json");
 
 async function getLatestMagicLink(email: string) {
-  const mailbox = encodeURIComponent(email.split("@")[0]);
+  const query = encodeURIComponent(`to:"${email}"`);
   let link = "";
   await expect.poll(async () => {
-    const response = await fetch(`http://127.0.0.1:54324/api/v1/mailbox/${mailbox}/latest/source`);
+    const response = await fetch(`http://127.0.0.1:54324/view/latest.html?query=${query}`);
     if (!response.ok) return "";
-    const source = (await response.text())
-      .replace(/=\r?\n/g, "")
-      .replace(/=3D/gi, "=")
-      .replace(/=26/gi, "&")
-      .replace(/&amp;/g, "&");
-    const match = source.match(/http:\/\/127\.0\.0\.1:54321\/auth\/v1\/verify\?[^\s<>"']+/);
+    const html = (await response.text()).replace(/&amp;/g, "&");
+    const match = html.match(/http:\/\/127\.0\.0\.1:54321\/auth\/v1\/verify\?[^\s<>"']+/);
     link = match?.[0] ?? "";
     return link;
   }, { timeout: 15_000 }).not.toBe("");
