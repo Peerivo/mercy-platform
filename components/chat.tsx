@@ -50,13 +50,14 @@ export function Chat({requestId,initial,userId}:{requestId:string;initial:ChatMe
       const {data}=await s.auth.getUser();
       if(!current||generation!==lifecycleGeneration||quickExitActive())return;
       if(!data.user){location.replace("/auth");return}
-      const { data: canAccess, error } = await s.rpc(
-        "can_access_case",
-        {
-          case_id: requestId,
-          uid: data.user.id,
-        }
-      );
+
+      // Re-check access through the same help_requests RLS policy used by the
+      // server page. The internal authorization helper stays out of the Data API.
+      const { data: visibleCase, error } = await s
+        .from("help_requests")
+        .select("id")
+        .eq("id",requestId)
+        .maybeSingle();
 
       if (
         !current ||
@@ -66,7 +67,7 @@ export function Chat({requestId,initial,userId}:{requestId:string;initial:ChatMe
         return;
       }
 
-      if (error || !canAccess) {
+      if (error || !visibleCase) {
         location.replace(`/cabinet/requests/${requestId}`);
         return;
       }
