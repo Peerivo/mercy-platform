@@ -76,6 +76,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div>
               <strong>Язык милосердия</strong>
               <p>Добровольная и практическая помощь людей людям.</p>
+              <p>
+                <Link href="/feedback">Обратная связь</Link>
+              </p>
             </div>
             <p className="footer-safety">
               При непосредственной угрозе жизни или безопасности обращайтесь в местную экстренную службу.
