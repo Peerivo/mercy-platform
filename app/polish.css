@@ -2,6 +2,32 @@
   border-radius: 999px;
 }
 
+.page-shell,
+.container {
+  padding-inline: 20px;
+}
+
+@media (min-width: 640px) {
+  .page-shell,
+  .container {
+    padding-inline: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .page-shell,
+  .container {
+    padding-inline: 40px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .page-shell,
+  .container {
+    padding-inline: 56px;
+  }
+}
+
 .hero .nav {
   margin-top: 28px;
 }
@@ -33,6 +59,11 @@ article.card h2 {
 }
 
 @media (max-width: 720px) {
+  .page-shell,
+  .container {
+    padding-inline: 16px;
+  }
+
   .hero .nav {
     display: grid;
     grid-template-columns: 1fr;
