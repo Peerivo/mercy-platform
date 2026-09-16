@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(32);
+select plan(39);
 select has_table('public','help_requests','schema reproduced');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.messages'::regclass),'messages: RLS enabled');
@@ -34,5 +34,12 @@ select ok(to_regclass('public.qualification_documents') is null,'qualification d
 select ok(to_regclass('public.published_specialists') is null,'published specialist projection is removed from Mercy');
 select ok(to_regprocedure('public.search_specialists(text,text,text,text,boolean,integer,integer)') is null,'specialist search RPC is removed from Mercy');
 select ok(to_regprocedure('public.save_specialist_profile(jsonb)') is null,'specialist write RPC is removed from Mercy');
+select has_table('public','help_request_responses','direct help responses exist');
+select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_request_responses'::regclass),'help responses use RLS');
+select ok(not has_table_privilege('authenticated','public.help_request_responses','INSERT'),'response identity and consent cannot bypass RPC');
+select ok(has_function_privilege('authenticated','public.respond_to_help_request(uuid,jsonb,text)','EXECUTE') and not has_function_privilege('anon','public.respond_to_help_request(uuid,jsonb,text)','EXECUTE'),'request response requires authenticated user');
+select has_table('public','feedback_messages','feedback inbox exists');
+select ok(not has_table_privilege('anon','public.feedback_messages','SELECT') and not has_table_privilege('authenticated','public.feedback_messages','SELECT'),'feedback inbox is not directly readable');
+select ok(has_function_privilege('anon','public.submit_feedback(text,text,text)','EXECUTE') and has_function_privilege('authenticated','public.submit_feedback(text,text,text)','EXECUTE'),'feedback submission is available before and after login');
 select * from finish();
 rollback;
