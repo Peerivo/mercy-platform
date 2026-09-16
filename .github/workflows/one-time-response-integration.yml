@@ -1,0 +1,97 @@
+name: One-time response integration update
+
+on:
+  push:
+    branches:
+      - feat/simple-auth-request-response
+    paths:
+      - .github/workflows/one-time-response-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/simple-auth-request-response
+          fetch-depth: 0
+      - name: Add response and feedback integration tests
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/supabase.integration.test.ts')
+          text = path.read_text(encoding='utf-8')
+          marker = '  test("message nonce is idempotent, immutable, and scoped to its author", async () => {'
+          block = r'''  test("direct help response stays private to responder, request owner and assigned coordinator", async () => {
+            const directInsert = await clients.u2.from("help_request_responses").insert({
+              help_request_id: case1,
+              responder_id: ids.u2,
+              message: "forged direct insert must fail",
+              contact_method: "forged",
+            });
+            expect(directInsert.error).not.toBeNull();
+
+            const created = await clients.u2.rpc("respond_to_help_request", {
+              case_id: case1,
+              payload: {
+                message: "I can help with this fictional request today",
+                contact_method: "Telegram @integration-helper",
+              },
+              consent_version: "help-response-v1",
+            });
+            expect(created.error).toBeNull();
+            const responseId = created.data as string;
+
+            for (const actor of ["u2", "u1", "c1"]) {
+              const rows = await clients[actor].from("help_request_responses").select("id,message,contact_method").eq("id", responseId);
+              expect(rows.error).toBeNull();
+              expect(rows.data).toHaveLength(1);
+            }
+            expect((await clients.u3.from("help_request_responses").select("id").eq("id", responseId)).data).toEqual([]);
+            expect((await clients.a1.from("help_request_responses").select("id").eq("id", responseId)).data).toEqual([]);
+
+            const ownerAttempt = await clients.u1.rpc("respond_to_help_request", {
+              case_id: case1,
+              payload: { message: "owner cannot answer own request", contact_method: "none" },
+              consent_version: "help-response-v1",
+            });
+            expect(ownerAttempt.error?.message).toContain("owner cannot respond");
+            expect((await clients.u2.from("consents").select("kind,help_response_id").eq("help_response_id", responseId)).data)
+              .toEqual([{ kind: "HELP_RESPONSE", help_response_id: responseId }]);
+          });
+
+          test("anonymous feedback is accepted without exposing the feedback inbox", async () => {
+            const anon = createClient(url, anonKey, { auth: { persistSession: false } });
+            const sent = await anon.rpc("submit_feedback", {
+              message_text: "Registration felt too complicated",
+              reply_email: "feedback@example.invalid",
+              page_path: "/auth",
+            });
+            expect(sent.error).toBeNull();
+            expect(typeof sent.data).toBe("string");
+            expect((await anon.from("feedback_messages").select("*")).error).not.toBeNull();
+
+            const svc = createClient(url, serviceKey, { auth: { persistSession: false } });
+            const stored = await svc.from("feedback_messages").select("message,page_path").eq("id", sent.data).single();
+            expect(stored.error).toBeNull();
+            expect(stored.data).toEqual({ message: "Registration felt too complicated", page_path: "/auth" });
+          });
+
+'''
+          if marker not in text:
+            raise SystemExit('target marker not found')
+          path.write_text(text.replace(marker, block + marker, 1), encoding='utf-8')
+          Path('.github/workflows/one-time-response-integration.yml').unlink()
+          PY
+      - name: Commit integration coverage
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/supabase.integration.test.ts .github/workflows/one-time-response-integration.yml
+          git commit -m "test: cover direct responses and feedback"
+          git push origin HEAD:feat/simple-auth-request-response
