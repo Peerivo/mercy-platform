@@ -63,6 +63,9 @@ export default async function Auth({
         <p className="muted auth-privacy-note">
           Для входа нужен только email. Имя, телефон и адрес при регистрации не требуются.
         </p>
+        <p className="auth-help-link">
+          <a href="/feedback">Не получается войти? Напишите нам</a>
+        </p>
       </div>
     </section>
   );
