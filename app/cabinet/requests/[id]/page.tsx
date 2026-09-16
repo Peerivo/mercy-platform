@@ -31,6 +31,11 @@ type OwnResponse = {
   contact_method: string;
 };
 
+type PrivateRequestAccess = {
+  id: string;
+  owner_id: string;
+};
+
 export default async function Case({
   params,
 }: {
@@ -62,11 +67,12 @@ export default async function Case({
   let ownResponse: OwnResponse | null = null;
 
   if (user) {
-    const [{ data: allowed }, ownResponseResult] = await Promise.all([
-      s.rpc("can_access_case", {
-        case_id: id,
-        uid: user.id,
-      }),
+    const [privateAccessResult, ownResponseResult] = await Promise.all([
+      s
+        .from("help_requests")
+        .select("id,owner_id")
+        .eq("id", id)
+        .maybeSingle(),
       s
         .from("help_request_responses")
         .select("message,contact_method")
@@ -75,20 +81,24 @@ export default async function Case({
         .maybeSingle(),
     ]);
 
-    canAccessPrivate = allowed === true;
+    const privateRequest =
+      privateAccessResult.data && !privateAccessResult.error
+        ? (privateAccessResult.data as PrivateRequestAccess)
+        : null;
+
+    // The help_requests SELECT policy is the authorization source of truth:
+    // only the owner or the active coordinator can see this row.
+    canAccessPrivate = privateRequest !== null;
+    isOwner = privateRequest?.owner_id === user.id;
+    isCoordinator = canAccessPrivate && !isOwner;
+
     ownResponse =
       ownResponseResult.data && !ownResponseResult.error
         ? (ownResponseResult.data as OwnResponse)
         : null;
 
     if (canAccessPrivate) {
-      const [
-        messagesResult,
-        stepsResult,
-        coordinatorResult,
-        ownershipResult,
-        responsesResult,
-      ] = await Promise.all([
+      const [messagesResult, stepsResult, responsesResult] = await Promise.all([
         s
           .from("messages")
           .select("id,body,created_at,author_id,client_nonce")
@@ -101,16 +111,6 @@ export default async function Case({
           .select("id,title,responsible,due_at,status,organization_id")
           .eq("help_request_id", id)
           .order("created_at"),
-        s.rpc("is_active_coordinator", {
-          case_id: id,
-          uid: user.id,
-        }),
-        s
-          .from("help_requests")
-          .select("id")
-          .eq("id", id)
-          .eq("owner_id", user.id)
-          .maybeSingle(),
         s
           .from("help_request_responses")
           .select("id,message,contact_method,status,created_at")
@@ -122,9 +122,6 @@ export default async function Case({
       messages = (messagesResult.data ?? []) as ChatMessage[];
       steps = (stepsResult.data ?? []) as SupportStep[];
       responses = (responsesResult.data ?? []) as HelpResponse[];
-      isCoordinator = coordinatorResult.data === true;
-      isOwner =
-        ownershipResult.data !== null && ownershipResult.error === null;
     }
   }
 
