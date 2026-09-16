@@ -1,7 +1,8 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(39);
+select plan(46);
 select has_table('public','help_requests','schema reproduced');
+select has_column('public','help_requests','published_at','help requests have explicit publication state');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.messages'::regclass),'messages: RLS enabled');
 select has_index('public','service_locations','service_locations_geo_idx','geo index exists');
@@ -25,6 +26,16 @@ select ok(not has_function_privilege('anon','public.current_staff_role()','EXECU
 select ok(not has_function_privilege('anon','public.enforce_message()','EXECUTE') and not has_function_privilege('authenticated','public.enforce_message()','EXECUTE'),'message trigger is not API callable');
 select ok(not has_function_privilege('anon','public.enforce_catalog_review()','EXECUTE') and not has_function_privilege('authenticated','public.enforce_catalog_review()','EXECUTE'),'catalog trigger is not API callable');
 select ok(has_function_privilege('anon','public.nearby_service_locations(double precision,double precision,integer,integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.nearby_service_locations(double precision,double precision,integer,integer,integer)','EXECUTE'),'public geo RPC remains callable');
+select ok(has_function_privilege('anon','public.get_public_help_request(uuid)','EXECUTE') and has_function_privilege('authenticated','public.get_public_help_request(uuid)','EXECUTE'),'public request detail RPC remains callable');
+select ok(has_function_privilege('anon','public.list_public_help_requests(text,text,text,text,integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.list_public_help_requests(text,text,text,text,integer,integer)','EXECUTE'),'public request list RPC remains callable');
+select ok(lower(pg_get_functiondef('public.get_public_help_request(uuid)'::regprocedure)) like '%published_at is not null%','public request detail excludes unpublished rows');
+select ok(lower(pg_get_functiondef('public.list_public_help_requests(text,text,text,text,integer,integer)'::regprocedure)) like '%published_at is not null%','public request list excludes unpublished rows');
+select ok(lower(pg_get_functiondef('public.respond_to_help_request(uuid,jsonb,text)'::regprocedure)) like '%published_at is not null%','responses cannot target unpublished requests');
+select ok(
+  lower(pg_get_functiondef('public.is_admin(uuid)'::regprocedure)) like '%uid = auth.uid()%'
+  and lower(pg_get_functiondef('public.is_active_coordinator(uuid,uuid)'::regprocedure)) like '%uid = auth.uid()%'
+  and lower(pg_get_functiondef('public.can_access_case(uuid,uuid)'::regprocedure)) like '%uid = auth.uid()%'
+,'security-definer helpers bind explicit uid to the caller');
 create function public.pgtap_default_privilege_probe() returns boolean language sql as $$select true$$;
 select ok(not has_function_privilege('anon','public.pgtap_default_privilege_probe()','EXECUTE') and not has_function_privilege('authenticated','public.pgtap_default_privilege_probe()','EXECUTE'),'new functions do not acquire API execution by default');
 select isnt((select relreplident from pg_class where oid='public.messages'::regclass),'f','messages do not expose FULL old rows on DELETE');
