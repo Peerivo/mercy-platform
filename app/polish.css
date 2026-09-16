@@ -58,6 +58,17 @@ article.card h2 {
   font-weight: 400;
 }
 
+.consent-row a {
+  color: var(--accent-strong);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+
+.consent-row a:hover {
+  text-decoration-thickness: 2px;
+}
+
 @media (max-width: 720px) {
   .page-shell,
   .container {
