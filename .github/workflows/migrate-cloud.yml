@@ -47,7 +47,10 @@ jobs:
             -H "Authorization: Bearer ${server_key}" \
             "$bucket_url")"
 
-          if [ "$status" = "404" ]; then
+          api_code="$(jq -r '.code // empty' /tmp/mercy-bucket.json 2>/dev/null || true)"
+          api_status="$(jq -r '.statusCode // empty' /tmp/mercy-bucket.json 2>/dev/null || true)"
+
+          if [ "$status" = "404" ] || [ "$api_code" = "NoSuchBucket" ] || [ "$api_status" = "404" ]; then
             echo "qualification-documents bucket is already absent"
             exit 0
           fi
@@ -58,10 +61,25 @@ jobs:
             exit 1
           fi
 
-          curl --fail --silent --show-error \
+          delete_status="$(curl --silent --show-error --output /tmp/mercy-bucket-delete.json --write-out '%{http_code}' \
             -X DELETE \
             -H "apikey: ${server_key}" \
             -H "Authorization: Bearer ${server_key}" \
-            "$bucket_url" >/dev/null
+            "$bucket_url")"
 
-          echo "qualification-documents bucket removed through Storage API"
+          delete_code="$(jq -r '.code // empty' /tmp/mercy-bucket-delete.json 2>/dev/null || true)"
+          delete_api_status="$(jq -r '.statusCode // empty' /tmp/mercy-bucket-delete.json 2>/dev/null || true)"
+
+          if [[ "$delete_status" =~ ^2 ]]; then
+            echo "qualification-documents bucket removed through Storage API"
+            exit 0
+          fi
+
+          if [ "$delete_status" = "404" ] || [ "$delete_code" = "NoSuchBucket" ] || [ "$delete_api_status" = "404" ]; then
+            echo "qualification-documents bucket became absent during cleanup"
+            exit 0
+          fi
+
+          cat /tmp/mercy-bucket-delete.json >&2 || true
+          echo "Unexpected Storage API status while deleting bucket: ${delete_status}" >&2
+          exit 1
