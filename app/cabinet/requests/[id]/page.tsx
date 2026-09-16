@@ -7,6 +7,7 @@ import { getPublicRequestStatus } from "@/lib/request-status";
 import type { ChatMessage } from "@/lib/chat-history";
 import { ShareRequest } from "@/components/share-request";
 import { ReportRequest } from "@/components/report-request";
+import { RequestResponse } from "@/components/request-response";
 
 type SupportStep = {
   id: string;
@@ -15,6 +16,19 @@ type SupportStep = {
   due_at: string | null;
   status: string;
   organization_id: string | null;
+};
+
+type HelpResponse = {
+  id: string;
+  message: string;
+  contact_method: string;
+  status: string;
+  created_at: string;
+};
+
+type OwnResponse = {
+  message: string;
+  contact_method: string;
 };
 
 export default async function Case({
@@ -29,13 +43,9 @@ export default async function Case({
     data: { user },
   } = await s.auth.getUser();
 
-  // Публичные безопасные данные просьбы.
-  const { data: publicRows, error } = await s.rpc(
-    "get_public_help_request",
-    {
-      case_id: id,
-    }
-  );
+  const { data: publicRows, error } = await s.rpc("get_public_help_request", {
+    case_id: id,
+  });
 
   const r = publicRows?.[0];
 
@@ -46,17 +56,30 @@ export default async function Case({
   let canAccessPrivate = false;
   let isCoordinator = false;
   let isOwner = false;
-
   let messages: ChatMessage[] = [];
   let steps: SupportStep[] = [];
+  let responses: HelpResponse[] = [];
+  let ownResponse: OwnResponse | null = null;
 
   if (user) {
-    const { data: allowed } = await s.rpc("can_access_case", {
-      case_id: id,
-      uid: user.id,
-    });
+    const [{ data: allowed }, ownResponseResult] = await Promise.all([
+      s.rpc("can_access_case", {
+        case_id: id,
+        uid: user.id,
+      }),
+      s
+        .from("help_request_responses")
+        .select("message,contact_method")
+        .eq("help_request_id", id)
+        .eq("responder_id", user.id)
+        .maybeSingle(),
+    ]);
 
     canAccessPrivate = allowed === true;
+    ownResponse =
+      ownResponseResult.data && !ownResponseResult.error
+        ? (ownResponseResult.data as OwnResponse)
+        : null;
 
     if (canAccessPrivate) {
       const [
@@ -64,72 +87,57 @@ export default async function Case({
         stepsResult,
         coordinatorResult,
         ownershipResult,
+        responsesResult,
       ] = await Promise.all([
         s
           .from("messages")
-          .select(
-            "id,body,created_at,author_id,client_nonce"
-          )
+          .select("id,body,created_at,author_id,client_nonce")
           .eq("help_request_id", id)
           .order("created_at")
           .order("id")
           .limit(100),
-
         s
           .from("support_steps")
-          .select(
-            "id,title,responsible,due_at,status,organization_id"
-          )
+          .select("id,title,responsible,due_at,status,organization_id")
           .eq("help_request_id", id)
           .order("created_at"),
-
         s.rpc("is_active_coordinator", {
           case_id: id,
           uid: user.id,
         }),
-
-        // Важно: отдельно определяем владельца.
-        // can_access_case=true может быть и у координатора.
         s
           .from("help_requests")
           .select("id")
           .eq("id", id)
           .eq("owner_id", user.id)
           .maybeSingle(),
+        s
+          .from("help_request_responses")
+          .select("id,message,contact_method,status,created_at")
+          .eq("help_request_id", id)
+          .eq("status", "PENDING")
+          .order("created_at", { ascending: false }),
       ]);
 
-      messages =
-        (messagesResult.data ?? []) as ChatMessage[];
-
-      steps =
-        (stepsResult.data ?? []) as SupportStep[];
-
-      isCoordinator =
-        coordinatorResult.data === true;
-
+      messages = (messagesResult.data ?? []) as ChatMessage[];
+      steps = (stepsResult.data ?? []) as SupportStep[];
+      responses = (responsesResult.data ?? []) as HelpResponse[];
+      isCoordinator = coordinatorResult.data === true;
       isOwner =
-        ownershipResult.data !== null &&
-        ownershipResult.error === null;
+        ownershipResult.data !== null && ownershipResult.error === null;
     }
   }
 
-  const publicStatus = getPublicRequestStatus(
-    r.status
-  );
+  const publicStatus = getPublicRequestStatus(r.status);
+  const completed = r.status === "RESOLVED" || r.status === "CLOSED";
 
   return (
     <section className="container section">
       <div className="nav">
         <h1>Просьба № {r.case_number}</h1>
-
-        {isCoordinator && (
-          <a href="/staff/cases">
-            К назначенным обращениям
-          </a>
-        )}
+        {isCoordinator && <a href="/staff/cases">К назначенным обращениям</a>}
       </div>
 
-      {/* ПУБЛИЧНАЯ ЧАСТЬ */}
       <div className="card">
         <p>
           <strong>{r.category}</strong>
@@ -142,70 +150,80 @@ export default async function Case({
         </p>
 
         <p>
-          <strong>Статус:</strong>{" "}
-          {publicStatus}
+          <strong>Статус:</strong> {publicStatus}
         </p>
 
         <p>{r.description}</p>
-        
-        <ShareRequest caseNumber={r.case_number} />
 
+        <ShareRequest caseNumber={r.case_number} />
         <ReportRequest caseId={id} />
 
         {isOwner && r.status !== "CLOSED" && (
           <OwnerRequestActions caseId={id} />
         )}
 
-        {isCoordinator && (
-          <StatusForm
-            caseId={id}
-            status={r.status}
-          />
-        )}
+        {isCoordinator && <StatusForm caseId={id} status={r.status} />}
       </div>
 
-      {/* ПРИВАТНАЯ ЧАСТЬ */}
+      {!completed && !isOwner && !isCoordinator && (
+        <RequestResponse
+          caseId={id}
+          signedIn={Boolean(user)}
+          existing={ownResponse}
+        />
+      )}
+
       {canAccessPrivate && user ? (
         <>
+          {(isOwner || isCoordinator) && (
+            <section className="response-list-section">
+              <h2>Отклики на просьбу</h2>
+              <div className="grid">
+                {responses.length ? (
+                  responses.map((response) => (
+                    <article className="card" key={response.id}>
+                      <p>{response.message}</p>
+                      <p>
+                        <strong>Связаться:</strong> {response.contact_method}
+                      </p>
+                      <p className="muted">
+                        {new Date(response.created_at).toLocaleString("ru-RU")}
+                      </p>
+                    </article>
+                  ))
+                ) : (
+                  <div className="empty-state">
+                    <h3>Пока нет откликов</h3>
+                    <p>Когда кто-то предложит помощь, отклик появится здесь.</p>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
           <h2>Совместный план поддержки</h2>
 
           <div className="grid">
             {steps.length ? (
               steps.map((x) => (
-                <div
-                  className="card"
-                  key={x.id}
-                >
+                <div className="card" key={x.id}>
                   <strong>{x.title}</strong>
-
                   <p>
-                    {x.responsible} ·{" "}
-                    {x.status}
-                    {x.due_at
-                      ? ` · до ${x.due_at}`
-                      : ""}
+                    {x.responsible} · {x.status}
+                    {x.due_at ? ` · до ${x.due_at}` : ""}
                   </p>
                 </div>
               ))
             ) : (
-              <div className="card">
-                Координатор пока не добавил
-                шаги.
-              </div>
+              <div className="card">Координатор пока не добавил шаги.</div>
             )}
           </div>
 
-          <Chat
-            requestId={id}
-            initial={messages}
-            userId={user.id}
-          />
+          <Chat requestId={id} initial={messages} userId={user.id} />
         </>
       ) : (
         <p>
-          Внутренний план и приватный чат
-          доступны только автору обращения и
-          назначенному координатору.
+          Внутренний план и приватный чат доступны только автору обращения и назначенному координатору.
         </p>
       )}
     </section>

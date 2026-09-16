@@ -58,6 +58,12 @@ article.card h2 {
   font-weight: 400;
 }
 
+.site-footer a {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .consent-row a {
   color: var(--accent-strong);
   text-decoration-line: underline;
@@ -67,6 +73,91 @@ article.card h2 {
 
 .consent-row a:hover {
   text-decoration-thickness: 2px;
+}
+
+.auth-simple {
+  display: grid;
+  place-items: start center;
+}
+
+.auth-simple-card {
+  width: min(100%, 620px);
+  padding: clamp(24px, 5vw, 42px);
+}
+
+.auth-simple-card h1 {
+  margin-bottom: 14px;
+}
+
+.auth-kicker {
+  margin-bottom: 8px;
+  color: var(--accent-strong);
+  font-size: 0.85rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.auth-email-form {
+  margin-top: 24px;
+}
+
+.auth-email-form .btn {
+  width: 100%;
+}
+
+.auth-sent {
+  margin-top: 24px;
+  padding: 20px;
+  border-radius: 16px;
+  background: var(--surface-soft);
+}
+
+.auth-privacy-note {
+  margin-top: 18px;
+  font-size: 0.9rem;
+}
+
+.auth-help-link {
+  margin: 10px 0 0;
+  font-weight: 700;
+}
+
+.auth-help-link a {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-help-link a:hover,
+.auth-help-link a:focus-visible {
+  text-decoration-thickness: 2px;
+}
+
+.request-response {
+  max-width: 760px;
+  margin-top: 24px;
+}
+
+.response-auth-note {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+.response-list-section {
+  margin-top: 36px;
+  margin-bottom: 36px;
+}
+
+.feedback-page .page-heading,
+.feedback-form,
+.feedback-success {
+  max-width: 760px;
+}
+
+.feedback-form,
+.feedback-success {
+  margin-top: 24px;
 }
 
 @media (max-width: 720px) {
@@ -88,5 +179,11 @@ article.card h2 {
   .section > form.card > .nav {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .request-response .btn,
+  .feedback-form .btn,
+  .feedback-success .btn {
+    width: 100%;
   }
 }

@@ -1,4 +1,9 @@
-import { reset, signIn, signUp } from "./actions";
+import { sendLoginLink } from "./actions";
+
+function safeNext(value: string | undefined) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/cabinet";
+  return value.slice(0, 500);
+}
 
 export default async function Auth({
   searchParams,
@@ -6,70 +11,62 @@ export default async function Auth({
   searchParams: Promise<Record<string, string>>;
 }) {
   const q = await searchParams;
+  const next = safeNext(q.next);
 
   return (
-    <section className="page-shell section">
-      <h1>Вход и регистрация</h1>
-      <p className="page-lead">
-        Войдите в существующий аккаунт или создайте новый. Настоящее имя, телефон и адрес для регистрации не нужны.
-      </p>
+    <section className="page-shell section auth-simple">
+      <div className="auth-simple-card card">
+        <div>
+          <p className="auth-kicker">Один шаг</p>
+          <h1>Войти по email</h1>
+          <p className="page-lead">
+            Введите email — мы пришлём ссылку для входа. Если аккаунта ещё нет, он создастся автоматически.
+            Пароль придумывать не нужно.
+          </p>
+        </div>
 
-      {q.error && (
-        <p role="alert">Не удалось выполнить действие. Проверьте данные.</p>
-      )}
-      {q.check && (
-        <p role="status">Проверьте email: мы отправили письмо для подтверждения аккаунта.</p>
-      )}
+        {q.error && (
+          <p role="alert">
+            Не удалось отправить письмо. Проверьте email и попробуйте ещё раз.
+          </p>
+        )}
 
-      <div className="grid cols2 auth-grid">
-        <form className="card grid" action={signIn}>
-          <div>
-            <h2>Войти</h2>
-            <p className="muted">Для тех, у кого уже есть аккаунт.</p>
-          </div>
-          <label>
-            Email
-            <input name="email" type="email" required autoComplete="email" />
-          </label>
-          <label>
-            Пароль
-            <input name="password" type="password" minLength={10} required autoComplete="current-password" />
-          </label>
-          <button className="btn">Войти</button>
-        </form>
-
-        <form className="card grid" action={signUp}>
-          <div>
-            <h2>Создать аккаунт</h2>
+        {q.sent ? (
+          <div className="auth-sent" role="status">
+            <h2>Письмо отправлено</h2>
+            <p>
+              Откройте письмо от «Языка милосердия» и нажмите ссылку. После этого вы сразу вернётесь на нужную страницу.
+            </p>
             <p className="muted">
-              Email используется только для входа и восстановления доступа.
+              Если письма нет, проверьте «Спам» или отправьте ссылку ещё раз через минуту.
             </p>
           </div>
-          <label>
-            Email
-            <input name="email" type="email" required autoComplete="email" />
-          </label>
-          <label>
-            Пароль от 10 символов
-            <input name="password" type="password" minLength={10} required autoComplete="new-password" />
-          </label>
-          <button className="btn">Зарегистрироваться</button>
-        </form>
-      </div>
+        ) : (
+          <form className="grid auth-email-form" action={sendLoginLink}>
+            <input type="hidden" name="next" value={next} />
+            <label>
+              Email
+              <input
+                name="email"
+                type="email"
+                required
+                autoComplete="email"
+                inputMode="email"
+                placeholder="name@example.com"
+                autoFocus
+              />
+            </label>
+            <button className="btn">Получить ссылку для входа</button>
+          </form>
+        )}
 
-      <form action={reset} className="auth-reset grid">
-        <div>
-          <h2>Забыли пароль?</h2>
-          <p className="muted">Укажите email — пришлём ссылку для восстановления доступа.</p>
-        </div>
-        <label>
-          Email для восстановления
-          <input name="email" type="email" required autoComplete="email" />
-        </label>
-        <div className="form-actions">
-          <button className="btn secondary">Восстановить доступ</button>
-        </div>
-      </form>
+        <p className="muted auth-privacy-note">
+          Для входа нужен только email. Имя, телефон и адрес при регистрации не требуются.
+        </p>
+        <p className="auth-help-link">
+          <a href="/feedback">Не получается войти? Напишите нам</a>
+        </p>
+      </div>
     </section>
   );
 }

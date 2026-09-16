@@ -3,25 +3,33 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { quickExitGuard } from "../../lib/quick-exit-guard";
 
-const password = "Browser-password-42!";
 type LifecycleObservation = { documentId: string; persisted: boolean; phase: "pagehide" | "pageshow"; route: string };
 type BfCacheFailure = { reason?: string; type?: string };
 type BfCacheEvent = { frameId: string; loaderId: string; reasons: BfCacheFailure[] };
 const bfcacheDiagnosticsPath = path.join(process.cwd(), "test-results", "bfcache-diagnostics.json");
 
+async function getLatestMagicLink(email: string) {
+  const query = encodeURIComponent(`to:"${email}"`);
+  let link = "";
+  await expect.poll(async () => {
+    const response = await fetch(`http://127.0.0.1:54324/view/latest.html?query=${query}`);
+    if (!response.ok) return "";
+    const html = (await response.text()).replace(/&amp;/g, "&");
+    const match = html.match(/http:\/\/127\.0\.0\.1:54321\/auth\/v1\/verify\?[^\s<>"']+/);
+    link = match?.[0] ?? "";
+    return link;
+  }, { timeout: 15_000 }).not.toBe("");
+  return link;
+}
+
 async function register(page: Page, email: string) {
   await page.goto("/auth");
-  const form = page.locator("form").filter({ hasText: "Создать аккаунт" });
-  await form.getByLabel("Email").fill(email);
-  await form.getByLabel("Пароль от 10 символов").fill(password);
-  await form.getByRole("button", { name: "Зарегистрироваться" }).click();
-  // Wait for the signUp action to complete before navigating away or signing in.
-  await expect(page).toHaveURL(/\/auth\?check=email$/);
-  await page.goto("/auth");
-  const login = page.locator("form").filter({ hasText: "Войти" });
-  await login.getByLabel("Email").fill(email);
-  await login.getByLabel("Пароль").fill(password);
-  await login.getByRole("button", { name: "Войти" }).click();
+  await page.getByLabel("Email").fill(email);
+  await page.getByRole("button", { name: "Получить ссылку для входа" }).click();
+  await expect(page).toHaveURL(/\/auth\?sent=1/);
+  await expect(page.getByText("Письмо отправлено")).toBeVisible();
+  const magicLink = await getLatestMagicLink(email);
+  await page.goto(magicLink);
   await expect(page).toHaveURL(/\/cabinet$/);
   await expect(page.locator("main .page-shell")).toBeVisible();
 }
@@ -106,6 +114,11 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await expect(
       p2.getByText("A fictional browser request")
     ).toBeVisible();
+    await p2.getByLabel("Чем вы можете помочь").fill("Могу привезти продукты сегодня вечером");
+    await p2.getByLabel("Как с вами связаться").fill("Telegram @browser-helper");
+    await p2.getByLabel(/Я согласен.*сообщение/).check();
+    await p2.getByRole("button", { name: "Отправить отклик" }).click();
+    await expect(p2.getByText(/Отклик отправлен/)).toBeVisible();
     await p1.getByLabel("Сообщение").fill("private draft must disappear");
     await p1.getByRole("button", { name: "Быстро скрыть приватную страницу" }).click();
     await expect(p1).toHaveURL(/\/auth$/);
@@ -143,10 +156,11 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p1.getByLabel(/Я согласен/).check();
     await p1.getByRole("button", { name: "Опубликовать просьбу" }).click();
     await expect(p1).toHaveURL(/\/auth/);
-    const login = p1.locator("form").filter({ hasText: "Войти" });
-    await login.getByLabel("Email").fill(firstEmail);
-    await login.getByLabel("Пароль").fill(password);
-    await login.getByRole("button", { name: "Войти" }).click();
+    await p1.getByLabel("Email").fill(firstEmail);
+    await p1.getByRole("button", { name: "Получить ссылку для входа" }).click();
+    await expect(p1).toHaveURL(/\/auth\?sent=1/);
+    const reloginLink = await getLatestMagicLink(firstEmail);
+    await p1.goto(reloginLink);
     await expect(p1).toHaveURL(/\/cabinet$/);
     await expect(p1.getByRole("link", { name: /№ .*PREGNANCY/ })).toHaveCount(1);
     await expect(p1.getByText("This anonymous submission must never be stored")).toHaveCount(0);
