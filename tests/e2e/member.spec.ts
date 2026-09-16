@@ -102,7 +102,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await register(p1, firstEmail);
     await register(p2, `browser-u2-${suffix}@mercy.invalid`);
     const privateUrl = await createRequest(p1);
-    await p1.getByLabel("Сообщение").fill("browser message");
+    await p1.getByLabel(/^Сообщение$/).fill("browser message");
     await p1.getByRole("button", { name: "Отправить" }).click();
     await expect(p1.getByText("browser message")).toBeVisible();
     await p1.reload();
@@ -119,7 +119,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p2.getByLabel(/Я согласен.*сообщение/).check();
     await p2.getByRole("button", { name: "Отправить отклик" }).click();
     await expect(p2.getByText(/Отклик отправлен/)).toBeVisible();
-    await p1.getByLabel("Сообщение").fill("private draft must disappear");
+    await p1.getByLabel(/^Сообщение$/).fill("private draft must disappear");
     await p1.getByRole("button", { name: "Быстро скрыть приватную страницу" }).click();
     await expect(p1).toHaveURL(/\/auth$/);
 
@@ -130,7 +130,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
 
     await expect(p1.getByText("browser message")).toHaveCount(0);
     await expect(p1.getByText("private draft must disappear")).toHaveCount(0);
-    await expect(p1.getByLabel("Сообщение")).toHaveCount(0);
+    await expect(p1.getByLabel(/^Сообщение$/)).toHaveCount(0);
     const privateReturn = lifecycle.filter(item => item.phase === "pageshow" && item.route === "/cabinet/requests/:id").at(-1);
     const returnPath = privateReturn === privateDocument
       ? "private-entry-not-revisited"
@@ -147,7 +147,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     ).toBeVisible();
 
     await expect(
-      p1.getByLabel("Сообщение")
+      p1.getByLabel(/^Сообщение$/)
     ).toHaveCount(0);
     await p1.goto("/help");
     await p1.getByLabel("Страна").fill("XX");
