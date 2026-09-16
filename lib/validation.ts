@@ -43,6 +43,19 @@ export const offerSchema = z
     message: "city required for offline help",
   });
 
+export const requestResponseSchema = z.object({
+  caseId: z.string().uuid(),
+  message: z.string().trim().min(10).max(1500),
+  contactMethod: z.string().trim().min(2).max(200),
+  consent: z.literal(true),
+});
+
+export const feedbackSchema = z.object({
+  message: z.string().trim().min(3).max(3000),
+  replyEmail: z.union([z.literal(""), z.email().max(320)]),
+  pagePath: z.string().trim().max(500),
+});
+
 export const volunteerReviewSchema = z.object({
   id: z.string().uuid(),
   status: z.enum(["VERIFIED", "REJECTED"]),
