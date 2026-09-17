@@ -2,6 +2,7 @@ import "./globals.css";
 import "./polish.css";
 import "./public-pages.css";
 import "./mobile-shell.css";
+import "./brand.css";
 import "./cabinet.css";
 import type { Metadata } from "next";
 import Image from "next/image";
