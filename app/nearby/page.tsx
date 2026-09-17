@@ -23,23 +23,33 @@ export default async function NearbyPage({
   const { data } = await q;
 
   return (
-    <section className="page-shell section">
-      <h1>Помощь рядом</h1>
-      <p className="page-lead">
-        Здесь показываются только опубликованные и проверенные точки помощи.
-        Конфиденциальные адреса и непроверенные контакты не публикуются.
-      </p>
+    <section className="page-shell section nearby-page">
+      <div className="public-page-intro">
+        <span className="request-section-kicker">Проверенные точки</span>
+        <h1>Помощь рядом</h1>
+        <p className="page-lead public-page-lead">
+          Здесь показываются только опубликованные и проверенные точки помощи.
+          Конфиденциальные адреса и непроверенные контакты не публикуются.
+        </p>
+      </div>
 
-      <form className="search-form">
-        <label>
-          Город
-          <input
-            name="city"
-            defaultValue={city}
-            placeholder="Например, Батуми"
-          />
-        </label>
-        <button className="btn secondary">Показать список</button>
+      <form className="card nearby-search-card">
+        <div className="form-section-heading">
+          <span className="request-section-kicker">Фильтр</span>
+          <h2>Выберите город</h2>
+        </div>
+
+        <div className="nearby-search-row">
+          <label>
+            Город
+            <input
+              name="city"
+              defaultValue={city}
+              placeholder="Например, Батуми"
+            />
+          </label>
+          <button className="btn secondary">Показать список</button>
+        </div>
       </form>
 
       <Nearby initial={(data || []).map((x) => ({ ...x, distance_meters: null }))} />
