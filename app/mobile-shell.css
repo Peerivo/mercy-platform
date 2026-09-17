@@ -1,0 +1,19 @@
+/* Extra-small viewport safeguards for the shared mobile shell. */
+@media (max-width: 360px) {
+  .brand-copy {
+    display: none;
+  }
+
+  .site-header-inner {
+    gap: 6px;
+  }
+
+  .site-header-actions {
+    gap: 4px;
+  }
+
+  .site-header .btn,
+  .mobile-menu summary {
+    padding-inline: 8px;
+  }
+}
