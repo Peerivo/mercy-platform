@@ -558,11 +558,6 @@ article.card h2 {
 }
 
 @media (max-width: 420px) {
-  .page-shell,
-  .container {
-    padding-inline: 14px;
-  }
-
   .brand-copy small {
     display: none;
   }
