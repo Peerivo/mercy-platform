@@ -12,18 +12,21 @@ export default async function Help({
   const q = await searchParams;
 
   return (
-    <section className="page-shell section">
-      <h1>Расскажите, какая помощь нужна</h1>
+    <section className="page-shell section public-form-page help-page">
+      <div className="public-page-intro">
+        <span className="request-section-kicker">Нужна помощь</span>
+        <h1>Расскажите, какая помощь нужна</h1>
 
-      <p>
-        Текст просьбы о помощи будет опубликован и доступен без регистрации.
-        Не указывайте в описании телефон, email, точный адрес, паспортные данные
-        и другие сведения, которые не должны быть публичными. Контактные данные,
-        указанные в отдельных полях ниже, публично не показываются.
-      </p>
+        <p className="page-lead public-page-lead">
+          Текст просьбы будет опубликован и доступен без регистрации. Не
+          указывайте в описании телефон, email, точный адрес, паспортные данные
+          и другие сведения, которые не должны быть публичными. Контактные
+          данные из отдельных полей ниже публично не показываются.
+        </p>
+      </div>
 
       {q.error && (
-        <p role="alert">
+        <p className="form-alert" role="alert">
           Не удалось сохранить. Проверьте поля или повторите позже.
         </p>
       )}
