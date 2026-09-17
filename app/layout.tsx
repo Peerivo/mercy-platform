@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
+import { MobileMenu } from "@/components/mobile-menu";
 import { QuickExit } from "@/components/quick-exit";
 import { quickExitGuard } from "@/lib/quick-exit-guard";
 
@@ -24,7 +25,7 @@ const navigation = [
   { href: "/help", label: "Нужна помощь" },
   { href: "/volunteer", label: "Хочу помочь" },
   { href: "/cabinet", label: "Кабинет" },
-];
+] as const;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -54,17 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
             <div className="site-header-actions">
               <QuickExit />
-
-              <details className="mobile-menu">
-                <summary aria-label="Открыть меню">Меню</summary>
-                <nav className="mobile-menu-panel" aria-label="Мобильная навигация">
-                  {navigation.map((item) => (
-                    <Link href={item.href} key={item.href}>
-                      {item.label}
-                    </Link>
-                  ))}
-                </nav>
-              </details>
+              <MobileMenu items={navigation} />
             </div>
           </div>
         </header>
