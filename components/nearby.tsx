@@ -56,7 +56,15 @@ export function Nearby({ initial }: { initial: Place[] }) {
   }
 
   return (
-    <>
+    <div className="nearby-results-block">
+      <div className="request-section-heading nearby-results-heading">
+        <div>
+          <span className="request-section-kicker">Точки помощи</span>
+          <h2>Доступные варианты</h2>
+        </div>
+        <p>Можно использовать город или определить расстояние от текущего местоположения.</p>
+      </div>
+
       <div className="nav nearby-actions">
         <button className="btn" onClick={locate}>
           Найти рядом со мной
@@ -66,45 +74,63 @@ export function Nearby({ initial }: { initial: Place[] }) {
         </button>
       </div>
 
-      <p aria-live="polite">{status}</p>
+      {status && (
+        <p className="nearby-status" aria-live="polite">
+          {status}
+        </p>
+      )}
 
       {map && (
-        <div className="notice">
-          Карта использует провайдера, указанного в настройках. В MVP точки доступны списком даже при ошибке тайлов.
-          Координаты посетителя не сохраняются и не добавляются в URL.
+        <div className="notice nearby-map-notice">
+          Карта использует провайдера, указанного в настройках. В MVP точки
+          доступны списком даже при ошибке тайлов. Координаты посетителя не
+          сохраняются и не добавляются в URL.
         </div>
       )}
 
-      <div className="grid cols2">
+      <div className="grid cols2 nearby-list">
         {places.length ? (
           places.map((place) => (
-            <article className="card" key={place.id}>
+            <article className="card nearby-card" key={place.id}>
               <h2>
                 {place.organization_name}: {place.name}
               </h2>
-              <p>
+
+              <p className="nearby-card-location">
                 {place.city}
                 {place.address_public ? `, ${place.address_public}` : ""}
               </p>
-              <p>
-                {place.formats.join(", ")} · {place.cost_type} · {place.languages.join(", ")}
+
+              <p className="nearby-card-meta">
+                {place.formats.join(", ")} · {place.cost_type} ·{" "}
+                {place.languages.join(", ")}
               </p>
+
               {place.distance_meters != null && (
-                <p>{(place.distance_meters / 1000).toFixed(1)} км по прямой</p>
+                <p className="nearby-card-distance">
+                  {(place.distance_meters / 1000).toFixed(1)} км по прямой
+                </p>
               )}
-              <p>{place.opening_hours || "Часы работы не уточнены"}</p>
-              <p>{place.contact_public}</p>
+
+              <p className="nearby-card-hours">
+                {place.opening_hours || "Часы работы не уточнены"}
+              </p>
+
+              {place.contact_public && (
+                <p className="nearby-card-contact">{place.contact_public}</p>
+              )}
             </article>
           ))
         ) : (
           <div className="empty-state nearby-empty">
             <h2>Проверенных точек пока нет</h2>
             <p>
-              Мы не показываем непроверенные контакты. Попробуйте другой город или вернитесь позже.
+              Мы не показываем непроверенные контакты. Попробуйте другой город
+              или вернитесь позже.
             </p>
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }
