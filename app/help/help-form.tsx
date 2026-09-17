@@ -10,102 +10,123 @@ export function HelpForm() {
   const jurisdiction = getRequestJurisdiction(country);
 
   return (
-    <form action={createRequest} className="card grid">
-      <label>
-        Категория
-        <select name="category" required>
-          <option value="PREGNANCY">Беременность и материнство</option>
-          <option value="FAMILY">Семья</option>
-          <option value="HOUSING">Жильё</option>
-          <option value="FOOD_GOODS">Продукты и вещи</option>
-          <option value="LEGAL_DOCUMENTS">Документы и право</option>
-          <option value="WORK_EDUCATION">Работа и обучение</option>
-          <option value="OTHER">Другое</option>
-        </select>
-      </label>
+    <form action={createRequest} className="card grid public-form-card help-form-card">
+      <div className="form-section">
+        <div className="form-section-heading">
+          <span className="request-section-kicker">Просьба</span>
+          <h2>Что и где нужно</h2>
+        </div>
 
-      <div className="grid cols2">
         <label>
-          Страна
-          <input
-            name="country"
+          Категория
+          <select name="category" required>
+            <option value="PREGNANCY">Беременность и материнство</option>
+            <option value="FAMILY">Семья</option>
+            <option value="HOUSING">Жильё</option>
+            <option value="FOOD_GOODS">Продукты и вещи</option>
+            <option value="LEGAL_DOCUMENTS">Документы и право</option>
+            <option value="WORK_EDUCATION">Работа и обучение</option>
+            <option value="OTHER">Другое</option>
+          </select>
+        </label>
+
+        <div className="grid cols2 compact-form-grid">
+          <label>
+            Страна
+            <input
+              name="country"
+              required
+              maxLength={80}
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+            />
+          </label>
+
+          <label>
+            Город
+            <input name="city" required maxLength={120} />
+          </label>
+        </div>
+
+        <label>
+          Описание
+          <textarea
+            name="description"
             required
-            maxLength={80}
-            value={country}
-            onChange={(e) => setCountry(e.target.value)}
+            minLength={20}
+            maxLength={5000}
+            rows={7}
           />
         </label>
 
+        <p className="muted form-help-text">
+          Не публикуйте телефон, email, точный адрес, документы, диагнозы,
+          результаты анализов и другие чувствительные персональные данные.
+          Медицинские услуги не оказываются через Mercy.
+        </p>
+
         <label>
-          Город
-          <input name="city" required maxLength={120} />
+          Срочность
+          <select name="urgency">
+            <option value="NORMAL">Обычная</option>
+            <option value="SOON">Желательно скоро</option>
+            <option value="URGENT">Срочно</option>
+          </select>
         </label>
       </div>
 
-      <label>
-        Описание
-        <textarea
-          name="description"
-          required
-          minLength={20}
-          maxLength={5000}
-          rows={7}
-        />
-      </label>
+      <div className="form-section">
+        <div className="form-section-heading">
+          <span className="request-section-kicker">Связь</span>
+          <h2>Как с вами связаться</h2>
+        </div>
 
-      <p className="muted">
-        Не публикуйте телефон, email, точный адрес,
-        документы, диагнозы, результаты анализов и другие
-        чувствительные персональные данные.
-        Медицинские услуги не оказываются через Mercy.
-      </p>
+        <div className="compact-choice-grid">
+          <label className="compact-choice">
+            <input name="can_message" type="checkbox" defaultChecked />
+            Можно писать
+          </label>
 
-      <label>
-        Срочность
-        <select name="urgency">
-          <option value="NORMAL">Обычная</option>
-          <option value="SOON">Желательно скоро</option>
-          <option value="URGENT">Срочно</option>
-        </select>
-      </label>
+          <label className="compact-choice">
+            <input name="can_call" type="checkbox" />
+            Можно звонить
+          </label>
+        </div>
 
-      <label>
-        <input name="can_message" type="checkbox" defaultChecked />
-        Можно писать
-      </label>
+        <div className="grid cols2 compact-form-grid">
+          <label>
+            Подходящее время
+            <input name="contact_window" maxLength={120} />
+          </label>
 
-      <label>
-        <input name="can_call" type="checkbox" />
-        Можно звонить
-      </label>
+          <label>
+            Внешний контакт (необязательно)
+            <input name="external_contact" maxLength={200} />
+          </label>
+        </div>
+      </div>
 
-      <label>
-        Подходящее время
-        <input name="contact_window" maxLength={120} />
-      </label>
+      <div className="form-section form-section-consent">
+        <label className="consent-row">
+          <input name="consent" type="checkbox" required />
 
-      <label>
-        Внешний контакт (необязательно)
-        <input name="external_contact" maxLength={200} />
-      </label>
+          <span>
+            Я согласен(-на) на обработку данных обращения в соответствии с{" "}
+            <a
+              href={`/consent/request?country=${jurisdiction}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              условиями обработки персональных данных
+            </a>
+            .
+          </span>
+        </label>
+      </div>
 
-      <label className="consent-row">
-        <input name="consent" type="checkbox" required />
-
-        <span>
-          Я согласен(-на) на обработку данных обращения в соответствии с{" "}
-          <a
-            href={`/consent/request?country=${jurisdiction}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            условиями обработки персональных данных
-          </a>
-          .
-        </span>
-      </label>
-
-      <button className="btn">Опубликовать просьбу</button>
+      <div className="form-submit-row">
+        <button className="btn">Опубликовать просьбу</button>
+      </div>
     </form>
   );
 }
