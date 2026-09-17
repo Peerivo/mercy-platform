@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 type NavigationItem = {
   href: string;
@@ -11,9 +11,9 @@ type NavigationItem = {
 export function MobileMenu({ items }: { items: readonly NavigationItem[] }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
 
-  function closeMenu() {
+  const closeMenu = useCallback(() => {
     detailsRef.current?.removeAttribute("open");
-  }
+  }, []);
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -50,7 +50,7 @@ export function MobileMenu({ items }: { items: readonly NavigationItem[] }) {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, []);
+  }, [closeMenu]);
 
   return (
     <details className="mobile-menu" ref={detailsRef}>
