@@ -1,0 +1,403 @@
+/* Public forms and discovery pages */
+.public-page-intro {
+  max-width: 780px;
+}
+
+.public-page-intro h1 {
+  margin-top: 6px;
+  margin-bottom: 14px;
+}
+
+.public-page-lead {
+  margin-bottom: 0;
+}
+
+.form-alert {
+  max-width: 900px;
+  margin: 18px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #efcaca;
+  border-radius: 12px;
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.public-form-card {
+  max-width: 900px;
+  margin-top: 24px;
+  gap: 14px;
+  padding: 18px;
+  background: rgba(238, 246, 242, 0.48);
+}
+
+.form-section {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+}
+
+.form-section-heading {
+  display: grid;
+  gap: 3px;
+}
+
+.form-section-heading h2 {
+  margin: 0;
+  font-size: 1.22rem;
+}
+
+.compact-form-grid {
+  gap: 14px;
+}
+
+.form-help-text {
+  margin: -2px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface-warm);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.compact-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.compact-choice,
+label.compact-choice {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  font-weight: 650;
+}
+
+.compact-choice input[type="checkbox"] {
+  margin: 0;
+}
+
+.compact-choice-single {
+  width: fit-content;
+  min-width: 220px;
+}
+
+.form-section-consent {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.form-section-consent .consent-row {
+  margin: 0;
+}
+
+.form-submit-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.form-submit-row .btn {
+  min-width: 190px;
+}
+
+/* Nearby */
+.nearby-search-card {
+  max-width: 760px;
+  margin-top: 24px;
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fbf9 100%);
+}
+
+.nearby-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.nearby-results-block {
+  margin-top: 24px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(238, 246, 242, 0.54);
+}
+
+.nearby-results-heading {
+  margin-bottom: 16px;
+}
+
+.nearby-actions {
+  margin: 0 0 12px;
+}
+
+.nearby-status {
+  width: fit-content;
+  margin: 0 0 14px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.nearby-map-notice {
+  margin-bottom: 14px;
+}
+
+.nearby-list {
+  gap: 14px;
+}
+
+.nearby-card {
+  padding: 20px;
+}
+
+.nearby-card h2 {
+  margin-bottom: 10px;
+}
+
+.nearby-card-location,
+.nearby-card-meta,
+.nearby-card-distance,
+.nearby-card-hours,
+.nearby-card-contact {
+  margin-bottom: 9px;
+}
+
+.nearby-card-location {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.nearby-card-meta,
+.nearby-card-hours {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.nearby-card-distance {
+  width: fit-content;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.nearby-card-contact {
+  font-weight: 650;
+}
+
+@media (max-width: 720px) {
+  .public-form-page,
+  .nearby-page {
+    padding-block: 20px 30px;
+  }
+
+  .public-page-intro h1 {
+    margin-top: 4px;
+    margin-bottom: 10px;
+    font-size: clamp(1.8rem, 9vw, 2.35rem);
+  }
+
+  .public-page-lead {
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  .form-alert {
+    margin-top: 14px;
+    padding: 10px 12px;
+    font-size: 0.92rem;
+  }
+
+  .public-form-card {
+    margin-top: 18px;
+    padding: 11px;
+    gap: 10px;
+    border-radius: 17px;
+  }
+
+  .form-section {
+    gap: 12px;
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .form-section-heading {
+    gap: 2px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .form-section-heading h2 {
+    font-size: 1.12rem;
+    line-height: 1.2;
+  }
+
+  .public-form-card label,
+  .nearby-search-card label {
+    gap: 5px;
+    font-size: 0.87rem;
+  }
+
+  .public-form-card input,
+  .public-form-card select,
+  .nearby-search-card input {
+    min-height: 42px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    font-size: 1rem;
+    line-height: 1.2;
+  }
+
+  .public-form-card textarea {
+    min-height: 116px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    font-size: 1rem;
+    line-height: 1.45;
+  }
+
+  .compact-form-grid {
+    gap: 10px;
+  }
+
+  .form-help-text {
+    padding: 10px 11px;
+    font-size: 0.86rem;
+    line-height: 1.45;
+  }
+
+  .compact-choice-grid {
+    gap: 8px;
+  }
+
+  .compact-choice,
+  label.compact-choice {
+    min-height: 42px;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+  }
+
+  .compact-choice-single {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .form-section-consent {
+    padding: 0;
+  }
+
+  .form-section-consent .consent-row {
+    padding: 11px;
+    font-size: 0.88rem;
+    line-height: 1.45;
+  }
+
+  .form-submit-row .btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 9px 14px;
+    font-size: 0.96rem;
+  }
+
+  .nearby-search-card {
+    margin-top: 18px;
+    padding: 14px;
+    gap: 12px;
+    border-radius: 17px;
+  }
+
+  .nearby-search-row {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  .nearby-search-row .btn {
+    width: 100%;
+    min-height: 42px;
+    padding: 8px 12px;
+    font-size: 0.95rem;
+  }
+
+  .nearby-results-block {
+    margin-top: 18px;
+    padding: 12px;
+    border-radius: 17px;
+  }
+
+  .nearby-results-heading {
+    margin-bottom: 12px;
+  }
+
+  .nearby-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .nearby-actions .btn {
+    width: 100%;
+    min-height: 42px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+  }
+
+  .nearby-status {
+    margin-bottom: 10px;
+    font-size: 0.86rem;
+  }
+
+  .nearby-list {
+    gap: 10px;
+  }
+
+  .nearby-card {
+    padding: 14px;
+    border-radius: 15px;
+  }
+
+  .nearby-card h2 {
+    margin-bottom: 8px;
+    font-size: 1.12rem;
+  }
+
+  .nearby-card-location,
+  .nearby-card-meta,
+  .nearby-card-distance,
+  .nearby-card-hours,
+  .nearby-card-contact {
+    margin-bottom: 7px;
+    line-height: 1.42;
+  }
+
+  .nearby-card-meta,
+  .nearby-card-hours {
+    font-size: 0.88rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .compact-choice-grid,
+  .nearby-actions {
+    grid-template-columns: 1fr;
+  }
+}
