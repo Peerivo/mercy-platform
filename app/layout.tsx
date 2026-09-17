@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   icons: {
     icon: "/icon.svg",
     shortcut: "/icon.svg",
-    apple: "/icon.svg",
+    apple: "/mercy-m.png",
   },
 };
 
@@ -42,7 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="site-header">
           <div className="page-shell site-header-inner">
             <Link className="brand" href="/" aria-label="Язык милосердия — главная">
-              <Image className="brand-icon" src="/icon.svg" alt="" width={34} height={34} />
+              <Image className="brand-icon" src="/icon.svg" alt="" width={34} height={34} priority />
               <span className="brand-copy">
                 <strong>Язык милосердия</strong>
                 <small>люди помогают людям</small>
