@@ -10,11 +10,11 @@ export default async function Volunteer({
   return (
     <section className="page-shell section public-form-page volunteer-page">
       <div className="public-page-intro">
-        <span className="request-section-kicker">Хочу помочь</span>
-        <h1>Расскажите, чем вы готовы помочь</h1>
+        <span className="request-section-kicker">Предложение помощи</span>
+        <h1>Хочу помочь</h1>
         <p className="page-lead public-page-lead">
-          Предложение увидят только вы и администратор. Контактные данные
-          публично не показываются.
+          Расскажите, чем вы готовы помочь. Предложение увидят только вы и
+          администратор; контактные данные публично не показываются.
         </p>
       </div>
 
