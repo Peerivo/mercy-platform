@@ -4,11 +4,27 @@ import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 import { feedbackSchema } from "@/lib/validation";
 
+type FeedbackTopic = "feedback" | "support";
+
+function feedbackLocation(input: {
+  topic: FeedbackTopic;
+  sourcePath: string;
+  status: "sent" | "validation" | "save";
+}) {
+  const params = new URLSearchParams();
+  params.set("topic", input.topic);
+  if (input.sourcePath) params.set("from", input.sourcePath);
+  if (input.status === "sent") params.set("sent", "1");
+  else params.set("error", input.status);
+  return `/feedback?${params.toString()}`;
+}
+
 async function emailFeedback(input: {
   id: string;
   message: string;
   replyEmail: string;
   pagePath: string;
+  topic: FeedbackTopic;
 }) {
   const apiKey = process.env.RESEND_API_KEY;
   const to = process.env.FEEDBACK_TO_EMAIL;
@@ -19,6 +35,7 @@ async function emailFeedback(input: {
     return;
   }
 
+  const isSupport = input.topic === "support";
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -29,9 +46,12 @@ async function emailFeedback(input: {
       from,
       to: [to],
       reply_to: input.replyEmail || undefined,
-      subject: `Язык милосердия: новая обратная связь ${input.id.slice(0, 8)}`,
+      subject: isSupport
+        ? `Язык милосердия: поддержка проекта ${input.id.slice(0, 8)}`
+        : `Язык милосердия: новая обратная связь ${input.id.slice(0, 8)}`,
       text: [
         `ID: ${input.id}`,
+        `Тип: ${isSupport ? "поддержка проекта" : "обратная связь"}`,
         `Страница: ${input.pagePath || "не указана"}`,
         `Email для ответа: ${input.replyEmail || "не указан"}`,
         "",
@@ -46,14 +66,25 @@ async function emailFeedback(input: {
 }
 
 export async function submitFeedback(formData: FormData) {
+  const topic: FeedbackTopic =
+    formData.get("topic") === "support" ? "support" : "feedback";
+  const rawSourcePath = String(formData.get("sourcePath") ?? "");
+  const sourcePath =
+    rawSourcePath.startsWith("/") && !rawSourcePath.startsWith("//")
+      ? rawSourcePath.slice(0, 500)
+      : "";
+
   const parsed = feedbackSchema.safeParse({
     message: formData.get("message"),
     replyEmail: formData.get("replyEmail") ?? "",
-    pagePath: formData.get("pagePath") ?? "",
+    pagePath:
+      topic === "support"
+        ? sourcePath || "/feedback?topic=support"
+        : formData.get("pagePath") ?? "",
   });
 
-  if (!parsed.success) {
-    redirect("/feedback?error=validation");
+  if (!parsed.success || (topic === "support" && !parsed.data.replyEmail)) {
+    redirect(feedbackLocation({ topic, sourcePath, status: "validation" }));
   }
 
   const s = await serverSupabase();
@@ -65,7 +96,7 @@ export async function submitFeedback(formData: FormData) {
 
   if (error || typeof data !== "string") {
     console.error("FEEDBACK SAVE:", error?.code, error?.message);
-    redirect("/feedback?error=save");
+    redirect(feedbackLocation({ topic, sourcePath, status: "save" }));
   }
 
   await emailFeedback({
@@ -73,7 +104,8 @@ export async function submitFeedback(formData: FormData) {
     message: parsed.data.message,
     replyEmail: parsed.data.replyEmail,
     pagePath: parsed.data.pagePath,
+    topic,
   });
 
-  redirect("/feedback?sent=1");
+  redirect(feedbackLocation({ topic, sourcePath, status: "sent" }));
 }

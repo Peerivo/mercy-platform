@@ -2,6 +2,8 @@ import "./globals.css";
 import "./polish.css";
 import "./public-pages.css";
 import "./mobile-shell.css";
+import "./brand.css";
+import "./cabinet.css";
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
@@ -71,6 +73,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <p>Добровольная и практическая помощь людей людям.</p>
               <p>
                 <Link href="/feedback">Обратная связь</Link>
+                {" · "}
+                <Link href="/feedback?topic=support">Поддержать проект</Link>
               </p>
             </div>
             <p className="footer-safety">
