@@ -740,6 +740,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
     "region": "Нижегородская область"
   },
   {
+    "name": "Воскресенск",
+    "region": "Московская область"
+  },
+  {
     "name": "Воткинск",
     "region": "Республика Удмуртская"
   },
@@ -1018,6 +1022,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
   {
     "name": "Дмитриев",
     "region": "Курская область"
+  },
+  {
+    "name": "Дмитров",
+    "region": "Московская область"
   },
   {
     "name": "Дмитровск",
@@ -1384,6 +1392,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
     "region": "Новосибирская область"
   },
   {
+    "name": "Истра",
+    "region": "Московская область"
+  },
+  {
     "name": "Ишим",
     "region": "Тюменская область"
   },
@@ -1666,6 +1678,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
   {
     "name": "Кисловодск",
     "region": "Ставропольский край"
+  },
+  {
+    "name": "Клин",
+    "region": "Московская область"
   },
   {
     "name": "Клинцы",
@@ -2404,6 +2420,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
     "region": "Калужская область"
   },
   {
+    "name": "Москва",
+    "region": "Москва"
+  },
+  {
     "name": "Муравленко",
     "region": "Ямало-Ненецкий АО"
   },
@@ -2474,6 +2494,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
   {
     "name": "Нариманов",
     "region": "Астраханская область"
+  },
+  {
+    "name": "Наро-Фоминск",
+    "region": "Московская область"
   },
   {
     "name": "Нарткала",
@@ -2720,6 +2744,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
     "region": "Ямало-Ненецкий АО"
   },
   {
+    "name": "Ногинск",
+    "region": "Московская область"
+  },
+  {
     "name": "Нолинск",
     "region": "Кировская область"
   },
@@ -2770,6 +2798,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
   {
     "name": "Обь",
     "region": "Новосибирская область"
+  },
+  {
+    "name": "Одинцово",
+    "region": "Московская область"
   },
   {
     "name": "Озерск",
@@ -2830,6 +2862,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
   {
     "name": "Оренбург",
     "region": "Оренбургская область"
+  },
+  {
+    "name": "Орехово-Зуево",
+    "region": "Московская область"
   },
   {
     "name": "Орлов",
@@ -3272,6 +3308,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
     "region": "Самарская область"
   },
   {
+    "name": "Санкт-Петербург",
+    "region": "Санкт-Петербург"
+  },
+  {
     "name": "Саранск",
     "region": "Республика Мордовия"
   },
@@ -3336,6 +3376,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
     "region": "Псковская область"
   },
   {
+    "name": "Севастополь",
+    "region": "Севастополь"
+  },
+  {
     "name": "Северо-Курильск",
     "region": "Сахалинская область"
   },
@@ -3394,6 +3438,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
   {
     "name": "Сергач",
     "region": "Нижегородская область"
+  },
+  {
+    "name": "Сергиев Посад",
+    "region": "Московская область"
   },
   {
     "name": "Сердобск",
@@ -3952,6 +4000,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
     "region": "Кировская область"
   },
   {
+    "name": "Урус-Мартан",
+    "region": "Республика Чеченская"
+  },
+  {
     "name": "Урюпинск",
     "region": "Волгоградская область"
   },
@@ -4230,6 +4282,10 @@ export const RUSSIAN_CITIES: readonly RussianCity[] = [
   {
     "name": "Шарья",
     "region": "Костромская область"
+  },
+  {
+    "name": "Шатура",
+    "region": "Московская область"
   },
   {
     "name": "Шахты",
