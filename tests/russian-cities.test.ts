@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { RUSSIAN_CITIES } from "@/lib/russian-cities";
+import { RUSSIAN_CITIES } from "../lib/russian-cities";
 
 describe("Russian city directory", () => {
   it("contains the complete source-sized city catalogue", () => {
