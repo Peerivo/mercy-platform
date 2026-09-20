@@ -1,3 +1,4 @@
+import { RussianCityInput } from "@/components/russian-city-input";
 import { createOffer } from "./actions";
 
 export default async function Volunteer({
@@ -51,14 +52,14 @@ export default async function Volunteer({
           <div className="grid cols2 compact-form-grid">
             <label>
               Страна
-              <input name="country" required maxLength={80} />
+              <input name="country" required maxLength={80} defaultValue="Россия" />
             </label>
             <label>
               Город
-              <input
+              <RussianCityInput
                 name="city"
                 maxLength={120}
-                placeholder="Можно оставить пустым при помощи онлайн"
+                placeholder="Начните вводить город России"
               />
             </label>
           </div>
