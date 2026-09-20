@@ -44,13 +44,16 @@ export function HelpForm() {
           </label>
 
           <label>
-            Город
+            Населённый пункт
             <RussianCityInput
               name="city"
               required
               maxLength={120}
-              placeholder="Начните вводить город России"
+              placeholder="Например, Псебай или Москва"
             />
+            <small className="muted">
+              Если населённого пункта нет в подсказках, введите его вручную — при отправке проверим название по ГАР/ФИАС.
+            </small>
           </label>
         </div>
 
