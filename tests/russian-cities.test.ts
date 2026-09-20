@@ -4,7 +4,7 @@ import { RUSSIAN_CITIES } from "@/lib/russian-cities";
 
 describe("Russian city directory", () => {
   it("contains the complete source-sized city catalogue", () => {
-    expect(RUSSIAN_CITIES.length).toBeGreaterThan(1000);
+    expect(RUSSIAN_CITIES).toHaveLength(1117);
   });
 
   it.each(["Москва", "Санкт-Петербург", "Владивосток", "Калининград"])(
