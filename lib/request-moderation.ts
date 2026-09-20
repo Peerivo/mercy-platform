@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { siteUrl } from "@/lib/config";
-import { adminSupabase } from "@/lib/supabase/admin";
+import { siteUrl } from "./config";
+import { adminSupabase } from "./supabase/admin";
 
 const MODERATION_TOKEN_TTL_MS = 48 * 60 * 60 * 1000;
 
