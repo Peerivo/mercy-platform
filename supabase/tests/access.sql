@@ -1,8 +1,15 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(58);
+select plan(65);
 select has_table('public','help_requests','schema reproduced');
 select has_column('public','help_requests','published_at','help requests have explicit publication state');
+select has_column('public','help_requests','review_status','help requests have explicit moderation state');
+select has_column('public','help_requests','reviewed_at','help requests record moderation time');
+select ok((select column_default is null from information_schema.columns where table_schema='public' and table_name='help_requests' and column_name='published_at'),'new requests are unpublished by default');
+select has_table('private','help_request_moderation_tokens','moderation capabilities are stored outside the exposed schema');
+select ok(not has_table_privilege('anon','private.help_request_moderation_tokens','SELECT') and not has_table_privilege('authenticated','private.help_request_moderation_tokens','SELECT'),'moderation token hashes are not API-readable');
+select ok(has_function_privilege('service_role','public.issue_help_request_moderation_token(uuid,text,timestamptz)','EXECUTE') and not has_function_privilege('anon','public.issue_help_request_moderation_token(uuid,text,timestamptz)','EXECUTE') and not has_function_privilege('authenticated','public.issue_help_request_moderation_token(uuid,text,timestamptz)','EXECUTE'),'only service role can issue moderation capabilities');
+select ok(has_function_privilege('service_role','public.moderate_help_request_by_token_hash(text,text)','EXECUTE') and not has_function_privilege('anon','public.moderate_help_request_by_token_hash(text,text)','EXECUTE') and not has_function_privilege('authenticated','public.moderate_help_request_by_token_hash(text,text)','EXECUTE'),'only service role can apply capability decisions');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.messages'::regclass),'messages: RLS enabled');
 select has_index('public','service_locations','service_locations_geo_idx','geo index exists');
