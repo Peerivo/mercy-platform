@@ -1,5 +1,6 @@
 import { serverSupabase } from "@/lib/supabase/server";
 import { Nearby } from "@/components/nearby";
+import { RussianCityInput } from "@/components/russian-city-input";
 
 export default async function NearbyPage({
   searchParams,
@@ -42,10 +43,10 @@ export default async function NearbyPage({
         <div className="nearby-search-row">
           <label>
             Город
-            <input
+            <RussianCityInput
               name="city"
               defaultValue={city}
-              placeholder="Например, Батуми"
+              placeholder="Например, Москва"
             />
           </label>
           <button className="btn secondary">Показать список</button>
