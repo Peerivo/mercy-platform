@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { publicConfig } from "@/lib/config";
+import { publicConfig } from "../config";
 
 let adminClient: SupabaseClient | null = null;
 
