@@ -88,7 +88,12 @@ export default async function Cabinet() {
                 </strong>
                 <p>
                   {request.city} · {request.urgency} ·{" "}
-                  {getPublicRequestStatus(request.status)} · {" "}\n                  {request.review_status === "PENDING"\n                    ? "на проверке"\n                    : request.review_status === "REJECTED"\n                      ? "отклонена"\n                      : "опубликована"}
+                  {getPublicRequestStatus(request.status)} · {" "}
+                  {request.review_status === "PENDING"
+                  ? "на проверке"
+                  : request.review_status === "REJECTED"
+                  ? "отклонена"
+                  : "опубликована"}
                 </p>
               </Link>
             ))
