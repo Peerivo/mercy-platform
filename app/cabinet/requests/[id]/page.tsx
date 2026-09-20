@@ -31,9 +31,22 @@ type OwnResponse = {
   contact_method: string;
 };
 
-type PrivateRequestAccess = {
+type RequestView = {
   id: string;
+  case_number: number;
+  category: string;
+  country: string;
+  city: string;
+  description: string;
+  urgency: string;
+  status: string;
+  created_at: string;
+  review_status?: string;
+};
+
+type PrivateRequestAccess = RequestView & {
   owner_id: string;
+  review_status: string;
 };
 
 export default async function Case({
@@ -48,15 +61,12 @@ export default async function Case({
     data: { user },
   } = await s.auth.getUser();
 
-  const { data: publicRows, error } = await s.rpc("get_public_help_request", {
+  const publicResult = await s.rpc("get_public_help_request", {
     case_id: id,
   });
 
-  const r = publicRows?.[0];
-
-  if (error || !r) {
-    notFound();
-  }
+  let r = (publicResult.data?.[0] ?? null) as RequestView | null;
+  const published = Boolean(r);
 
   let canAccessPrivate = false;
   let isCoordinator = false;
@@ -70,15 +80,19 @@ export default async function Case({
     const [privateAccessResult, ownResponseResult] = await Promise.all([
       s
         .from("help_requests")
-        .select("id,owner_id")
+        .select(
+          "id,owner_id,case_number,category,country,city,description,urgency,status,review_status,created_at"
+        )
         .eq("id", id)
         .maybeSingle(),
-      s
-        .from("help_request_responses")
-        .select("message,contact_method")
-        .eq("help_request_id", id)
-        .eq("responder_id", user.id)
-        .maybeSingle(),
+      published
+        ? s
+            .from("help_request_responses")
+            .select("message,contact_method")
+            .eq("help_request_id", id)
+            .eq("responder_id", user.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
     const privateRequest =
@@ -86,11 +100,15 @@ export default async function Case({
         ? (privateAccessResult.data as PrivateRequestAccess)
         : null;
 
-    // The help_requests SELECT policy is the authorization source of truth:
-    // only the owner or the active coordinator can see this row.
+    // The help_requests SELECT policy remains the private authorization source:
+    // only the owner or the active coordinator can read the base row.
     canAccessPrivate = privateRequest !== null;
     isOwner = privateRequest?.owner_id === user.id;
     isCoordinator = canAccessPrivate && !isOwner;
+
+    if (!r && privateRequest) {
+      r = privateRequest;
+    }
 
     ownResponse =
       ownResponseResult.data && !ownResponseResult.error
@@ -125,8 +143,13 @@ export default async function Case({
     }
   }
 
+  if (!r) {
+    notFound();
+  }
+
   const publicStatus = getPublicRequestStatus(r.status);
   const completed = r.status === "RESOLVED" || r.status === "CLOSED";
+  const reviewStatus = r.review_status ?? (published ? "VERIFIED" : "PENDING");
 
   return (
     <section className="container section">
@@ -134,6 +157,19 @@ export default async function Case({
         <h1>Просьба № {r.case_number}</h1>
         {isCoordinator && <a href="/staff/cases">К назначенным обращениям</a>}
       </div>
+
+      {isOwner && reviewStatus === "PENDING" && (
+        <div className="notice">
+          Просьба отправлена на проверку и пока не видна в публичном списке.
+          После одобрения она будет опубликована автоматически.
+        </div>
+      )}
+
+      {isOwner && reviewStatus === "REJECTED" && (
+        <p role="alert">
+          Просьба отклонена при проверке и не опубликована.
+        </p>
+      )}
 
       <div className="card">
         <p>
@@ -152,8 +188,8 @@ export default async function Case({
 
         <p>{r.description}</p>
 
-        <ShareRequest caseNumber={r.case_number} />
-        <ReportRequest caseId={id} />
+        {published && <ShareRequest caseNumber={r.case_number} />}
+        {published && <ReportRequest caseId={id} />}
 
         {isOwner && r.status !== "CLOSED" && (
           <OwnerRequestActions caseId={id} />
@@ -162,7 +198,7 @@ export default async function Case({
         {isCoordinator && <StatusForm caseId={id} status={r.status} />}
       </div>
 
-      {!completed && !isOwner && !isCoordinator && (
+      {published && !completed && !isOwner && !isCoordinator && (
         <RequestResponse
           caseId={id}
           signedIn={Boolean(user)}
@@ -191,7 +227,11 @@ export default async function Case({
                 ) : (
                   <div className="empty-state">
                     <h3>Пока нет откликов</h3>
-                    <p>Когда кто-то предложит помощь, отклик появится здесь.</p>
+                    <p>
+                      {published
+                        ? "Когда кто-то предложит помощь, отклик появится здесь."
+                        : "Отклики станут доступны после публикации просьбы."}
+                    </p>
                   </div>
                 )}
               </div>
