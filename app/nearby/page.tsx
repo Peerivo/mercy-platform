@@ -37,16 +37,16 @@ export default async function NearbyPage({
       <form className="card nearby-search-card">
         <div className="form-section-heading">
           <span className="request-section-kicker">Фильтр</span>
-          <h2>Выберите город</h2>
+          <h2>Выберите населённый пункт</h2>
         </div>
 
         <div className="nearby-search-row">
           <label>
-            Город
+            Населённый пункт
             <RussianCityInput
               name="city"
               defaultValue={city}
-              placeholder="Например, Москва"
+              placeholder="Например, Псебай или Москва"
             />
           </label>
           <button className="btn secondary">Показать список</button>
