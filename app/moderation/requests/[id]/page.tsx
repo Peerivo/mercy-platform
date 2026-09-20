@@ -1,8 +1,18 @@
+import type { Metadata } from "next";
 import { adminSupabase } from "@/lib/supabase/admin";
 import { hashRequestModerationToken } from "@/lib/request-moderation";
 import { moderateRequest } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+  },
+  referrer: "no-referrer",
+};
 
 type ModerationRow = {
   id: string;
