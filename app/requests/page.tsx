@@ -162,12 +162,12 @@ export default async function RequestsPage({
           </label>
 
           <label>
-            Город
+            Населённый пункт
             <RussianCityInput
               name="city"
               maxLength={120}
               defaultValue={filters.city}
-              placeholder="Например, Москва"
+              placeholder="Например, Псебай или Москва"
             />
           </label>
         </div>
