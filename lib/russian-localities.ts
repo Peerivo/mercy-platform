@@ -1,5 +1,5 @@
-import { RUSSIAN_CITIES } from "@/lib/russian-cities";
-import { RUSSIAN_URBAN_SETTLEMENTS } from "@/lib/russian-urban-settlements";
+import { RUSSIAN_CITIES } from "./russian-cities";
+import { RUSSIAN_URBAN_SETTLEMENTS } from "./russian-urban-settlements";
 
 export type RussianLocality = Readonly<{
   name: string;
