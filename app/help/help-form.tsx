@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createRequest } from "./actions";
 import { getRequestJurisdiction } from "@/lib/request-consent";
+import { RussianCityInput } from "@/components/russian-city-input";
 
 export function HelpForm() {
   const [country, setCountry] = useState("Россия");
@@ -44,7 +45,12 @@ export function HelpForm() {
 
           <label>
             Город
-            <input name="city" required maxLength={120} />
+            <RussianCityInput
+              name="city"
+              required
+              maxLength={120}
+              placeholder="Начните вводить город России"
+            />
           </label>
         </div>
 
