@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { RussianCityInput } from "@/components/russian-city-input";
+
 import { serverSupabase } from "@/lib/supabase/server";
 import { getPublicRequestStatus } from "@/lib/request-status";
 import { publicRequestSearchSchema } from "@/lib/validation";
@@ -161,11 +163,11 @@ export default async function RequestsPage({
 
           <label>
             Город
-            <input
+            <RussianCityInput
               name="city"
               maxLength={120}
               defaultValue={filters.city}
-              placeholder="Например, Батуми"
+              placeholder="Например, Москва"
             />
           </label>
         </div>
