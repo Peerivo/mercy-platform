@@ -9,7 +9,7 @@ import type {
   MouseEvent,
 } from "react";
 
-import { RUSSIAN_CITIES } from "@/lib/russian-cities";
+import { RUSSIAN_LOCALITIES } from "@/lib/russian-localities";
 
 type RussianCityInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -19,7 +19,7 @@ type RussianCityInputProps = Omit<
 const MAX_SUGGESTIONS = 8;
 
 function normalize(value: string) {
-  return value.trim().toLocaleLowerCase("ru-RU");
+  return value.trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е");
 }
 
 export function RussianCityInput({
@@ -34,7 +34,7 @@ export function RussianCityInput({
 }: RussianCityInputProps) {
   const generatedId = useId();
   const safeId = generatedId.replace(/:/g, "");
-  const inputId = id ?? `russian-city-${safeId}`;
+  const inputId = id ?? `russian-locality-${safeId}`;
   const listId = `${inputId}-suggestions`;
 
   const [value, setValue] = useState(() => String(defaultValue ?? ""));
@@ -48,8 +48,8 @@ export function RussianCityInput({
       return [];
     }
 
-    const startsWith = RUSSIAN_CITIES.filter((city) =>
-      normalize(city.name).startsWith(query)
+    const startsWith = RUSSIAN_LOCALITIES.filter((locality) =>
+      normalize(locality.name).startsWith(query),
     );
 
     if (startsWith.length >= MAX_SUGGESTIONS) {
@@ -57,13 +57,18 @@ export function RussianCityInput({
     }
 
     const startsWithKeys = new Set(
-      startsWith.map((city) => `${city.name}\u0000${city.region}`)
+      startsWith.map(
+        (locality) =>
+          `${locality.name}\u0000${locality.region}\u0000${locality.kind}`,
+      ),
     );
 
-    const contains = RUSSIAN_CITIES.filter(
-      (city) =>
-        normalize(city.name).includes(query) &&
-        !startsWithKeys.has(`${city.name}\u0000${city.region}`)
+    const contains = RUSSIAN_LOCALITIES.filter(
+      (locality) =>
+        normalize(locality.name).includes(query) &&
+        !startsWithKeys.has(
+          `${locality.name}\u0000${locality.region}\u0000${locality.kind}`,
+        ),
     );
 
     return [...startsWith, ...contains].slice(0, MAX_SUGGESTIONS);
@@ -89,8 +94,8 @@ export function RussianCityInput({
     onBlur?.(event);
   }
 
-  function chooseCity(cityName: string) {
-    setValue(cityName);
+  function chooseLocality(localityName: string) {
+    setValue(localityName);
     setIsOpen(false);
     setActiveIndex(-1);
   }
@@ -99,7 +104,7 @@ export function RussianCityInput({
     if (visible && event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((current) =>
-        current >= suggestions.length - 1 ? 0 : current + 1
+        current >= suggestions.length - 1 ? 0 : current + 1,
       );
       return;
     }
@@ -107,14 +112,14 @@ export function RussianCityInput({
     if (visible && event.key === "ArrowUp") {
       event.preventDefault();
       setActiveIndex((current) =>
-        current <= 0 ? suggestions.length - 1 : current - 1
+        current <= 0 ? suggestions.length - 1 : current - 1,
       );
       return;
     }
 
     if (visible && event.key === "Enter" && activeIndex >= 0) {
       event.preventDefault();
-      chooseCity(suggestions[activeIndex].name);
+      chooseLocality(suggestions[activeIndex].name);
       return;
     }
 
@@ -128,12 +133,10 @@ export function RussianCityInput({
 
   function handleOptionMouseDown(
     event: MouseEvent<HTMLLIElement>,
-    cityName: string
+    localityName: string,
   ) {
-    // Keep focus on the input so selecting an option does not accidentally
-    // submit or blur the surrounding form before the value is applied.
     event.preventDefault();
-    chooseCity(cityName);
+    chooseLocality(localityName);
   }
 
   return (
@@ -163,12 +166,12 @@ export function RussianCityInput({
           className="russian-city-suggestions"
           id={listId}
           role="listbox"
-          aria-label="Города России"
+          aria-label="Населённые пункты России"
         >
-          {suggestions.map((city, index) => (
+          {suggestions.map((locality, index) => (
             <li
               id={`${listId}-option-${index}`}
-              key={`${city.name}-${city.region}-${index}`}
+              key={`${locality.name}-${locality.region}-${locality.kind}-${index}`}
               className={
                 index === activeIndex
                   ? "russian-city-option is-active"
@@ -176,11 +179,15 @@ export function RussianCityInput({
               }
               role="option"
               aria-selected={index === activeIndex}
-              onMouseDown={(event) => handleOptionMouseDown(event, city.name)}
+              onMouseDown={(event) =>
+                handleOptionMouseDown(event, locality.name)
+              }
               onMouseEnter={() => setActiveIndex(index)}
             >
-              <span className="russian-city-name">{city.name}</span>
-              <span className="russian-city-region">{city.region}</span>
+              <span className="russian-city-name">{locality.name}</span>
+              <span className="russian-city-region">
+                {locality.kind} · {locality.region}
+              </span>
             </li>
           ))}
         </ul>
