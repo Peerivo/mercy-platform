@@ -1,4 +1,4 @@
-import { findKnownRussianLocality } from "@/lib/russian-localities";
+import { findKnownRussianLocality } from "./russian-localities";
 
 export type LocalityVerification = Readonly<{
   verified: boolean;
