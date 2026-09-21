@@ -26,6 +26,7 @@ describe("Beget cutover freeze transport", () => {
     expect(freezeBlock?.[1]).toMatch(/^\nBEGIN;/);
     expect(freezeBlock?.[1]).toMatch(/COMMIT;\s*$/);
     expect(unfreezeBlock?.[1]).toMatch(/^\nBEGIN;/);
+    expect(unfreezeBlock?.[1]).toContain("DO $");
     expect(unfreezeBlock?.[1]).toMatch(/COMMIT;\s*$/);
   });
 });
