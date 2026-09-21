@@ -30,3 +30,28 @@ describe("Beget cutover freeze transport", () => {
     expect(unfreezeBlock?.[1]).toMatch(/COMMIT;\s*$/);
   });
 });
+
+
+describe("Beget cutover remote execution", () => {
+  test("runs remote shell loops on Beget instead of interpolating runner variables", () => {
+    expect(script).toContain('ssh "${REMOTE}" bash -s -- "${REMOTE_WORK}" <<\'REMOTE\'');
+    expect(script).toContain('ssh "${REMOTE}" bash -s -- "${SUPABASE_DIR}" <<\'REMOTE\'');
+    expect(script).not.toContain('ssh "${REMOTE}" "set -euo pipefail');
+  });
+
+  test("applies schema, auth data, public data, and migration history in one target transaction", () => {
+    expect(script).toContain('echo "== Apply canonical Mercy schema and data on Beget =="');
+    expect(script).toContain("printf 'BEGIN;\\n'");
+    expect(script).toContain('cat auth-users.sql');
+    expect(script).toContain('cat auth-identities.sql');
+    expect(script).toContain('cat public-data.sql');
+    expect(script).toContain('docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1');
+    expect(script).toContain("printf 'COMMIT;\\n'");
+  });
+
+  test("restarts Supabase by compose service instead of a guessed realtime container name", () => {
+    expect(script).toContain('services=(auth rest realtime storage kong)');
+    expect(script).toContain('docker compose restart "${services[@]}"');
+    expect(script).not.toContain('realtime-dev.supabase-realtime');
+  });
+});
