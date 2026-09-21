@@ -62,10 +62,10 @@ Run **Cut over Mercy Supabase to Beget** only after the preflight succeeds. The 
 5. Verify source migration history exactly matches the repository and `auth.users`/`auth.identities` column layouts match Beget.
 6. Refuse to continue if Storage is non-empty or MFA/SSO/non-email identities are present.
 7. Freeze all `public` table writes and Auth user/identity writes on the old source using temporary DB triggers inside one transaction. Stream the SQL to containerized `psql` with Docker stdin attached (`-i`), arm cleanup before execution, then verify the exact expected relation set has the trigger and report any missing relation. The failure trap removes these triggers automatically.
-8. Apply the canonical SQL migrations from `supabase/migrations` to the fresh Beget target, then restore `auth.users`, `auth.identities`, and `public` data with triggers disabled for the import.
+8. Apply the canonical SQL migrations from `supabase/migrations`, restore `auth.users`, `auth.identities` and `public` data, and record migration history in one target PostgreSQL transaction. Remote loop variables must be evaluated on Beget via `ssh ... bash -s`/quoted heredoc, never interpolated by the GitHub runner. Data import runs with `session_replication_role = replica` inside that transaction.
 9. Do not send production database dumps to GitHub Artifacts; temporary dumps live only on the runner and Beget work directory and are removed after the run.
 10. Compare deterministic row fingerprints for every public table plus Auth users/identities, compare public RLS policy fingerprint, and compare Realtime publication membership.
-11. Restart and verify every affected service: Auth, REST/PostgREST, Realtime, Storage and Kong, then smoke Auth and a public RPC through the Russian API endpoint.
+11. Restart and verify every affected service by Docker Compose service name (`auth`, `rest`, `realtime`, `storage`, `kong`) rather than hard-coded container names, then smoke Auth and a public RPC through the Russian API endpoint.
 12. Switch the application only after database verification succeeds.
 13. Keep the source frozen until the Russian deployment is verified.
 14. On any failed migration verification, the workflow unfreezes the old source automatically; the Beget safety backup is retained for target repair/rollback.
