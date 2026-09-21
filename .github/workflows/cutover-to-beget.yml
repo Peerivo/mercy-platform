@@ -30,7 +30,7 @@ jobs:
       BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
       BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
       OLD_SUPABASE_DB_URL: ${{ secrets.OLD_SUPABASE_DB_URL }}
-      TARGET_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      TARGET_SUPABASE_URL: https://api.xn----htbcggcjkhwxk7j6bn.xn--p1ai
       TARGET_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
     steps:
@@ -51,7 +51,6 @@ jobs:
             BEGET_SUPABASE_SSH_KEY \
             BEGET_SUPABASE_KNOWN_HOSTS \
             OLD_SUPABASE_DB_URL \
-            TARGET_SUPABASE_URL \
             TARGET_ANON_KEY
           do
             if [ -z "${!name:-}" ]; then
