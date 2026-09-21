@@ -71,7 +71,7 @@ success=0
 unfreeze_source() {
   cat > "${LOCAL_WORK}/unfreeze.sql" <<'SQL'
 BEGIN;
-DO $
+DO $$
 DECLARE r record;
 BEGIN
   FOR r IN
