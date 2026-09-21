@@ -11,7 +11,7 @@ The repository contains both a read-only preflight and a separately guarded dest
 - Application production: existing Mercy deployment until the cutover increment is approved.
 - Source database: current managed `Mercy-prod` Supabase project.
 - Target database: self-hosted Supabase on Beget in Russia.
-- Public target API endpoint: `https://api.xn----htbcggcjkhwxk7j6bn.xn--p1ai`.
+- Public target API endpoint: `https://api.xn----htbcggcjkhwxk7j6bn.xn--p1ai`. The cutover workflow uses this canonical public URL directly; it is not a secret.
 - Target PostgreSQL and pooler ports must remain bound only to localhost; public access is through HTTPS/Caddy/Kong.
 
 ## Required GitHub Environment configuration
