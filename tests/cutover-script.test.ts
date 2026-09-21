@@ -55,3 +55,10 @@ describe("Beget cutover remote execution", () => {
     expect(script).not.toContain('realtime-dev.supabase-realtime');
   });
 });
+
+
+test("normalizes historical specialist Storage state to the verified empty source profile", () => {
+  expect(script).toContain("DELETE FROM storage.buckets WHERE id = 'qualification-documents';");
+  expect(script).toContain('target_storage_profile=');
+  expect(script).toContain('if [[ "${target_storage_profile}" != "0|0" ]]');
+});
