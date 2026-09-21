@@ -205,11 +205,36 @@ SQL
 source_psql -f /dev/stdin < "${LOCAL_WORK}/freeze.sql" >/dev/null
 frozen=1
 
-freeze_count="$(source_psql -Atc "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where t.tgname='mercy_migration_write_freeze' and not t.tgisinternal and (n.nspname='public' or (n.nspname='auth' and c.relname in ('users','identities')));")"
-public_table_count="$(source_psql -Atc "select count(*) from pg_tables where schemaname='public';")"
-expected_freeze_count=$((public_table_count + 2))
-if [[ "${freeze_count}" != "${expected_freeze_count}" ]]; then
-  echo "::error::Write freeze is incomplete."
+freeze_verification="$(source_psql -At -F '|' -c "
+with expected(schema_name, table_name) as (
+  select 'public'::text, tablename::text
+  from pg_tables
+  where schemaname='public'
+  union all
+  values ('auth','users'),('auth','identities')
+),
+actual as (
+  select n.nspname::text as schema_name, c.relname::text as table_name
+  from pg_trigger t
+  join pg_class c on c.oid=t.tgrelid
+  join pg_namespace n on n.oid=c.relnamespace
+  where t.tgname='mercy_migration_write_freeze'
+    and not t.tgisinternal
+)
+select
+  (select count(*) from expected),
+  (select count(*) from actual a join expected e using(schema_name,table_name)),
+  coalesce((
+    select string_agg(e.schema_name || '.' || e.table_name, ',' order by e.schema_name,e.table_name)
+    from expected e
+    left join actual a using(schema_name,table_name)
+    where a.table_name is null
+  ), '');
+")"
+IFS='|' read -r expected_freeze_count actual_freeze_count missing_freeze_tables <<< "${freeze_verification}"
+echo "Write freeze coverage: ${actual_freeze_count}/${expected_freeze_count}"
+if [[ -n "${missing_freeze_tables}" || "${actual_freeze_count}" != "${expected_freeze_count}" ]]; then
+  echo "::error::Write freeze is incomplete. Missing: ${missing_freeze_tables:-unknown}"
   exit 1
 fi
 
