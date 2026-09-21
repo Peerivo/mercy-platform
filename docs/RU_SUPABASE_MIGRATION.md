@@ -61,7 +61,7 @@ Run **Cut over Mercy Supabase to Beget** only after the preflight succeeds. The 
 4. Take and retain a safety backup of the fresh Beget target.
 5. Verify source migration history exactly matches the repository and `auth.users`/`auth.identities` column layouts match Beget.
 6. Refuse to continue if Storage is non-empty or MFA/SSO/non-email identities are present.
-7. Freeze all `public` table writes and Auth user/identity writes on the old source using temporary DB triggers; verify the exact expected relation set has the trigger, and report any missing relation. The failure trap removes these triggers automatically.
+7. Freeze all `public` table writes and Auth user/identity writes on the old source using temporary DB triggers inside one transaction. Stream the SQL to containerized `psql` with Docker stdin attached (`-i`), arm cleanup before execution, then verify the exact expected relation set has the trigger and report any missing relation. The failure trap removes these triggers automatically.
 8. Apply the canonical SQL migrations from `supabase/migrations` to the fresh Beget target, then restore `auth.users`, `auth.identities`, and `public` data with triggers disabled for the import.
 9. Do not send production database dumps to GitHub Artifacts; temporary dumps live only on the runner and Beget work directory and are removed after the run.
 10. Compare deterministic row fingerprints for every public table plus Auth users/identities, compare public RLS policy fingerprint, and compare Realtime publication membership.

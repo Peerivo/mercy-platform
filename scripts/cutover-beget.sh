@@ -45,7 +45,17 @@ p.chmod(0o600)
 PY
 
 source_psql() {
-  docker run --rm     --env-file "${SOURCE_ENV}"     postgres:17-alpine     psql -v ON_ERROR_STOP=1 "$@"
+  docker run --rm \
+    --env-file "${SOURCE_ENV}" \
+    postgres:17-alpine \
+    psql -v ON_ERROR_STOP=1 "$@"
+}
+
+source_psql_stdin() {
+  docker run --rm -i \
+    --env-file "${SOURCE_ENV}" \
+    postgres:17-alpine \
+    psql -v ON_ERROR_STOP=1 -f /dev/stdin
 }
 
 source_dump() {
@@ -60,6 +70,7 @@ success=0
 
 unfreeze_source() {
   cat > "${LOCAL_WORK}/unfreeze.sql" <<'SQL'
+BEGIN;
 DO $$
 DECLARE r record;
 BEGIN
@@ -80,8 +91,9 @@ $$;
 DROP TRIGGER IF EXISTS mercy_migration_write_freeze ON auth.users;
 DROP TRIGGER IF EXISTS mercy_migration_write_freeze ON auth.identities;
 DROP SCHEMA IF EXISTS mercy_migration CASCADE;
+COMMIT;
 SQL
-  source_psql -f /dev/stdin < "${LOCAL_WORK}/unfreeze.sql" >/dev/null
+  source_psql_stdin < "${LOCAL_WORK}/unfreeze.sql" >/dev/null
 }
 
 cleanup() {
@@ -139,6 +151,7 @@ scp -q "${LOCAL_WORK}/migrations.tgz" "${REMOTE}:${REMOTE_WORK}/migrations.tgz"
 
 echo "== Freeze old Mercy writes =="
 cat > "${LOCAL_WORK}/freeze.sql" <<'SQL'
+BEGIN;
 CREATE SCHEMA IF NOT EXISTS mercy_migration;
 CREATE TABLE IF NOT EXISTS mercy_migration.state(
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
@@ -200,10 +213,12 @@ DROP TRIGGER IF EXISTS mercy_migration_write_freeze ON auth.identities;
 CREATE TRIGGER mercy_migration_write_freeze
   BEFORE INSERT OR UPDATE OR DELETE ON auth.identities
   FOR EACH STATEMENT EXECUTE FUNCTION mercy_migration.block_write();
+COMMIT;
 SQL
 
-source_psql -f /dev/stdin < "${LOCAL_WORK}/freeze.sql" >/dev/null
+# Arm cleanup before any effect: unfreeze is idempotent and safe if the transaction rolls back.
 frozen=1
+source_psql_stdin < "${LOCAL_WORK}/freeze.sql" >/dev/null
 
 freeze_verification="$(source_psql -At -F '|' -c "
 with expected(schema_name, table_name) as (
