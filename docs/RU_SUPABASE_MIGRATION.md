@@ -4,7 +4,7 @@
 
 This runbook covers the planned migration of Mercy production data from the current managed Supabase project to the self-hosted Supabase instance in Russia on Beget.
 
-The workflow currently implemented in this repository is **preflight-only**. It does not dump user data, restore data, change the Beget database, or cut production traffic over.
+The repository contains both a read-only preflight and a separately guarded destructive cutover workflow. The cutover is manual, requires `MIGRATE`, and leaves the old source write-frozen after success until the Russian application is verified.
 
 ## Current topology
 
@@ -51,23 +51,24 @@ It must pass all of these checks:
 
 A successful preflight is evidence only; it is not authorization to migrate.
 
-## Cutover prerequisites for the future apply increment
+## Cutover workflow
 
-The destructive migration workflow must be implemented and reviewed separately. Before it can run:
+Run **Cut over Mercy Supabase to Beget** only after the preflight succeeds. The workflow performs these gates and actions:
 
 1. Put the old Mercy production into an explicit maintenance/write-freeze state so no new requests, messages, moderation actions, feedback, auth writes relevant to the application, or other mutable Mercy records can be created during the final dump and cutover.
 2. Confirm the freeze from outside the application with a smoke check that write paths are unavailable.
 3. Re-run source verification immediately after the freeze.
 4. Take and retain a safety backup of the fresh Beget target.
-5. Dump roles, schema and data using the Supabase-supported filtered procedure.
-6. Do not send production database dumps to GitHub Artifacts.
-7. Restore fail-closed in a transaction where supported and abort on the first SQL error.
-8. Verify all material tables, users, RLS policies, grants, Realtime publication state, and critical row counts, not only a small subset.
-9. Restart and verify every affected service: Auth, REST/PostgREST, Realtime, Storage and Kong. A process merely starting is insufficient; health/readiness must pass.
-10. Switch the application only after database verification succeeds.
-11. Run production smoke tests against the Russian endpoint.
-12. Keep the source frozen until the Russian deployment is verified.
-13. On any failed verification, restore Beget from the safety backup and route the application back to the old production before reopening writes.
+5. Verify source migration history exactly matches the repository and `auth.users`/`auth.identities` column layouts match Beget.
+6. Refuse to continue if Storage is non-empty or MFA/SSO/non-email identities are present.
+7. Freeze all `public` table writes and Auth user/identity writes on the old source using temporary DB triggers; the failure trap removes these triggers automatically.
+8. Apply the canonical SQL migrations from `supabase/migrations` to the fresh Beget target, then restore `auth.users`, `auth.identities`, and `public` data with triggers disabled for the import.
+9. Do not send production database dumps to GitHub Artifacts; temporary dumps live only on the runner and Beget work directory and are removed after the run.
+10. Compare deterministic row fingerprints for every public table plus Auth users/identities, compare public RLS policy fingerprint, and compare Realtime publication membership.
+11. Restart and verify every affected service: Auth, REST/PostgREST, Realtime, Storage and Kong, then smoke Auth and a public RPC through the Russian API endpoint.
+12. Switch the application only after database verification succeeds.
+13. Keep the source frozen until the Russian deployment is verified.
+14. On any failed migration verification, the workflow unfreezes the old source automatically; the Beget safety backup is retained for target repair/rollback.
 
 ## Rollback
 
