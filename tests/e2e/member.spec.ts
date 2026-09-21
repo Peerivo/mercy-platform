@@ -149,7 +149,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p1.getByLabel("Город").fill("No session");
     await p1.getByLabel("Описание").fill("This anonymous submission must never be stored");
     await p1.getByLabel(/Я согласен/).check();
-    await p1.getByRole("button", { name: "Опубликовать просьбу" }).click();
+    await p1.getByRole("button", { name: "Отправить на проверку" }).click();
     await expect(p1).toHaveURL(/\/auth/);
     await p1.getByLabel("Email").fill(firstEmail);
     await p1.getByRole("button", { name: "Получить ссылку для входа" }).click();
