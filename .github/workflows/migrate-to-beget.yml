@@ -128,16 +128,26 @@ jobs:
           fi
           echo "pg=${pg}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify required extensions exist on target
+      - name: Verify required extensions are available on target
         shell: bash
         run: |
           set -euo pipefail
           remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
           source_ext="$(docker run --rm --env-file /tmp/source-pg.env postgres:17-alpine psql -At -c "select extname from pg_extension where extname in ('postgis','pgcrypto','uuid-ossp') order by 1;")"
-          target_ext="$(ssh "${remote}" "docker exec supabase-db psql -U postgres -d postgres -At -c \"select extname from pg_extension where extname in ('postgis','pgcrypto','uuid-ossp') order by 1;\"")"
+          target_available="$(ssh "${remote}" "docker exec supabase-db psql -U postgres -d postgres -At -c \"select name from pg_available_extensions where name in ('postgis','pgcrypto','uuid-ossp') order by 1;\"")"
+          target_installed="$(ssh "${remote}" "docker exec supabase-db psql -U postgres -d postgres -At -c \"select extname from pg_extension where extname in ('postgis','pgcrypto','uuid-ossp') order by 1;\"")"
+
           printf 'Required source extensions:\n%s\n' "${source_ext}"
-          printf 'Matching target extensions:\n%s\n' "${target_ext}"
-          test "${source_ext}" = "${target_ext}"
+          printf 'Available target extensions:\n%s\n' "${target_available}"
+          printf 'Already installed target extensions:\n%s\n' "${target_installed}"
+
+          test "${source_ext}" = "${target_available}"
+
+          if ! printf '%s\n' "${target_installed}" | grep -qx postgis; then
+            echo "PostGIS is available but not yet installed on the fresh target."
+            echo "This is expected: Mercy's initial migration installs PostGIS in schema extensions."
+          fi
 
       - name: Report compatibility result
         shell: bash
