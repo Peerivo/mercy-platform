@@ -1,11 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { describe, expect, test } from "vitest";
 
 const scriptPath = path.join(process.cwd(), "scripts", "cutover-beget.sh");
 const script = fs.readFileSync(scriptPath, "utf8");
 
 describe("Beget cutover freeze transport", () => {
+  test("has valid Bash syntax", () => {
+    expect(() => execFileSync("bash", ["-n", scriptPath])).not.toThrow();
+  });
   test("streams freeze SQL through an attached Docker stdin", () => {
     expect(script).toMatch(/source_psql_stdin\(\)\s*\{[\s\S]*docker run --rm -i[\s\S]*psql -v ON_ERROR_STOP=1 -f \/dev\/stdin/);
     expect(script).toContain('source_psql_stdin < "${LOCAL_WORK}/freeze.sql"');
