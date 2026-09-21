@@ -1,0 +1,20 @@
+{
+  "apiVersion": "peerivo.io/contract/v1",
+  "kind": "GlobalContractBinding",
+  "project": {
+    "repository": "Peerivo/mercy-platform"
+  },
+  "globalRef": {
+    "repository": "Peerivo/global",
+    "id": "peerivo-global",
+    "version": "1.3.0",
+    "digest": "sha256:2b8406ae4542f58306099e4ec4930bb531ab31969c5739cb31da47ad08cf7b05",
+    "gitSha": "e3b581229ab6e21d6116ca2387fa5b604352e05e"
+  },
+  "updatePolicy": {
+    "observeAllUpdates": true,
+    "compatibleAdditive": "recompute_before_next_effectful_run",
+    "permissionOrSafetyChanging": "explicit_acknowledgement",
+    "breaking": "explicit_approval_migration_and_compatibility_evidence"
+  }
+}

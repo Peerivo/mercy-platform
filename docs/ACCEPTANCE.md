@@ -1,6 +1,7 @@
 # Acceptance
 
 ## Automated status
+- `.peerivo/global-contract.json` must exist and bind `Peerivo/mercy-platform` to canonical `Peerivo/global` / `peerivo-global` v1.3.0 with the exact canonical digest and Git SHA; agents must resolve it before effectful work and fail closed for missing/stale authority-changing bindings.
 - Unit validation: help request, volunteer offer, moderation and staff workspace schemas are covered. Specialist/provider validation is intentionally absent because that contour is not part of Mercy.
 - Clean temporary Supabase migration/RLS/Realtime integration is mandatory in CI and runs without cloud credentials or silent skips.
 - pgTAP: 32 schema/RLS/grant/default-privilege/publication assertions, including explicit checks that `specialist_profiles`, qualification documents, the specialist projection and specialist RPCs do not exist after clean migration replay.
