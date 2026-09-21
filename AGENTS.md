@@ -2,6 +2,10 @@
 
 Read `PROJECT.md` before changing code. Keep it current and separate implemented behavior from plans.
 
+## Global Contract
+
+Before any task, read `.peerivo/global-contract.json` and resolve the pinned canonical contract in `Peerivo/global`. Compute the effective `Global -> Project -> Agent -> Task/Run` contract before effectful work. Local rules may tighten inherited restrictions but may not silently weaken them. If the binding is missing or stale in a way that changes authority, permissions, or safety, fail closed until adoption is reviewed and acknowledged.
+
 - TypeScript is strict; validate untrusted input with Zod. Never trust client user IDs, roles, or assignment fields.
 - Use user JWTs for normal data access. Never expose service-role keys, database URLs, private content, or visitor coordinates in logs.
 - Schema changes are append-only SQL migrations under `supabase/migrations`; never edit an applied migration or push/reset a remote project from this workspace.
