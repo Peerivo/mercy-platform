@@ -300,6 +300,11 @@ tar -xzf migrations.tgz
     printf '\n'
   done
 
+  # Historical specialist migrations create this bucket; the later removal migration
+  # drops DB objects but hosted Supabase required Storage API cleanup. The verified
+  # source profile has zero buckets/objects, so normalize the self-hosted target here.
+  printf "DELETE FROM storage.buckets WHERE id = 'qualification-documents';\n"
+
   printf 'SET session_replication_role = replica;\n'
   cat auth-users.sql
   cat auth-identities.sql
@@ -368,6 +373,12 @@ fingerprint_target > "${LOCAL_WORK}/target.after"
 if ! cmp -s "${LOCAL_WORK}/source.after" "${LOCAL_WORK}/target.after"; then
   echo "::error::Target row fingerprints do not match frozen source."
   diff -u "${LOCAL_WORK}/source.after" "${LOCAL_WORK}/target.after" || true
+  exit 1
+fi
+
+target_storage_profile="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select (select count(*) from storage.buckets),(select count(*) from storage.objects);\"")"
+if [[ "${target_storage_profile}" != "0|0" ]]; then
+  echo "::error::Target Storage profile differs from the verified empty source profile: ${target_storage_profile}"
   exit 1
 fi
 
