@@ -45,7 +45,17 @@ p.chmod(0o600)
 PY
 
 source_psql() {
-  docker run --rm     --env-file "${SOURCE_ENV}"     postgres:17-alpine     psql -v ON_ERROR_STOP=1 "$@"
+  docker run --rm \
+    --env-file "${SOURCE_ENV}" \
+    postgres:17-alpine \
+    psql -v ON_ERROR_STOP=1 "$@"
+}
+
+source_psql_stdin() {
+  docker run --rm -i \
+    --env-file "${SOURCE_ENV}" \
+    postgres:17-alpine \
+    psql -v ON_ERROR_STOP=1 -f /dev/stdin
 }
 
 source_dump() {
@@ -81,7 +91,7 @@ DROP TRIGGER IF EXISTS mercy_migration_write_freeze ON auth.users;
 DROP TRIGGER IF EXISTS mercy_migration_write_freeze ON auth.identities;
 DROP SCHEMA IF EXISTS mercy_migration CASCADE;
 SQL
-  source_psql -f /dev/stdin < "${LOCAL_WORK}/unfreeze.sql" >/dev/null
+  source_psql_stdin < "${LOCAL_WORK}/unfreeze.sql" >/dev/null
 }
 
 cleanup() {
@@ -202,7 +212,7 @@ CREATE TRIGGER mercy_migration_write_freeze
   FOR EACH STATEMENT EXECUTE FUNCTION mercy_migration.block_write();
 SQL
 
-source_psql -f /dev/stdin < "${LOCAL_WORK}/freeze.sql" >/dev/null
+source_psql_stdin < "${LOCAL_WORK}/freeze.sql" >/dev/null
 frozen=1
 
 freeze_verification="$(source_psql -At -F '|' -c "
