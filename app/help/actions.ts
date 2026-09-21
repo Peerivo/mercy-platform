@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 import { requestSchema } from "@/lib/validation";
 import { getRequestConsentVersion } from "@/lib/request-consent";
+import { notifyRequestReview } from "@/lib/request-review-notification";
 
 export async function createRequest(fd: FormData) {
   const s = await serverSupabase();
@@ -24,6 +25,10 @@ export async function createRequest(fd: FormData) {
     can_call: fd.get("can_call") === "on",
     contact_window: fd.get("contact_window") || "",
     external_contact: fd.get("external_contact") || "",
+    beneficiary_scope: fd.get("beneficiary_scope") || "SELF",
+    beneficiary_consent_attested:
+      fd.get("beneficiary_consent_attested") === "on",
+    interaction_mode: fd.get("interaction_mode") || "REMOTE_OR_PUBLIC",
     consent: fd.get("consent") === "on",
   });
 
@@ -41,7 +46,24 @@ export async function createRequest(fd: FormData) {
     consent_version: consentVersion,
   });
 
-  if (error) redirect("/help?error=save");
+  if (error || typeof data !== "string") redirect("/help?error=save");
+
+  const { data: created } = await s
+    .from("help_requests")
+    .select("case_number")
+    .eq("id", data)
+    .maybeSingle();
+
+  if (created?.case_number) {
+    try {
+      await notifyRequestReview({
+        id: data,
+        caseNumber: created.case_number,
+      });
+    } catch (notificationError) {
+      console.error("REQUEST REVIEW EMAIL:", notificationError);
+    }
+  }
 
   redirect(`/cabinet/requests/${data}`);
 }
