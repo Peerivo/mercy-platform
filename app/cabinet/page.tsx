@@ -27,7 +27,9 @@ export default async function Cabinet() {
     await Promise.all([
       s
         .from("help_requests")
-        .select("id,case_number,category,city,urgency,status,created_at")
+        .select(
+          "id,case_number,category,city,urgency,status,review_status,created_at"
+        )
         .order("created_at", { ascending: false })
         .limit(50),
       s
@@ -88,7 +90,12 @@ export default async function Cabinet() {
                 </strong>
                 <p>
                   {request.city} · {request.urgency} ·{" "}
-                  {getPublicRequestStatus(request.status)}
+                  {getPublicRequestStatus(request.status)} ·{" "}
+                  {request.review_status === "PENDING"
+                    ? "На проверке"
+                    : request.review_status === "REJECTED"
+                      ? "Отклонено"
+                      : "Опубликовано"}
                 </p>
               </Link>
             ))

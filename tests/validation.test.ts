@@ -22,6 +22,9 @@ describe("help request validation", () => {
     can_call: false,
     contact_window: "",
     external_contact: "",
+    beneficiary_scope: "SELF",
+    beneficiary_consent_attested: false,
+    interaction_mode: "REMOTE_OR_PUBLIC",
     consent: true,
   };
 
@@ -38,6 +41,23 @@ describe("help request validation", () => {
       requestSchema.safeParse({ ...valid, description: "x".repeat(5001) })
         .success
     ).toBe(false));
+
+  it("requires an attestation when asking for another person", () => {
+    expect(
+      requestSchema.safeParse({
+        ...valid,
+        beneficiary_scope: "OTHER",
+        beneficiary_consent_attested: false,
+      }).success
+    ).toBe(false);
+    expect(
+      requestSchema.safeParse({
+        ...valid,
+        beneficiary_scope: "OTHER",
+        beneficiary_consent_attested: true,
+      }).success
+    ).toBe(true);
+  });
 });
 
 describe("volunteer offer validation", () => {

@@ -40,7 +40,7 @@ async function createRequest(page: Page) {
   await page.getByLabel("Город").fill("Test");
   await page.getByLabel("Описание").fill("A fictional browser request long enough for validation");
   await page.getByLabel(/Я согласен/).check();
-  await page.getByRole("button", { name: "Опубликовать просьбу" }).click();
+  await page.getByRole("button", { name: "Отправить на проверку" }).click();
   await expect(page).toHaveURL(/\/cabinet\/requests\/[0-9a-f-]+$/);
   return page.url();
 }
@@ -113,12 +113,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p2.goto(privateUrl);
     await expect(
       p2.getByText("A fictional browser request")
-    ).toBeVisible();
-    await p2.getByLabel("Чем вы можете помочь").fill("Могу привезти продукты сегодня вечером");
-    await p2.getByLabel("Как с вами связаться").fill("Telegram @browser-helper");
-    await p2.getByLabel(/Я согласен.*сообщение/).check();
-    await p2.getByRole("button", { name: "Отправить отклик" }).click();
-    await expect(p2.getByText(/Отклик отправлен/)).toBeVisible();
+    ).toHaveCount(0);
     await p1.getByLabel(/^Сообщение$/).fill("private draft must disappear");
     await p1.getByRole("button", { name: "Быстро скрыть приватную страницу" }).click();
     await expect(p1).toHaveURL(/\/auth$/);
@@ -144,7 +139,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
 
     await expect(
       p1.getByText("A fictional browser request")
-    ).toBeVisible();
+    ).toHaveCount(0);
 
     await expect(
       p1.getByLabel(/^Сообщение$/)
@@ -154,7 +149,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p1.getByLabel("Город").fill("No session");
     await p1.getByLabel("Описание").fill("This anonymous submission must never be stored");
     await p1.getByLabel(/Я согласен/).check();
-    await p1.getByRole("button", { name: "Опубликовать просьбу" }).click();
+    await p1.getByRole("button", { name: "Отправить на проверку" }).click();
     await expect(p1).toHaveURL(/\/auth/);
     await p1.getByLabel("Email").fill(firstEmail);
     await p1.getByRole("button", { name: "Получить ссылку для входа" }).click();
@@ -252,7 +247,7 @@ test("main pages share the responsive shell and Peerivo icon", async ({ page }) 
   }
 
   await page.setViewportSize({ width: 390, height: 900 });
-  for (const route of ["/", "/nearby", "/auth", "/help", "/volunteer", "/safe"]) {
+  for (const route of ["/", "/nearby", "/auth", "/help", "/volunteer", "/safety", "/safe"]) {
     await page.goto(route);
     await expect(page.locator("main .page-shell").first()).toBeVisible();
     expect(await page.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);

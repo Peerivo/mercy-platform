@@ -127,6 +127,9 @@ export default async function Case({
 
   const publicStatus = getPublicRequestStatus(r.status);
   const completed = r.status === "RESOLVED" || r.status === "CLOSED";
+  const pendingReview = r.review_status === "PENDING";
+  const rejectedReview = r.review_status === "REJECTED";
+  const homeVisit = r.interaction_mode === "HOME_VISIT";
 
   return (
     <section className="container section">
@@ -150,10 +153,33 @@ export default async function Case({
           <strong>Статус:</strong> {publicStatus}
         </p>
 
+        {pendingReview && (
+          <p className="form-alert">
+            Просьба ещё не опубликована: она ожидает проверки модератором.
+          </p>
+        )}
+
+        {rejectedReview && (
+          <p className="form-alert">
+            Просьба не опубликована. Решение можно уточнить через обратную связь.
+          </p>
+        )}
+
+        {homeVisit && (
+          <p className="muted">
+            Домашний визит относится к повышенному риску и координируется
+            отдельно. Прямой отклик на такую просьбу отключён.
+          </p>
+        )}
+
         <p>{r.description}</p>
 
-        <ShareRequest caseNumber={r.case_number} />
-        <ReportRequest caseId={id} />
+        {r.review_status === "VERIFIED" && (
+          <>
+            <ShareRequest caseNumber={r.case_number} />
+            <ReportRequest caseId={id} />
+          </>
+        )}
 
         {isOwner && r.status !== "CLOSED" && (
           <OwnerRequestActions caseId={id} />
@@ -162,13 +188,28 @@ export default async function Case({
         {isCoordinator && <StatusForm caseId={id} status={r.status} />}
       </div>
 
-      {!completed && !isOwner && !isCoordinator && (
+      {!completed &&
+        !isOwner &&
+        !isCoordinator &&
+        r.review_status === "VERIFIED" &&
+        !homeVisit && (
         <RequestResponse
           caseId={id}
           signedIn={Boolean(user)}
           existing={ownResponse}
         />
       )}
+
+      {!completed &&
+        !isOwner &&
+        !isCoordinator &&
+        r.review_status === "VERIFIED" &&
+        homeVisit && (
+          <div className="card">
+            Домашний визит нельзя взять обычным откликом. Подбор помощника
+            проходит через координатора.
+          </div>
+        )}
 
       {canAccessPrivate && user ? (
         <>

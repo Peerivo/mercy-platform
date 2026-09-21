@@ -6,6 +6,8 @@ import { getRequestJurisdiction } from "@/lib/request-consent";
 
 export function HelpForm() {
   const [country, setCountry] = useState("Россия");
+  const [beneficiaryScope, setBeneficiaryScope] =
+    useState<"SELF" | "OTHER">("SELF");
 
   const jurisdiction = getRequestJurisdiction(country);
 
@@ -73,6 +75,51 @@ export function HelpForm() {
             <option value="URGENT">Срочно</option>
           </select>
         </label>
+
+        <label>
+          Кому нужна помощь
+          <select
+            name="beneficiary_scope"
+            value={beneficiaryScope}
+            onChange={(event) =>
+              setBeneficiaryScope(event.target.value as "SELF" | "OTHER")
+            }
+          >
+            <option value="SELF">Мне</option>
+            <option value="OTHER">Другому человеку</option>
+          </select>
+        </label>
+
+        {beneficiaryScope === "OTHER" && (
+          <label className="consent-row">
+            <input
+              name="beneficiary_consent_attested"
+              type="checkbox"
+              required
+            />
+            <span>
+              Я подтверждаю, что человек знает о размещении этой просьбы и
+              согласен принять помощь. Перед публикацией модератор попросит
+              отдельно подтвердить это согласие.
+            </span>
+          </label>
+        )}
+
+        <label>
+          Формат помощи
+          <select name="interaction_mode" defaultValue="REMOTE_OR_PUBLIC">
+            <option value="REMOTE_OR_PUBLIC">
+              Без входа домой / онлайн / общественное место
+            </option>
+            <option value="HOME_VISIT">Нужен визит домой</option>
+          </select>
+        </label>
+
+        <p className="muted form-help-text">
+          Домашний визит проходит усиленную проверку. Обычный прямой отклик на
+          такую просьбу не открывается — нужен координатор. Подробнее:{" "}
+          <a href="/safety">как устроена безопасность Mercy</a>.
+        </p>
       </div>
 
       <div className="form-section">
@@ -125,7 +172,7 @@ export function HelpForm() {
       </div>
 
       <div className="form-submit-row">
-        <button className="btn">Опубликовать просьбу</button>
+        <button className="btn">Отправить на проверку</button>
       </div>
     </form>
   );

@@ -101,6 +101,18 @@ describe.sequential("direct help responses and public feedback", () => {
     }
     caseId = made.data;
 
+    const approved = await clients["response-admin"].rpc(
+      "moderate_help_request",
+      {
+        request_id: caseId,
+        new_status: "VERIFIED",
+        reason_text: "fictional integration review",
+        beneficiary_consent_confirmed: false,
+        requester_identity_confirmed: false,
+      }
+    );
+    if (approved.error) throw approved.error;
+
     const assigned = await clients["response-admin"].rpc("assign_case", {
       case_id: caseId,
       new_coordinator: ids["response-coordinator"],

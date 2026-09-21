@@ -157,6 +157,55 @@ describe.sequential("disposable Supabase security boundary", () => {
     for (const actor of ["u2", "c1", "a1"]) expect((await clients[actor].from("help_requests").select("id,description").eq("id", case1)).data).toEqual([]);
   });
 
+  test("new requests stay private until ADMIN review", async () => {
+    const ownerRow = await clients.u1
+      .from("help_requests")
+      .select("review_status,published_at,beneficiary_scope,interaction_mode")
+      .eq("id", case1)
+      .single();
+    expect(ownerRow.error).toBeNull();
+    expect(ownerRow.data).toMatchObject({
+      review_status: "PENDING",
+      published_at: null,
+      beneficiary_scope: "SELF",
+      interaction_mode: "REMOTE_OR_PUBLIC",
+    });
+
+    const anon = createClient(url, anonKey, { auth: { persistSession: false } });
+    const hidden = await anon.rpc("get_public_help_request", { case_id: case1 });
+    expect(hidden.error).toBeNull();
+    expect(hidden.data).toEqual([]);
+
+    const queue = await clients.a1.rpc("admin_pending_help_requests", {
+      request_limit: 50,
+      request_offset: 0,
+    });
+    expect(queue.error).toBeNull();
+    expect(queue.data?.some((row: { id: string }) => row.id === case1)).toBe(true);
+
+    const denied = await clients.u2.rpc("moderate_help_request", {
+      request_id: case1,
+      new_status: "VERIFIED",
+      reason_text: "forged review",
+      beneficiary_consent_confirmed: false,
+      requester_identity_confirmed: false,
+    });
+    expect(denied.error).not.toBeNull();
+
+    const approved = await clients.a1.rpc("moderate_help_request", {
+      request_id: case1,
+      new_status: "VERIFIED",
+      reason_text: "fictional request approved",
+      beneficiary_consent_confirmed: false,
+      requester_identity_confirmed: false,
+    });
+    expect(approved.error).toBeNull();
+
+    const visible = await anon.rpc("get_public_help_request", { case_id: case1 });
+    expect(visible.error).toBeNull();
+    expect(visible.data).toHaveLength(1);
+  });
+
   test("volunteer offer is consented, owner-isolated and moderated without staff elevation", async () => {
     const created=await clients.u1.rpc("create_volunteer_offer",{payload:{category:"FOOD",country:"XX",city:"Test",online:false,description:"A sufficiently long fictional volunteer offer",contact_method:"private chat"},consent_version:"volunteer-offer-v1"});
     expect(created.error).toBeNull();const offerId=created.data as string;

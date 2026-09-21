@@ -18,7 +18,21 @@ export const requestSchema = z.object({
   can_call: z.boolean(),
   contact_window: z.string().max(120),
   external_contact: z.string().max(200),
+  beneficiary_scope: z.enum(["SELF", "OTHER"]),
+  beneficiary_consent_attested: z.boolean(),
+  interaction_mode: z.enum(["REMOTE_OR_PUBLIC", "HOME_VISIT"]),
   consent: z.literal(true),
+}).superRefine((value, ctx) => {
+  if (
+    value.beneficiary_scope === "OTHER" &&
+    !value.beneficiary_consent_attested
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["beneficiary_consent_attested"],
+      message: "beneficiary consent attestation required",
+    });
+  }
 });
 
 export const offerSchema = z
@@ -60,6 +74,14 @@ export const volunteerReviewSchema = z.object({
   id: z.string().uuid(),
   status: z.enum(["VERIFIED", "REJECTED"]),
   reason: z.string().trim().min(3).max(500),
+});
+
+export const helpRequestReviewSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["VERIFIED", "REJECTED"]),
+  reason: z.string().trim().min(3).max(500),
+  beneficiaryConsentConfirmed: z.boolean(),
+  requesterIdentityConfirmed: z.boolean(),
 });
 
 export const staffPageSchema = z.coerce

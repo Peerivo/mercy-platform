@@ -2,6 +2,9 @@ import Link from "next/link";import {redirect} from "next/navigation";import {se
 type CaseRow={id:string;case_number:number;category:string;city:string;urgency:string;status:string;created_at:string;coordinator_id?:string|null;coordinator_name?:string|null};
 export default async function StaffCases({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){const raw=await searchParams,pageResult=staffPageSchema.safeParse(raw.page),page=pageResult.success?pageResult.data:1,limit=20,offset=(page-1)*limit,s=await serverSupabase(),{data:{user}}=await s.auth.getUser();if(!user)redirect("/auth");const {data:staffRole}=await s.rpc("current_staff_role");if(!staffRole)redirect("/cabinet");const isAdmin=staffRole==="ADMIN";let rows:CaseRow[]=[];let coordinators:{id:string;display_name:string}[]=[];if(isAdmin){const [queue,staff]=await Promise.all([s.rpc("assignment_queue",{queue_limit:limit+1,queue_offset:offset}),s.rpc("staff_coordinators",{coordinator_limit:100})]);if(queue.error||staff.error)redirect("/cabinet");rows=(queue.data??[]) as CaseRow[];coordinators=(staff.data??[]) as typeof coordinators}else{const assigned=await s.rpc("coordinator_cases",{case_limit:limit+1,case_offset:offset});if(assigned.error)redirect("/cabinet");rows=(assigned.data??[]) as CaseRow[]}const hasNext=rows.length>limit;rows=rows.slice(0,limit);return <section className="container section"><nav className="nav" aria-label="Рабочее место"><Link href="/cabinet">Кабинет</Link><strong>{isAdmin?"Очередь обращений":"Назначенные обращения"}</strong>{isAdmin && (
   <>
+    <Link href="/staff/requests">
+      Проверка просьб
+    </Link>
     <Link href="/staff/reports">
       Жалобы
     </Link>
