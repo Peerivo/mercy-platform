@@ -8,6 +8,7 @@
 - Chromium: production-build browser acceptance covers session isolation, request/chat flows, Quick Exit, ordinary Back/BFCache safety, responsive shell, icon metadata and horizontal-overflow protection.
 - Local lint, typecheck, unit tests and production build must pass before publication; Docker-backed checks remain mandatory in CI and coverage is not weakened.
 - Responsive shell: header and main content use the same bounded container with 16/24/40/56 px inline padding at the 0/640/1024/1440 px breakpoints.
+- Russian Supabase migration preflight is read-only: it must validate pinned SSH access, source/target PostgreSQL versions, an empty target Mercy contour and required extensions without dumping user data or modifying the Beget database. Source DB credentials must not appear in process arguments or logs.
 
 ## Mercy product boundary
 Mercy contains public help requests with private contact data, owner actions, staff coordination, volunteer offers, complaint moderation and a verified organization/location catalog.
@@ -28,3 +29,5 @@ A user creates an offer only through the atomic RPC: owner identity comes from J
 
 ## Production launch gate
 Before LIVE: apply migration history to the explicitly identified Supabase project through the protected GitHub Actions workflow, verify backup/restore, Auth Site URL/redirect+SMTP/email confirmation, Realtime publication, trusted ADMIN bootstrap, immutable image SHA and smoke tests. No manual `supabase db push` is part of the production procedure.
+
+Before the Russian Beget cutover, the read-only preflight must pass first. The actual migration is a separate reviewed increment and must not run until the old production write paths are frozen. That cutover must take a safety backup of Beget, restore roles/schema/data with fail-closed error handling, verify all material row counts and RLS/publication objects, verify Auth/REST/Realtime/Storage/Kong after restart, switch the application to the Russian Supabase endpoint, run smoke tests, and retain a tested rollback path. The procedure is documented in `docs/RU_SUPABASE_MIGRATION.md`.
