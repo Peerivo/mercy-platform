@@ -1,8 +1,12 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(58);
+select plan(64);
 select has_table('public','help_requests','schema reproduced');
 select has_column('public','help_requests','published_at','help requests have explicit publication state');
+select has_column('public','help_requests','review_status','help requests have moderation state');
+select has_column('public','help_requests','beneficiary_scope','help requests track beneficiary scope');
+select has_column('public','help_requests','interaction_mode','help requests track interaction risk');
+select has_index('public','help_requests','help_requests_review_queue_idx','request review queue is indexed');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.messages'::regclass),'messages: RLS enabled');
 select has_index('public','service_locations','service_locations_geo_idx','geo index exists');
@@ -19,6 +23,16 @@ select ok(has_function_privilege('authenticated','public.send_message(uuid,text,
 select ok(has_function_privilege('authenticated','public.assign_case(uuid,uuid,text)','EXECUTE') and not has_function_privilege('anon','public.assign_case(uuid,uuid,text)','EXECUTE'),'assignment RPC is authenticated only and enforces admin internally');
 select ok(not has_function_privilege('anon','public.set_staff_role(uuid,public.staff_role,boolean,text)','EXECUTE') and has_function_privilege('authenticated','public.set_staff_role(uuid,public.staff_role,boolean,text)','EXECUTE'),'staff-role RPC is authenticated only');
 select ok(not has_function_privilege('anon','public.create_help_request(jsonb,text)','EXECUTE') and has_function_privilege('authenticated','public.create_help_request(jsonb,text)','EXECUTE'),'request RPC is authenticated only');
+select ok(
+  not has_function_privilege('anon','public.admin_pending_help_requests(integer,integer)','EXECUTE')
+  and has_function_privilege('authenticated','public.admin_pending_help_requests(integer,integer)','EXECUTE'),
+  'request moderation queue requires a signed-in caller and checks ADMIN internally'
+);
+select ok(
+  not has_function_privilege('anon','public.moderate_help_request(uuid,public.review_status,text,boolean,boolean)','EXECUTE')
+  and has_function_privilege('authenticated','public.moderate_help_request(uuid,public.review_status,text,boolean,boolean)','EXECUTE'),
+  'request moderation requires a signed-in caller and checks ADMIN internally'
+);
 select ok(not has_function_privilege('anon','public.assignment_queue(integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.assignment_queue(integer,integer)','EXECUTE'),'queue RPC is authenticated only');
 select ok(not has_function_privilege('anon','public.staff_coordinators(integer)','EXECUTE') and has_function_privilege('authenticated','public.staff_coordinators(integer)','EXECUTE'),'coordinator directory is authenticated and checks admin internally');
 select ok(not has_function_privilege('anon','public.coordinator_cases(integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.coordinator_cases(integer,integer)','EXECUTE'),'coordinator case list requires a user JWT');
@@ -101,6 +115,7 @@ select results_eq(
     order by 1$$,
   $$select signature from (values
       ('admin_help_request_reports(integer,integer)'::text),
+      ('admin_pending_help_requests(integer,integer)'::text),
       ('assign_case(uuid,uuid,text)'::text),
       ('assignment_queue(integer,integer)'::text),
       ('change_case_status(uuid,request_status)'::text),
@@ -110,6 +125,7 @@ select results_eq(
       ('current_staff_role()'::text),
       ('get_public_help_request(uuid)'::text),
       ('list_public_help_requests(text,text,text,text,integer,integer)'::text),
+      ('moderate_help_request(uuid,review_status,text,boolean,boolean)'::text),
       ('moderate_volunteer_offer(uuid,review_status,text)'::text),
       ('respond_to_help_request(uuid,jsonb,text)'::text),
       ('review_help_request_report(uuid,text,text)'::text),
