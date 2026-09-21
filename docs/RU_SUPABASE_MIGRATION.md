@@ -14,15 +14,22 @@ The workflow currently implemented in this repository is **preflight-only**. It 
 - Public target API endpoint: `https://api.xn----htbcggcjkhwxk7j6bn.xn--p1ai`.
 - Target PostgreSQL and pooler ports must remain bound only to localhost; public access is through HTTPS/Caddy/Kong.
 
-## Required GitHub Environment secrets
+## Required GitHub Environment configuration
 
 The `production` environment must provide:
 
+Environment Variables (preferred; non-sensitive):
+
 - `BEGET_SUPABASE_HOST`
 - `BEGET_SUPABASE_USER`
+
+Environment Secrets:
+
 - `BEGET_SUPABASE_SSH_KEY`
 - `BEGET_SUPABASE_KNOWN_HOSTS`
 - `OLD_SUPABASE_DB_URL`
+
+For compatibility, the workflow also accepts `BEGET_SUPABASE_HOST` and `BEGET_SUPABASE_USER` as Secrets if Variables are not set.
 
 The source DB password must never be printed, committed, uploaded as an artifact, or passed in a process argument. The preflight parses it into a mode-0600 env file and passes it to the temporary Postgres client container through `--env-file`.
 

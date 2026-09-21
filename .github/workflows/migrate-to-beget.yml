@@ -16,14 +16,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      BEGET_SUPABASE_HOST: ${{ secrets.BEGET_SUPABASE_HOST }}
-      BEGET_SUPABASE_USER: ${{ secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
       OLD_SUPABASE_DB_URL: ${{ secrets.OLD_SUPABASE_DB_URL }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate required secrets
+      - name: Validate required production configuration
         shell: bash
         env:
           BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
@@ -33,7 +33,7 @@ jobs:
           missing=0
           for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS OLD_SUPABASE_DB_URL; do
             if [ -z "${!name:-}" ]; then
-              echo "::error::Missing production secret: ${name}"
+              echo "::error::Missing production configuration: ${name}"
               missing=1
             fi
           done
