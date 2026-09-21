@@ -139,7 +139,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
 
     await expect(
       p1.getByText("A fictional browser request")
-    ).toBeVisible();
+    ).toHaveCount(0);
 
     await expect(
       p1.getByLabel(/^Сообщение$/)
@@ -247,7 +247,7 @@ test("main pages share the responsive shell and Peerivo icon", async ({ page }) 
   }
 
   await page.setViewportSize({ width: 390, height: 900 });
-  for (const route of ["/", "/nearby", "/auth", "/help", "/volunteer", "/safe"]) {
+  for (const route of ["/", "/nearby", "/auth", "/help", "/volunteer", "/safety", "/safe"]) {
     await page.goto(route);
     await expect(page.locator("main .page-shell").first()).toBeVisible();
     expect(await page.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
