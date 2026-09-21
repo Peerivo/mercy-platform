@@ -142,11 +142,14 @@ cat > "${LOCAL_WORK}/freeze.sql" <<'SQL'
 CREATE SCHEMA IF NOT EXISTS mercy_migration;
 CREATE TABLE IF NOT EXISTS mercy_migration.state(
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
-  frozen_at timestamptz NOT NULL DEFAULT now()
+  frozen_at timestamptz NOT NULL DEFAULT now(),
+  frozen_until timestamptz NOT NULL
 );
-INSERT INTO mercy_migration.state(singleton)
-VALUES (true)
-ON CONFLICT (singleton) DO UPDATE SET frozen_at = excluded.frozen_at;
+INSERT INTO mercy_migration.state(singleton, frozen_until)
+VALUES (true, now() + interval '45 minutes')
+ON CONFLICT (singleton) DO UPDATE
+SET frozen_at = now(),
+    frozen_until = excluded.frozen_until;
 
 CREATE OR REPLACE FUNCTION mercy_migration.block_write()
 RETURNS trigger
@@ -154,7 +157,15 @@ LANGUAGE plpgsql
 SET search_path = ''
 AS $$
 BEGIN
-  RAISE EXCEPTION 'Mercy production is temporarily read-only for migration';
+  IF EXISTS (
+    SELECT 1
+    FROM mercy_migration.state
+    WHERE singleton = true
+      AND frozen_until > now()
+  ) THEN
+    RAISE EXCEPTION 'Mercy production is temporarily read-only for migration';
+  END IF;
+  RETURN NULL;
 END
 $$;
 
@@ -318,6 +329,7 @@ curl -fsS   -H "apikey: ${TARGET_ANON_KEY}"   -H "Authorization: Bearer ${TARGET
 
 curl -fsS   -H "apikey: ${TARGET_ANON_KEY}"   -H "Authorization: Bearer ${TARGET_ANON_KEY}"   -H "Content-Type: application/json"   -X POST   -d '{}'   "${TARGET_SUPABASE_URL}/rest/v1/rpc/list_public_help_requests" >/dev/null
 
+source_psql -Atc "update mercy_migration.state set frozen_until = now() + interval '24 hours' where singleton = true;" >/dev/null
 success=1
 echo "Migration verified successfully."
 echo "The old Mercy database remains write-frozen until application cutover is verified."
