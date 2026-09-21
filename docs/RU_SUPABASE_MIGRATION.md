@@ -45,7 +45,7 @@ It must pass all of these checks:
 4. The Beget `supabase-db` container is reachable.
 5. Source and target PostgreSQL versions are reported.
 6. The target has no Mercy users and no `public.help_requests` relation.
-7. Required extensions used by Mercy are present on the target.
+7. Required extensions used by Mercy are available on the target via `pg_available_extensions`. They need not already be installed in the fresh database when the canonical Mercy migration installs them; specifically, `202609120001_initial.sql` installs PostGIS into schema `extensions`.
 8. No source data dump is created.
 9. No target database mutation occurs.
 
