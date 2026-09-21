@@ -1,0 +1,94 @@
+name: Cut over Mercy Supabase to Beget
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Select MIGRATE to freeze old Mercy writes and migrate production data to Beget"
+        required: true
+        type: choice
+        options:
+          - CANCEL
+          - MIGRATE
+        default: CANCEL
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercy-beget-supabase-cutover
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    if: ${{ inputs.confirm == 'MIGRATE' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MIGRATION_CONFIRM: ${{ inputs.confirm }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      OLD_SUPABASE_DB_URL: ${{ secrets.OLD_SUPABASE_DB_URL }}
+      TARGET_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      TARGET_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate production configuration
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test "${MIGRATION_CONFIRM}" = "MIGRATE"
+          missing=0
+          for name in \
+            BEGET_SUPABASE_HOST \
+            BEGET_SUPABASE_USER \
+            BEGET_SUPABASE_SSH_KEY \
+            BEGET_SUPABASE_KNOWN_HOSTS \
+            OLD_SUPABASE_DB_URL \
+            TARGET_SUPABASE_URL \
+            TARGET_ANON_KEY
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing production configuration: ${name}"
+              missing=1
+            fi
+          done
+          test "${missing}" -eq 0
+
+      - name: Configure pinned SSH host key
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Syntax-check cutover script
+        shell: bash
+        run: bash -n scripts/cutover-beget.sh
+
+      - name: Freeze, migrate and verify
+        shell: bash
+        run: bash scripts/cutover-beget.sh
+
+      - name: Cutover result
+        shell: bash
+        run: |
+          echo "Mercy data is verified on Beget."
+          echo "Old Mercy writes remain frozen until the REG.RU application cutover is verified."
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519
