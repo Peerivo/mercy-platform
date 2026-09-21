@@ -1,0 +1,251 @@
+name: Migrate Mercy Supabase to Beget
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preflight only, or apply the migration"
+        required: true
+        type: choice
+        options:
+          - preflight
+          - apply
+        default: preflight
+      confirm:
+        description: "For apply only: type MIGRATE"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercy-beget-supabase-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BEGET_SUPABASE_HOST: ${{ secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ secrets.BEGET_SUPABASE_USER }}
+      OLD_SUPABASE_DB_URL: ${{ secrets.OLD_SUPABASE_DB_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.117.0
+
+      - name: Validate migration inputs and secrets
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in             BEGET_SUPABASE_HOST             BEGET_SUPABASE_USER             BEGET_SUPABASE_SSH_KEY             BEGET_SUPABASE_KNOWN_HOSTS             OLD_SUPABASE_DB_URL
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing production secret: ${name}"
+              missing=1
+            fi
+          done
+          if [ "${{ inputs.mode }}" = "apply" ] && [ "${{ inputs.confirm }}" != "MIGRATE" ]; then
+            echo "::error::Apply mode requires confirm=MIGRATE"
+            missing=1
+          fi
+          test "${missing}" -eq 0
+
+      - name: Configure pinned SSH host key
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Prepare remote migration runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "${OLD_SUPABASE_DB_URL}" > /tmp/old-supabase-db-url
+
+          cat > /tmp/migrate-mercy.sh <<'REMOTE_SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          MODE="${1:?mode required}"
+          CONFIRM="${2:-}"
+          RUN_ID="${3:?run id required}"
+          WORKDIR="/home/supabase-deploy/mercy-migration-${RUN_ID}"
+          CLI="${WORKDIR}/supabase"
+          SOURCE_FILE="${WORKDIR}/old-supabase-db-url"
+          ROLES="${WORKDIR}/roles.sql"
+          SCHEMA="${WORKDIR}/schema.sql"
+          DATA="${WORKDIR}/data.sql"
+
+          cleanup() {
+            set +e
+            rm -f "${SOURCE_FILE}" "${ROLES}" "${SCHEMA}" "${DATA}"
+            docker exec supabase-db rm -f               /tmp/mercy-roles.sql               /tmp/mercy-schema.sql               /tmp/mercy-data.sql >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          test "${MODE}" = "preflight" || test "${MODE}" = "apply"
+          if [ "${MODE}" = "apply" ] && [ "${CONFIRM}" != "MIGRATE" ]; then
+            echo "apply mode requires MIGRATE confirmation" >&2
+            exit 1
+          fi
+
+          test -x "${CLI}"
+          test -s "${SOURCE_FILE}"
+          docker inspect supabase-db >/dev/null
+          docker exec supabase-db pg_isready -U postgres -d postgres >/dev/null
+
+          SOURCE_URL="$(cat "${SOURCE_FILE}")"
+          "${CLI}" --version
+
+          source_pg="$(docker run --rm -e SOURCE_URL="${SOURCE_URL}" postgres:17-alpine             sh -c 'psql "$SOURCE_URL" -Atc "show server_version;"')"
+          target_pg="$(docker exec supabase-db psql -U postgres -d postgres -Atc 'show server_version;')"
+          echo "Source PostgreSQL: ${source_pg}"
+          echo "Target PostgreSQL: ${target_pg}"
+
+          echo "Creating Supabase-filtered logical dumps on the Russian destination server..."
+          "${CLI}" db dump --db-url "${SOURCE_URL}" -f "${ROLES}" --role-only
+          "${CLI}" db dump --db-url "${SOURCE_URL}" -f "${SCHEMA}"
+          "${CLI}" db dump --db-url "${SOURCE_URL}" -f "${DATA}" --use-copy --data-only
+
+          test -s "${ROLES}"
+          test -s "${SCHEMA}"
+          test -s "${DATA}"
+
+          # Managed Supabase may be PostgreSQL 17 while the Beget image is PostgreSQL 15.
+          # This exact setting is documented as safe to comment for a PG15 restore.
+          sed -i 's/^SET transaction_timeout/-- &/' "${SCHEMA}" "${DATA}"
+
+          echo "Dump sizes:"
+          du -h "${ROLES}" "${SCHEMA}" "${DATA}"
+          echo "Dump SHA-256:"
+          sha256sum "${ROLES}" "${SCHEMA}" "${DATA}"
+
+          source_users="$(docker run --rm -e SOURCE_URL="${SOURCE_URL}" postgres:17-alpine             sh -c 'psql "$SOURCE_URL" -Atc "select count(*) from auth.users;"')"
+          source_help="$(docker run --rm -e SOURCE_URL="${SOURCE_URL}" postgres:17-alpine             sh -c 'psql "$SOURCE_URL" -Atc "select count(*) from public.help_requests;"')"
+          source_offers="$(docker run --rm -e SOURCE_URL="${SOURCE_URL}" postgres:17-alpine             sh -c 'psql "$SOURCE_URL" -Atc "select count(*) from public.volunteer_offers;"')"
+          source_tables="$(docker run --rm -e SOURCE_URL="${SOURCE_URL}" postgres:17-alpine             sh -c 'psql "$SOURCE_URL" -Atc "select count(*) from pg_tables where schemaname='\"'\"'public'\"'\"';"')"
+          source_policies="$(docker run --rm -e SOURCE_URL="${SOURCE_URL}" postgres:17-alpine             sh -c 'psql "$SOURCE_URL" -Atc "select count(*) from pg_policies where schemaname='\"'\"'public'\"'\"';"')"
+
+          echo "Source verification counts:"
+          echo "auth.users=${source_users}"
+          echo "public.help_requests=${source_help}"
+          echo "public.volunteer_offers=${source_offers}"
+          echo "public.tables=${source_tables}"
+          echo "public.policies=${source_policies}"
+
+          if [ "${MODE}" = "preflight" ]; then
+            echo "Preflight complete. Target database was not modified."
+            exit 0
+          fi
+
+          target_users_before="$(docker exec supabase-db psql -U postgres -d postgres -Atc 'select count(*) from auth.users;')"
+          target_help_exists="$(docker exec supabase-db psql -U postgres -d postgres -Atc "select coalesce(to_regclass('public.help_requests')::text,'');")"
+
+          if [ "${target_users_before}" != "0" ] || [ -n "${target_help_exists}" ]; then
+            echo "Target is not fresh; refusing to overwrite it." >&2
+            echo "target auth.users=${target_users_before}, help_requests=${target_help_exists:-absent}" >&2
+            exit 1
+          fi
+
+          BACKUP_DIR="/home/supabase-deploy/beget-pre-migration-backups"
+          mkdir -p "${BACKUP_DIR}"
+          chmod 700 "${BACKUP_DIR}"
+          backup_prefix="${BACKUP_DIR}/before-${RUN_ID}"
+
+          echo "Creating target safety backup..."
+          docker exec supabase-db pg_dumpall -U postgres --globals-only > "${backup_prefix}-globals.sql"
+          docker exec supabase-db pg_dump -U postgres -d postgres -Fc > "${backup_prefix}-postgres.dump"
+          chmod 600 "${backup_prefix}-globals.sql" "${backup_prefix}-postgres.dump"
+
+          docker cp "${ROLES}" supabase-db:/tmp/mercy-roles.sql
+          docker cp "${SCHEMA}" supabase-db:/tmp/mercy-schema.sql
+          docker cp "${DATA}" supabase-db:/tmp/mercy-data.sql
+
+          echo "Restoring roles, schema and data in one transaction..."
+          docker exec supabase-db psql             -U postgres             -d postgres             --single-transaction             --variable ON_ERROR_STOP=1             --file /tmp/mercy-roles.sql             --file /tmp/mercy-schema.sql             --command 'SET session_replication_role = replica'             --file /tmp/mercy-data.sql
+
+          docker restart             supabase-auth             supabase-rest             realtime-dev.supabase-realtime             supabase-storage             supabase-kong >/dev/null
+
+          sleep 10
+
+          target_users="$(docker exec supabase-db psql -U postgres -d postgres -Atc 'select count(*) from auth.users;')"
+          target_help="$(docker exec supabase-db psql -U postgres -d postgres -Atc 'select count(*) from public.help_requests;')"
+          target_offers="$(docker exec supabase-db psql -U postgres -d postgres -Atc 'select count(*) from public.volunteer_offers;')"
+          target_tables="$(docker exec supabase-db psql -U postgres -d postgres -Atc "select count(*) from pg_tables where schemaname='public';")"
+          target_policies="$(docker exec supabase-db psql -U postgres -d postgres -Atc "select count(*) from pg_policies where schemaname='public';")"
+
+          echo "Target verification counts:"
+          echo "auth.users=${target_users}"
+          echo "public.help_requests=${target_help}"
+          echo "public.volunteer_offers=${target_offers}"
+          echo "public.tables=${target_tables}"
+          echo "public.policies=${target_policies}"
+
+          test "${target_users}" = "${source_users}"
+          test "${target_help}" = "${source_help}"
+          test "${target_offers}" = "${source_offers}"
+          test "${target_tables}" = "${source_tables}"
+          test "${target_policies}" = "${source_policies}"
+
+          docker exec supabase-db pg_isready -U postgres -d postgres >/dev/null
+          docker ps --filter name=supabase-auth --filter status=running --format '{{.Names}}' | grep -qx supabase-auth
+          docker ps --filter name=supabase-rest --filter status=running --format '{{.Names}}' | grep -qx supabase-rest
+          docker ps --filter name=supabase-kong --filter status=running --format '{{.Names}}' | grep -qx supabase-kong
+
+          echo "Migration verified successfully."
+          echo "Safety backup retained at: ${backup_prefix}-*"
+          REMOTE_SCRIPT
+
+          chmod 700 /tmp/migrate-mercy.sh
+
+      - name: Upload migration tooling to Beget
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          remote_dir="/home/${BEGET_SUPABASE_USER}/mercy-migration-${GITHUB_RUN_ID}"
+
+          ssh "${remote}" "mkdir -p '${remote_dir}' && chmod 700 '${remote_dir}'"
+
+          scp -q "$(command -v supabase)" "${remote}:${remote_dir}/supabase"
+          scp -q /tmp/old-supabase-db-url "${remote}:${remote_dir}/old-supabase-db-url"
+          scp -q /tmp/migrate-mercy.sh "${remote}:${remote_dir}/migrate-mercy.sh"
+
+          ssh "${remote}"             "chmod 700 '${remote_dir}/supabase' '${remote_dir}/migrate-mercy.sh' && chmod 600 '${remote_dir}/old-supabase-db-url'"
+
+      - name: Run migration on Russian destination
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          remote_dir="/home/${BEGET_SUPABASE_USER}/mercy-migration-${GITHUB_RUN_ID}"
+
+          ssh "${remote}"             "'${remote_dir}/migrate-mercy.sh' '${{ inputs.mode }}' '${{ inputs.confirm }}' '${GITHUB_RUN_ID}'"
+
+      - name: Remove runner and remote temporary files
+        if: always()
+        shell: bash
+        run: |
+          rm -f ~/.ssh/id_ed25519 /tmp/old-supabase-db-url /tmp/migrate-mercy.sh
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          remote_dir="/home/${BEGET_SUPABASE_USER}/mercy-migration-${GITHUB_RUN_ID}"
+          ssh "${remote}" "rm -rf '${remote_dir}'" >/dev/null 2>&1 || true
