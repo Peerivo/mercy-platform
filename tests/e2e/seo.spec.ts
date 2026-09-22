@@ -22,7 +22,7 @@ test("SEO discovery stays canonical without exposing private utility routes", as
   }
   expect(sitemap).not.toContain("//requests");
 
-  for (const route of ["/auth", "/feedback", "/help", "/consent/request"]) {
+  for (const route of ["/auth", "/auth/update-password", "/feedback", "/help", "/consent/request"]) {
     await page.goto(route);
     const robotsMeta = page.locator('meta[name="robots"]');
     await expect(robotsMeta).toHaveAttribute("content", /noindex/i);
