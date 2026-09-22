@@ -212,9 +212,13 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:3100/health >/dev/null
           curl --fail --silent --show-error http://127.0.0.1:3100/health/data >/dev/null
 
-          # Verify the public reverse-proxy/TLS path before committing the candidate.
-          curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health" >/dev/null
-          curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health/data" >/dev/null
+          # Verify the public reverse-proxy/TLS path and exact candidate revision
+          # before committing the candidate environment.
+          public_release="$(curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health")"
+          printf '%s' "${public_release}" | grep -F '"status":"ok"' >/dev/null
+          printf '%s' "${public_release}" | grep -F "\"version\":\"${IMAGE_TAG}\"" >/dev/null
+          public_data="$(curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health/data")"
+          printf '%s' "${public_data}" | grep -F '"status":"ok"' >/dev/null
 
           if [ -n "${old_image}" ]; then
             cp -f "${PROD_ENV}" "${PREVIOUS_ENV}"
