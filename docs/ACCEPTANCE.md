@@ -1,7 +1,7 @@
 # Acceptance
 
 ## Automated status
-- `.peerivo/global-contract.json` must exist and bind `Peerivo/mercy-platform` to canonical `Peerivo/global` / `peerivo-global` v1.3.0 with the exact canonical digest and Git SHA; agents must resolve it before effectful work and fail closed for missing/stale authority-changing bindings.
+- `.peerivo/global-contract.json` must exist and bind `Peerivo/mercy-platform` to the current canonical Global Contract authority with the exact required version, digest and Git SHA; agents must resolve the authority from the binding before effectful work and fail closed for missing/stale authority-changing bindings.
 - Unit validation: help request, volunteer offer, moderation and staff workspace schemas are covered. Specialist/provider validation is intentionally absent because that contour is not part of Mercy.
 - Clean temporary Supabase migration/RLS/Realtime integration is mandatory in CI and runs without cloud credentials or silent skips.
 - pgTAP: 32 schema/RLS/grant/default-privilege/publication assertions, including explicit checks that `specialist_profiles`, qualification documents, the specialist projection and specialist RPCs do not exist after clean migration replay.
@@ -9,6 +9,7 @@
 - Chromium: production-build browser acceptance covers session isolation, request/chat flows, Quick Exit, ordinary Back/BFCache safety, responsive shell, icon metadata and horizontal-overflow protection.
 - Local lint, typecheck, unit tests and production build must pass before publication; Docker-backed checks remain mandatory in CI and coverage is not weakened.
 - Responsive shell: header and main content use the same bounded container with 16/24/40/56 px inline padding at the 0/640/1024/1440 px breakpoints.
+- SEO/discovery browser acceptance must verify normalized canonical URLs, `/robots.txt`, `/sitemap.xml`, observable `noindex` on non-indexable public/private utility routes, and self-referencing pagination canonical for `/requests?page=N`; robots exclusions must not prevent crawlers from observing required `noindex` directives.
 - Russian Supabase migration preflight is read-only: it must accept non-sensitive Beget host/user from the production Environment Variables (with secret fallback), keep credentials/keys in Secrets, validate pinned SSH access, source/target PostgreSQL versions, an empty target Mercy contour and availability of required extensions without dumping user data or modifying the Beget database. An extension does not have to be installed on the fresh target if the Mercy migration itself installs it; it must be present in `pg_available_extensions`. Source DB credentials must not appear in process arguments or logs.
 
 ## Mercy product boundary
