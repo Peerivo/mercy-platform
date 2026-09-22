@@ -1,11 +1,5 @@
 import Link from "next/link";
 
-export const metadata = {
-  title: "Просьбы о помощи",
-  description: "Опубликованные просьбы о добровольной и практической помощи.",
-  alternates: { canonical: "/requests" },
-};
-
 import { serverSupabase } from "@/lib/supabase/server";
 import { getPublicRequestStatus } from "@/lib/request-status";
 import { publicRequestSearchSchema } from "@/lib/validation";
@@ -54,6 +48,41 @@ type Filters = {
   page: number;
 };
 
+function parseFilters(raw: Record<string, string | string[] | undefined>): Filters {
+  const parsed = publicRequestSearchSchema.safeParse({
+    category: one(raw.category),
+    city: one(raw.city),
+    urgency: one(raw.urgency),
+    state: one(raw.state) || "ACTIVE",
+    page: one(raw.page) || "1",
+  });
+
+  return parsed.success
+    ? parsed.data
+    : {
+        category: "",
+        city: "",
+        urgency: "",
+        state: "ACTIVE",
+        page: 1,
+      };
+}
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const filters = parseFilters(await searchParams);
+  const canonical = filters.page > 1 ? `/requests?page=${filters.page}` : "/requests";
+
+  return {
+    title: "Просьбы о помощи",
+    description: "Опубликованные просьбы о добровольной и практической помощи.",
+    alternates: { canonical },
+  };
+}
+
 function requestsHref(filters: Filters, page: number) {
   const params = new URLSearchParams();
 
@@ -89,23 +118,7 @@ export default async function RequestsPage({
 }) {
   const raw = await searchParams;
 
-  const parsed = publicRequestSearchSchema.safeParse({
-    category: one(raw.category),
-    city: one(raw.city),
-    urgency: one(raw.urgency),
-    state: one(raw.state) || "ACTIVE",
-    page: one(raw.page) || "1",
-  });
-
-  const filters: Filters = parsed.success
-    ? parsed.data
-    : {
-        category: "",
-        city: "",
-        urgency: "",
-        state: "ACTIVE",
-        page: 1,
-      };
+  const filters = parseFilters(raw);
 
   const pageSize = 20;
   const offset = (filters.page - 1) * pageSize;
