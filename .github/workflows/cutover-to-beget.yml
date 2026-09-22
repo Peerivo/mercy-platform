@@ -11,6 +11,11 @@ on:
           - CANCEL
           - MIGRATE
         default: CANCEL
+      recover_from_run_id:
+        description: "Optional failed cutover run ID whose retained Beget safety backup must be restored before MIGRATE"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -27,6 +32,7 @@ jobs:
     timeout-minutes: 45
     env:
       MIGRATION_CONFIRM: ${{ inputs.confirm }}
+      RECOVER_FROM_RUN_ID: ${{ inputs.recover_from_run_id }}
       BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
       BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
       OLD_SUPABASE_DB_URL: ${{ secrets.OLD_SUPABASE_DB_URL }}
