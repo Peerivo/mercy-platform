@@ -1,12 +1,13 @@
 import type { MetadataRoute } from "next";
-
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://mercy.peerivo.net";
+import { siteUrl } from "@/lib/config";
 
 export default function sitemap(): MetadataRoute.Sitemap {
+  const baseUrl = siteUrl();
+
   return [
-    { url: `${siteUrl}/`, changeFrequency: "weekly", priority: 1 },
-    { url: `${siteUrl}/requests`, changeFrequency: "daily", priority: 0.9 },
-    { url: `${siteUrl}/nearby`, changeFrequency: "daily", priority: 0.8 },
-    { url: `${siteUrl}/volunteer`, changeFrequency: "monthly", priority: 0.6 },
+    { url: `${baseUrl}/`, changeFrequency: "weekly", priority: 1 },
+    { url: `${baseUrl}/requests`, changeFrequency: "daily", priority: 0.9 },
+    { url: `${baseUrl}/nearby`, changeFrequency: "daily", priority: 0.8 },
+    { url: `${baseUrl}/volunteer`, changeFrequency: "monthly", priority: 0.6 },
   ];
 }
