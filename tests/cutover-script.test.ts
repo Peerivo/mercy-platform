@@ -104,9 +104,13 @@ describe("Beget cutover recovery", () => {
     expect(recoveryCall).toBeLessThan(freshnessInvocation);
   });
 
-  test("rolls Beget back automatically after a post-apply failure", () => {
+  test("arms Beget rollback before remote target mutation", () => {
     expect(script).toContain("target_mutated=0");
-    expect(script).toContain("target_mutated=1");
+    const arm = script.indexOf("target_mutated=1");
+    const apply = script.indexOf('ssh "\${REMOTE}" bash -s -- "\${REMOTE_WORK}" <<\'REMOTE\'');
+    expect(arm).toBeGreaterThan(-1);
+    expect(apply).toBeGreaterThan(-1);
+    expect(arm).toBeLessThan(apply);
     expect(script).toContain('restore_target_backup "\${backup_prefix}-postgres.dump"');
   });
 
@@ -118,10 +122,17 @@ describe("Beget cutover recovery", () => {
     expect(script).not.toContain('SUPABASE_DIR="/opt/beget/supabase"');
   });
 
-  test("restores a safety backup with non-db project containers stopped", () => {
+  test("recreates target safely while keeping the database container running", () => {
+    expect(script).toContain('docker ps --no-trunc -q --filter "label=com.docker.compose.project=$project"');
     expect(script).toContain('docker stop "\${other_ids[@]}"');
+    expect(script).toContain("docker exec supabase-db dropdb");
+    expect(script).toContain("docker exec supabase-db createdb");
     expect(script).toContain("docker exec -i supabase-db pg_restore");
     expect(script).toContain('--single-transaction < "$backup_file"');
+    expect(script).not.toContain("--no-owner");
+    expect(script).not.toContain("--no-privileges");
+    expect(script).toContain("SET LOCAL ROLE supabase_auth_admin;");
+    expect(script).toContain("SET LOCAL ROLE supabase_storage_admin;");
     expect(script).toContain('[[ "$state" == "0||0|0" ]]');
   });
 });
