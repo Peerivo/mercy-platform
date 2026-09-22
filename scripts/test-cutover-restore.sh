@@ -36,6 +36,7 @@ admin_psql -c "drop role if exists mercy_restore_reader;" >/dev/null
 admin_psql -c "drop role if exists mercy_restore_owner;" >/dev/null
 admin_psql -c "create role mercy_restore_owner;" >/dev/null
 admin_psql -c "create role mercy_restore_reader;" >/dev/null
+admin_psql -c "grant mercy_restore_owner to postgres; grant mercy_restore_reader to postgres;" >/dev/null
 admin_psql -c "create database mercy_restore_test owner mercy_restore_owner template template0;" >/dev/null
 
 target_psql <<'SQL' >/dev/null
