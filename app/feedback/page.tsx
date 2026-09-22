@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { submitFeedback } from "./actions";
 
+export const metadata = {
+  title: "Обратная связь — Язык милосердия",
+  robots: { index: false, follow: false },
+};
+
 export default async function FeedbackPage({
   searchParams,
 }: {
