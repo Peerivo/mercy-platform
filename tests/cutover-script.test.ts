@@ -62,7 +62,15 @@ describe("Beget cutover remote execution", () => {
 
 
 test("normalizes historical specialist Storage state to the verified empty source profile", () => {
-  expect(script).toContain("DELETE FROM storage.buckets WHERE id = 'qualification-documents';");
+  const applyBlock = script.match(/echo "== Apply canonical Mercy schema and data on Beget =="([\s\S]*?)echo "== Restart and verify Supabase services =="/)?.[1] ?? "";
+  const deleteIndex = applyBlock.indexOf("DELETE FROM storage.buckets WHERE id = 'qualification-documents';");
+  const replicaBefore = applyBlock.lastIndexOf("SET session_replication_role = replica;", deleteIndex);
+  const originAfter = applyBlock.indexOf("SET session_replication_role = origin;", deleteIndex);
+
+  expect(deleteIndex).toBeGreaterThan(-1);
+  expect(replicaBefore).toBeGreaterThan(-1);
+  expect(replicaBefore).toBeLessThan(deleteIndex);
+  expect(originAfter).toBeGreaterThan(deleteIndex);
   expect(script).toContain('target_storage_profile=');
   expect(script).toContain('if [[ "${target_storage_profile}" != "0|0" ]]');
 });

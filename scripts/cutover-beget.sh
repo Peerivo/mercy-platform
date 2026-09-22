@@ -302,8 +302,12 @@ tar -xzf migrations.tgz
 
   # Historical specialist migrations create this bucket; the later removal migration
   # drops DB objects but hosted Supabase required Storage API cleanup. The verified
-  # source profile has zero buckets/objects, so normalize the self-hosted target here.
+  # source and fresh target both have zero Storage objects. During this one bootstrap
+  # transaction only, bypass Storage's delete-protection trigger to remove the known
+  # empty historical bucket, then immediately restore normal trigger behavior.
+  printf 'SET session_replication_role = replica;\n'
   printf "DELETE FROM storage.buckets WHERE id = 'qualification-documents';\n"
+  printf 'SET session_replication_role = origin;\n'
 
   printf 'SET session_replication_role = replica;\n'
   cat auth-users.sql
