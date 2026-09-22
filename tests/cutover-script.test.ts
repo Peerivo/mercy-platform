@@ -83,3 +83,34 @@ test("rejects any pre-existing target Storage bucket before mutation", () => {
   expect(script.indexOf("target_fresh=")).toBeLessThan(script.indexOf('echo "== Target safety backup =="'));
   expect(script.indexOf("target_fresh=")).toBeLessThan(script.indexOf('echo "== Apply canonical Mercy schema and data on Beget =="'));
 });
+
+
+describe("Beget cutover recovery", () => {
+  test("supports explicit recovery from a retained failed-run safety backup before freshness gating", () => {
+    expect(script).toContain('RECOVER_FROM_RUN_ID="\${RECOVER_FROM_RUN_ID:-}"');
+    expect(script).toContain('recovery_backup="\${BACKUP_DIR}/before-\${RECOVER_FROM_RUN_ID}-postgres.dump"');
+    expect(script).toContain('restore_target_backup "\${recovery_backup}"');
+    expect(script.indexOf('restore_target_backup "\${recovery_backup}"')).toBeLessThan(script.indexOf("assert_target_fresh"));
+  });
+
+  test("rolls Beget back automatically after a post-apply failure", () => {
+    expect(script).toContain("target_mutated=0");
+    expect(script).toContain("target_mutated=1");
+    expect(script).toContain('restore_target_backup "\${backup_prefix}-postgres.dump"');
+  });
+
+  test("restarts Supabase services without requiring access to the compose directory", () => {
+    expect(script).toContain("com.docker.compose.project");
+    expect(script).toContain("com.docker.compose.service=$service");
+    expect(script).toContain('docker restart "$cid"');
+    expect(script).not.toContain('cd "$supabase_dir"');
+    expect(script).not.toContain('SUPABASE_DIR="/opt/beget/supabase"');
+  });
+
+  test("restores a safety backup with non-db project containers stopped", () => {
+    expect(script).toContain('docker stop "\${other_ids[@]}"');
+    expect(script).toContain("docker exec -i supabase-db pg_restore");
+    expect(script).toContain('--single-transaction < "$backup_file"');
+    expect(script).toContain('[[ "$state" == "0||0|0" ]]');
+  });
+});
