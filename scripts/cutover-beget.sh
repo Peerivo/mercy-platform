@@ -125,7 +125,7 @@ project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.projec
 [[ -n "$project" ]] || { echo "Cannot resolve Supabase compose project label" >&2; exit 1; }
 
 db_id="$(docker inspect -f '{{.Id}}' supabase-db)"
-mapfile -t project_ids < <(docker ps -aq --filter "label=com.docker.compose.project=$project")
+mapfile -t project_ids < <(docker ps -q --filter "label=com.docker.compose.project=$project")
 other_ids=()
 for cid in "${project_ids[@]}"; do
   [[ "$cid" == "$db_id" ]] || other_ids+=("$cid")
