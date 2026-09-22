@@ -101,6 +101,43 @@ describe.sequential("direct help responses and public feedback", () => {
     }
     caseId = made.data;
 
+    const hiddenBeforeReview = await clients["response-helper"].rpc(
+      "get_public_help_request",
+      { case_id: caseId }
+    );
+    expect(hiddenBeforeReview.error).toBeNull();
+    expect(hiddenBeforeReview.data).toEqual([]);
+
+    const tokenHash = "a".repeat(64);
+    const issued = await service.rpc("issue_help_request_moderation_token", {
+      case_id: caseId,
+      token_hash_text: tokenHash,
+      expires_at_input: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+    });
+    expect(issued.error).toBeNull();
+
+    const forgedModeration = await clients["response-owner"].rpc(
+      "moderate_help_request_by_token_hash",
+      {
+        token_hash_text: tokenHash,
+        decision_text: "APPROVE",
+      }
+    );
+    expect(forgedModeration.error).not.toBeNull();
+
+    const approved = await service.rpc("moderate_help_request_by_token_hash", {
+      token_hash_text: tokenHash,
+      decision_text: "APPROVE",
+    });
+    expect(approved.error).toBeNull();
+
+    const visibleAfterReview = await clients["response-helper"].rpc(
+      "get_public_help_request",
+      { case_id: caseId }
+    );
+    expect(visibleAfterReview.error).toBeNull();
+    expect(visibleAfterReview.data).toHaveLength(1);
+
     const assigned = await clients["response-admin"].rpc("assign_case", {
       case_id: caseId,
       new_coordinator: ids["response-coordinator"],

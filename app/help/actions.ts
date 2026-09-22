@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 import { requestSchema } from "@/lib/validation";
 import { getRequestConsentVersion } from "@/lib/request-consent";
+import { requestHelpRequestModeration } from "@/lib/request-moderation";
 
 export async function createRequest(fd: FormData) {
   const s = await serverSupabase();
@@ -41,7 +42,20 @@ export async function createRequest(fd: FormData) {
     consent_version: consentVersion,
   });
 
-  if (error) redirect("/help?error=save");
+  if (error || typeof data !== "string") redirect("/help?error=save");
 
-  redirect(`/cabinet/requests/${data}`);
+  try {
+    await requestHelpRequestModeration({
+      id: data,
+      category: parsed.data.category,
+      country: parsed.data.country,
+      city: parsed.data.city,
+      description: parsed.data.description,
+      urgency: parsed.data.urgency,
+    });
+  } catch (moderationError) {
+    console.error("REQUEST MODERATION NOTIFICATION:", moderationError);
+  }
+
+  redirect(`/cabinet/requests/${data}?moderation=pending`);
 }
