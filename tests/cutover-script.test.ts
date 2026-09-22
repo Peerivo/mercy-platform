@@ -39,7 +39,8 @@ describe("Beget cutover freeze transport", () => {
 describe("Beget cutover remote execution", () => {
   test("runs remote shell loops on Beget instead of interpolating runner variables", () => {
     expect(script).toContain('ssh "${REMOTE}" bash -s -- "${REMOTE_WORK}" <<\'REMOTE\'');
-    expect(script).toContain('ssh "${REMOTE}" bash -s -- "${SUPABASE_DIR}" <<\'REMOTE\'');
+    expect(script).toContain('restart_target_services() {');
+    expect(script).toContain('ssh "${REMOTE}" bash -s <<\'REMOTE\'');
     expect(script).not.toContain('ssh "${REMOTE}" "set -euo pipefail');
   });
 
@@ -53,9 +54,11 @@ describe("Beget cutover remote execution", () => {
     expect(script).toContain("printf 'COMMIT;\\n'");
   });
 
-  test("restarts Supabase by compose service instead of a guessed realtime container name", () => {
+  test("restarts Supabase by compose service label instead of a guessed container name", () => {
     expect(script).toContain('services=(auth rest realtime storage kong)');
-    expect(script).toContain('docker compose restart "${services[@]}"');
+    expect(script).toContain('com.docker.compose.project');
+    expect(script).toContain('com.docker.compose.service=$service');
+    expect(script).toContain('docker restart "$cid"');
     expect(script).not.toContain('realtime-dev.supabase-realtime');
   });
 });
@@ -76,12 +79,16 @@ test("normalizes historical specialist Storage state to the verified empty sourc
 });
 
 test("rejects any pre-existing target Storage bucket before mutation", () => {
-  const freshnessQuery = script.match(/target_fresh=.*?storage\.objects[\s\S]*?fi/);
-  expect(freshnessQuery?.[0]).toContain("count(*) from storage.buckets");
-  expect(freshnessQuery?.[0]).toContain("target_storage_buckets target_storage_objects");
-  expect(freshnessQuery?.[0]).toContain('"${target_storage_buckets}" != "0"');
-  expect(script.indexOf("target_fresh=")).toBeLessThan(script.indexOf('echo "== Target safety backup =="'));
-  expect(script.indexOf("target_fresh=")).toBeLessThan(script.indexOf('echo "== Apply canonical Mercy schema and data on Beget =="'));
+  const targetProfile = script.match(/target_profile\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const freshnessGuard = script.match(/assert_target_fresh\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const freshnessInvocation = script.indexOf("\nassert_target_fresh\n");
+
+  expect(targetProfile).toContain("count(*) from storage.buckets");
+  expect(freshnessGuard).toContain("target_storage_buckets target_storage_objects");
+  expect(freshnessGuard).toContain('"${target_storage_buckets}" != "0"');
+  expect(freshnessInvocation).toBeGreaterThan(-1);
+  expect(freshnessInvocation).toBeLessThan(script.indexOf('echo "== Target safety backup =="'));
+  expect(freshnessInvocation).toBeLessThan(script.indexOf('echo "== Apply canonical Mercy schema and data on Beget =="'));
 });
 
 
