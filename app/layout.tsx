@@ -13,6 +13,7 @@ import { QuickExit } from "@/components/quick-exit";
 import { quickExitGuard } from "@/lib/quick-exit-guard";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://mercy.peerivo.net"),
   title: "Язык милосердия",
   description: "Спокойная и практическая поддержка в трудной ситуации",
   robots: { index: true, follow: true },
