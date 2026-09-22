@@ -50,7 +50,7 @@ SQL
 
 docker run --rm --network host postgres:17-alpine pg_dump "$target_url" -Fc > "$dump_file"
 [[ -s "$dump_file" ]]
-docker run --rm -i postgres:17-alpine pg_restore -l < "$dump_file" | grep -q "baseline_row"
+docker run --rm -i postgres:17-alpine pg_restore -l < "$dump_file" | grep "baseline_row" >/dev/null
 
 target_psql -c "create table public.extra_after_backup(id integer);" >/dev/null
 
