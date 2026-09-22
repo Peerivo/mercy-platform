@@ -40,15 +40,17 @@ admin_psql -c "grant mercy_restore_owner to postgres; grant mercy_restore_reader
 admin_psql -c "create database mercy_restore_test owner mercy_restore_owner template template0;" >/dev/null
 
 target_psql <<'SQL' >/dev/null
-SET ROLE mercy_restore_owner;
 CREATE TABLE public.baseline_row(id integer primary key);
 INSERT INTO public.baseline_row(id) VALUES (7);
-RESET ROLE;
+ALTER TABLE public.baseline_row OWNER TO mercy_restore_owner;
 GRANT SELECT ON public.baseline_row TO mercy_restore_reader;
 SQL
 
+[[ "$(target_psql -Atc "select to_regclass('public.baseline_row')::text;")" == "baseline_row" ]]
+
 docker run --rm --network host postgres:17-alpine pg_dump "$target_url" -Fc > "$dump_file"
 [[ -s "$dump_file" ]]
+docker run --rm -i postgres:17-alpine pg_restore -l < "$dump_file" | grep -q "baseline_row"
 
 target_psql -c "create table public.extra_after_backup(id integer);" >/dev/null
 
