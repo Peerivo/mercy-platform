@@ -1,0 +1,295 @@
+name: Deploy REG.RU production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type DEPLOY to deploy the current reviewed main"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercy-reg-ru-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ inputs.confirm == 'DEPLOY' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SITE_URL: https://xn----htbcggcjkhwxk7j6bn.xn--p1ai
+      IMAGE_NAME: mercy-platform
+      CONTAINER_NAME: mercy
+      REMOTE_DIR: /opt/peerivo/mercy
+      REG_RU_HOST: ${{ secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
+      FEEDBACK_TO_EMAIL: ${{ secrets.FEEDBACK_TO_EMAIL }}
+
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reject a stale workflow-dispatch revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          current_main="$(git rev-parse refs/remotes/origin/main)"
+          if [ "${current_main}" != "${GITHUB_SHA}" ]; then
+            echo "::error::This dispatch is stale. Event SHA ${GITHUB_SHA} is not current main ${current_main}."
+            exit 1
+          fi
+
+      - name: Validate production configuration
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in REG_RU_HOST REG_RU_USER REG_RU_SSH_KEY REG_RU_KNOWN_HOSTS NEXT_PUBLIC_SUPABASE_URL RESEND_API_KEY RESEND_FROM_EMAIL FEEDBACK_TO_EMAIL; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing protected production configuration: ${name}"
+              missing=1
+            fi
+          done
+          if [ -z "${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}" ] && [ -z "${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}" ]; then
+            echo "::error::Set either NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY"
+            missing=1
+          fi
+          test "${missing}" -eq 0
+
+      - name: Build immutable production image
+        shell: bash
+        env:
+          NEXT_PUBLIC_MAP_TILE_URL: https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
+          NEXT_PUBLIC_MAP_ATTRIBUTION: © OpenStreetMap contributors
+        run: |
+          set -euo pipefail
+          docker build             --build-arg NEXT_PUBLIC_SUPABASE_URL             --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY             --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY             --build-arg NEXT_PUBLIC_SITE_URL="${SITE_URL}"             --build-arg NEXT_PUBLIC_MAP_TILE_URL             --build-arg NEXT_PUBLIC_MAP_ATTRIBUTION             --build-arg GIT_SHA="${GITHUB_SHA}"             --label org.opencontainers.image.revision="${GITHUB_SHA}"             --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"             -t "${IMAGE_NAME}:${GITHUB_SHA}"             .
+
+          docker save "${IMAGE_NAME}:${GITHUB_SHA}" | gzip -1 > /tmp/mercy-image.tar.gz
+          test -s /tmp/mercy-image.tar.gz
+
+      - name: Prepare candidate runtime environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          {
+            printf 'NODE_ENV=production\n'
+            printf 'GIT_SHA=%s\n' "${GITHUB_SHA}"
+            printf 'NEXT_PUBLIC_SITE_URL=%s\n' "${SITE_URL}"
+            printf 'NEXT_PUBLIC_SUPABASE_URL=%s\n' "${NEXT_PUBLIC_SUPABASE_URL}"
+            printf 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=%s\n' "${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}"
+            printf 'NEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n' "${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}"
+            printf 'RESEND_API_KEY=%s\n' "${RESEND_API_KEY}"
+            printf 'RESEND_FROM_EMAIL=%s\n' "${RESEND_FROM_EMAIL}"
+            printf 'FEEDBACK_TO_EMAIL=%s\n' "${FEEDBACK_TO_EMAIL}"
+          } > /tmp/mercy.env
+
+      - name: Prepare transactional remote deployment script
+        shell: bash
+        run: |
+          cat > /tmp/deploy-mercy.sh <<'REMOTE_SCRIPT'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          IMAGE_NAME="${1:?image name required}"
+          IMAGE_TAG="${2:?image tag required}"
+          REMOTE_DIR="${3:?remote dir required}"
+          CONTAINER_NAME="${4:?container name required}"
+          SITE_URL="${5:?site URL required}"
+
+          IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
+          IMAGE_ARCHIVE="${REMOTE_DIR}/mercy-image.tar.gz"
+          NEXT_ENV="${REMOTE_DIR}/.env.next"
+          PROD_ENV="${REMOTE_DIR}/.env.production"
+          PREVIOUS_ENV="${REMOTE_DIR}/.env.previous"
+          CURRENT_IMAGE_FILE="${REMOTE_DIR}/current-image"
+          PREVIOUS_IMAGE_FILE="${REMOTE_DIR}/previous-image"
+
+          start_container() {
+            local image="${1:?image required}"
+            local env_file="${2:?env file required}"
+            docker run -d               --name "${CONTAINER_NAME}"               --restart unless-stopped               --read-only               --tmpfs /tmp:rw,noexec,nosuid,size=64m               --env-file "${env_file}"               -p 127.0.0.1:3100:3000               "${image}" >/dev/null
+          }
+
+          old_image=""
+          if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+            old_image="$(docker inspect -f '{{.Config.Image}}' "${CONTAINER_NAME}")"
+          elif [ -s "${CURRENT_IMAGE_FILE}" ]; then
+            old_image="$(cat "${CURRENT_IMAGE_FILE}")"
+          fi
+
+          armed=0
+          phase="candidate"
+
+          rollback() {
+            set +e
+            trap - EXIT HUP INT TERM
+            echo "Deployment interrupted or failed; rolling back." >&2
+            docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+
+            rollback_env="${PROD_ENV}"
+            if [ "${phase}" != "candidate" ] && [ -s "${PREVIOUS_ENV}" ]; then
+              rollback_env="${PREVIOUS_ENV}"
+              cp -f "${PREVIOUS_ENV}" "${PROD_ENV}" || true
+              chmod 600 "${PROD_ENV}" || true
+            fi
+
+            if [ -n "${old_image}" ] && [ -s "${rollback_env}" ]; then
+              start_container "${old_image}" "${rollback_env}" || true
+            fi
+
+            rm -f "${NEXT_ENV}" "${IMAGE_ARCHIVE}"
+            if [ "${IMAGE}" != "${old_image}" ]; then
+              docker image rm "${IMAGE}" >/dev/null 2>&1 || true
+            fi
+          }
+
+          on_exit() {
+            code=$?
+            if [ "${code}" -ne 0 ] && [ "${armed}" -eq 1 ]; then
+              rollback
+            fi
+            exit "${code}"
+          }
+
+          trap on_exit EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          cd "${REMOTE_DIR}"
+          test -s "${IMAGE_ARCHIVE}"
+          test -s "${NEXT_ENV}"
+          if [ -n "${old_image}" ]; then
+            test -s "${PROD_ENV}"
+          fi
+
+          gzip -dc "${IMAGE_ARCHIVE}" | docker load >/dev/null
+
+          if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker rm -f "${CONTAINER_NAME}" >/dev/null
+          fi
+
+          armed=1
+          start_container "${IMAGE}" "${NEXT_ENV}"
+
+          healthy=false
+          for _ in $(seq 1 45); do
+            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER_NAME}")"
+            if [ "${status}" = "healthy" ]; then
+              healthy=true
+              break
+            fi
+            if [ "${status}" = "unhealthy" ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${healthy}" != "true" ]; then
+            docker logs --tail=120 "${CONTAINER_NAME}" >&2 || true
+            false
+          fi
+
+          curl --fail --silent --show-error http://127.0.0.1:3100/health >/dev/null
+          curl --fail --silent --show-error http://127.0.0.1:3100/health/data >/dev/null
+
+          # Verify the public reverse-proxy/TLS path before committing the candidate.
+          curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health" >/dev/null
+          curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health/data" >/dev/null
+
+          if [ -n "${old_image}" ]; then
+            cp -f "${PROD_ENV}" "${PREVIOUS_ENV}"
+            chmod 600 "${PREVIOUS_ENV}"
+            printf '%s\n' "${old_image}" > "${PREVIOUS_IMAGE_FILE}"
+          else
+            rm -f "${PREVIOUS_ENV}" "${PREVIOUS_IMAGE_FILE}"
+          fi
+
+          phase="promoting"
+          mv -f "${NEXT_ENV}" "${PROD_ENV}"
+          chmod 600 "${PROD_ENV}"
+          printf '%s\n' "${IMAGE}" > "${CURRENT_IMAGE_FILE}"
+
+          phase="promoted"
+          armed=0
+          trap - EXIT HUP INT TERM
+
+          rm -f "${IMAGE_ARCHIVE}"
+
+          while IFS= read -r tag; do
+            [ -n "${tag}" ] || continue
+            if [ "${tag}" = "${IMAGE}" ] || [ "${tag}" = "${old_image}" ]; then
+              continue
+            fi
+            docker image rm "${tag}" >/dev/null 2>&1 || true
+          done < <(docker image ls "${IMAGE_NAME}" --format '{{.Repository}}:{{.Tag}}')
+
+          echo "Mercy ${IMAGE_TAG} passed local, data, reverse-proxy and TLS health checks."
+          REMOTE_SCRIPT
+          chmod 700 /tmp/deploy-mercy.sh
+
+      - name: Configure pinned SSH trust
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${REG_RU_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${REG_RU_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${REG_RU_USER}@${REG_RU_HOST}" true
+
+      - name: Upload immutable candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh "${remote}" "mkdir -p '${REMOTE_DIR}' && chmod 700 '${REMOTE_DIR}'"
+          scp -q /tmp/mercy-image.tar.gz "${remote}:${REMOTE_DIR}/mercy-image.tar.gz"
+          scp -q /tmp/mercy.env "${remote}:${REMOTE_DIR}/.env.next"
+          scp -q /tmp/deploy-mercy.sh "${remote}:${REMOTE_DIR}/deploy-mercy.sh"
+
+      - name: Deploy with transactional health checks and rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh "${remote}"             "chmod 700 '${REMOTE_DIR}/deploy-mercy.sh' && '${REMOTE_DIR}/deploy-mercy.sh' '${IMAGE_NAME}' '${GITHUB_SHA}' '${REMOTE_DIR}' '${CONTAINER_NAME}' '${SITE_URL}'"
+
+      - name: Verify published revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="$(curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health")"
+          printf '%s' "${release}" | jq -e --arg sha "${GITHUB_SHA}"             '.status == "ok" and .environment == "production" and .version == $sha' >/dev/null
+
+          data="$(curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health/data")"
+          printf '%s' "${data}" | jq -e '.status == "ok"' >/dev/null
+
+      - name: Remove sensitive runner files
+        if: always()
+        shell: bash
+        run: |
+          rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts /tmp/mercy.env /tmp/deploy-mercy.sh /tmp/mercy-image.tar.gz
