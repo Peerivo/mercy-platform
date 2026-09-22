@@ -96,8 +96,12 @@ describe("Beget cutover recovery", () => {
   test("supports explicit recovery from a retained failed-run safety backup before freshness gating", () => {
     expect(script).toContain('RECOVER_FROM_RUN_ID="\${RECOVER_FROM_RUN_ID:-}"');
     expect(script).toContain('recovery_backup="\${BACKUP_DIR}/before-\${RECOVER_FROM_RUN_ID}-postgres.dump"');
-    expect(script).toContain('restore_target_backup "\${recovery_backup}"');
-    expect(script.indexOf('restore_target_backup "\${recovery_backup}"')).toBeLessThan(script.indexOf("assert_target_fresh"));
+    expect(script).toContain('restore_target_backup "${recovery_backup}"');
+    const recoveryCall = script.indexOf('restore_target_backup "${recovery_backup}"');
+    const freshnessInvocation = script.lastIndexOf("\nassert_target_fresh\n");
+    expect(recoveryCall).toBeGreaterThan(-1);
+    expect(freshnessInvocation).toBeGreaterThan(-1);
+    expect(recoveryCall).toBeLessThan(freshnessInvocation);
   });
 
   test("rolls Beget back automatically after a post-apply failure", () => {
