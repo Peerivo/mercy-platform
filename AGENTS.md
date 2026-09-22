@@ -4,7 +4,7 @@ Read `PROJECT.md` before changing code. Keep it current and separate implemented
 
 ## Global Contract
 
-Before any task, read `.peerivo/global-contract.json` and resolve the pinned canonical contract in `Peerivo/global`. Compute the effective `Global -> Project -> Agent -> Task/Run` contract before effectful work. Local rules may tighten inherited restrictions but may not silently weaken them. If the binding is missing or stale in a way that changes authority, permissions, or safety, fail closed until adoption is reviewed and acknowledged.
+Before any task, read `.peerivo/global-contract.json` and resolve the canonical authority pinned by that binding. Compute the effective `Global -> Project -> Agent -> Task/Run` contract before effectful work. Local rules may tighten inherited restrictions but may not silently weaken them. If the binding is missing or stale in a way that changes authority, permissions, or safety, fail closed until adoption is reviewed and acknowledged.
 
 - TypeScript is strict; validate untrusted input with Zod. Never trust client user IDs, roles, or assignment fields.
 - Use user JWTs for normal data access. Never expose service-role keys, database URLs, private content, or visitor coordinates in logs.
