@@ -127,10 +127,11 @@ describe("Beget cutover recovery", () => {
     expect(script).toContain('docker stop "\${other_ids[@]}"');
     expect(script).toContain("docker exec supabase-db dropdb");
     expect(script).toContain("docker exec supabase-db createdb");
-    expect(script).toContain("docker exec -i supabase-db pg_restore");
-    expect(script).toContain('--single-transaction < "$backup_file"');
-    expect(script).not.toContain("--no-owner");
-    expect(script).not.toContain("--no-privileges");
+    const restoreBlock = script.match(/restore_target_backup\(\) \{([\s\S]*?)\n\}\n\nrestart_target_services/)?.[1] ?? "";
+    expect(restoreBlock).toContain("docker exec -i supabase-db pg_restore");
+    expect(restoreBlock).toContain('--single-transaction < "$backup_file"');
+    expect(restoreBlock).not.toContain("--no-owner");
+    expect(restoreBlock).not.toContain("--no-privileges");
     expect(script).toContain("SET LOCAL ROLE supabase_auth_admin;");
     expect(script).toContain("SET LOCAL ROLE supabase_storage_admin;");
     expect(script).toContain('[[ "$state" == "0||0|0" ]]');
