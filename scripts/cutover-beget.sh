@@ -142,22 +142,49 @@ if (( ${#other_ids[@]} > 0 )); then
   docker stop "${other_ids[@]}" >/dev/null
 fi
 
-docker exec supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -Atc \
-  "select pg_terminate_backend(pid) from pg_stat_activity where datname='postgres' and pid <> pg_backend_pid();" >/dev/null
-
 docker exec -i supabase-db pg_restore -l < "$backup_file" >/dev/null
+
+db_owner="$(docker exec supabase-db psql -U postgres -d template1 -Atc "select pg_get_userbyid(datdba) from pg_database where datname='postgres';")"
+[[ -n "$db_owner" ]] || { echo "Cannot resolve owner of target database" >&2; exit 1; }
+
+# Recreate the target database before restore. pg_restore --clean alone only
+# removes objects represented in the archive and can leave post-backup Mercy
+# objects or extensions behind.
+docker exec supabase-db dropdb \
+  -U postgres \
+  --maintenance-db=template1 \
+  --force \
+  postgres
+
+docker exec supabase-db createdb \
+  -U postgres \
+  --maintenance-db=template1 \
+  --template=template0 \
+  --owner="$db_owner" \
+  postgres
+
+# Preserve the archived object owners and ACLs. The baseline Supabase roles
+# remain cluster-wide across database recreation.
 docker exec -i supabase-db pg_restore \
   -U postgres \
   -d postgres \
-  --clean \
-  --if-exists \
-  --no-owner \
-  --no-privileges \
   --exit-on-error \
   --single-transaction < "$backup_file"
 
 state="$(docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c "select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.buckets),(select count(*) from storage.objects);")"
 [[ "$state" == "0||0|0" ]] || { echo "Safety-backup restore did not produce a fresh target: $state" >&2; exit 1; }
+
+# Exercise restored service-role access rather than treating row counts as
+# sufficient evidence that ownership and grants survived.
+docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+BEGIN;
+SET LOCAL ROLE supabase_auth_admin;
+SELECT count(*) FROM auth.users;
+RESET ROLE;
+SET LOCAL ROLE supabase_storage_admin;
+SELECT count(*) FROM storage.objects;
+ROLLBACK;
+SQL
 
 restart_others
 trap - EXIT
@@ -392,6 +419,10 @@ fi
 scp -q   "${LOCAL_WORK}/auth-users.sql"   "${LOCAL_WORK}/auth-identities.sql"   "${LOCAL_WORK}/public-data.sql"   "${REMOTE}:${REMOTE_WORK}/"
 
 echo "== Apply canonical Mercy schema and data on Beget =="
+# Arm target rollback before the remote mutation. If SSH drops after PostgreSQL
+# commits but before the runner receives exit status, cleanup must still restore
+# the retained baseline backup.
+target_mutated=1
 ssh "${REMOTE}" bash -s -- "${REMOTE_WORK}" <<'REMOTE'
 set -euo pipefail
 work="$1"
@@ -441,7 +472,6 @@ tar -xzf migrations.tgz
   printf 'COMMIT;\n'
 } | docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null
 REMOTE
-target_mutated=1
 
 echo "== Restart and verify Supabase services =="
 restart_target_services
