@@ -222,6 +222,16 @@ if [[ "${repo_versions}" != "${source_versions}" ]]; then
   exit 1
 fi
 
+if [[ -n "${RECOVER_FROM_RUN_ID}" ]]; then
+  if [[ ! "${RECOVER_FROM_RUN_ID}" =~ ^[0-9]+$ ]]; then
+    echo "::error::RECOVER_FROM_RUN_ID must be a numeric GitHub Actions run id."
+    exit 1
+  fi
+  recovery_backup="${BACKUP_DIR}/before-${RECOVER_FROM_RUN_ID}-postgres.dump"
+  echo "== Restore Beget target from retained safety backup for failed run ${RECOVER_FROM_RUN_ID} =="
+  restore_target_backup "${recovery_backup}"
+fi
+
 source_auth_columns="$(source_psql -At -F '|' -c "select table_name,ordinal_position,column_name,udt_name,is_nullable from information_schema.columns where table_schema='auth' and table_name in ('users','identities') order by table_name,ordinal_position;")"
 target_auth_columns="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select table_name,ordinal_position,column_name,udt_name,is_nullable from information_schema.columns where table_schema='auth' and table_name in ('users','identities') order by table_name,ordinal_position;\"")"
 if [[ "${source_auth_columns}" != "${target_auth_columns}" ]]; then
@@ -234,16 +244,6 @@ IFS='|' read -r storage_buckets storage_objects mfa_factors sso_providers non_em
 if [[ "${storage_buckets}" != "0" || "${storage_objects}" != "0" || "${mfa_factors}" != "0" || "${sso_providers}" != "0" || "${non_email_identities}" != "0" ]]; then
   echo "::error::Migration profile changed: this cutover supports email identities only, no MFA/SSO, and empty Storage."
   exit 1
-fi
-
-if [[ -n "${RECOVER_FROM_RUN_ID}" ]]; then
-  if [[ ! "${RECOVER_FROM_RUN_ID}" =~ ^[0-9]+$ ]]; then
-    echo "::error::RECOVER_FROM_RUN_ID must be a numeric GitHub Actions run id."
-    exit 1
-  fi
-  recovery_backup="${BACKUP_DIR}/before-${RECOVER_FROM_RUN_ID}-postgres.dump"
-  echo "== Restore Beget target from retained safety backup for failed run ${RECOVER_FROM_RUN_ID} =="
-  restore_target_backup "${recovery_backup}"
 fi
 
 assert_target_fresh
