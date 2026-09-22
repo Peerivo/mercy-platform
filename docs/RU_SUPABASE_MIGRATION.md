@@ -65,7 +65,7 @@ Run **Cut over Mercy Supabase to Beget** only after the preflight succeeds. The 
 8. Apply the canonical SQL migrations from `supabase/migrations`, normalize the historical `qualification-documents` Storage bucket to the verified source profile (currently zero buckets/objects). Because self-hosted Storage installs a delete-protection trigger, temporarily set `session_replication_role = replica` only around deletion of this known empty historical bucket inside the same bootstrap transaction, restore `origin` immediately, then restore `auth.users`, `auth.identities` and `public` data and record migration history in that target PostgreSQL transaction. Remote loop variables must be evaluated on Beget via `ssh ... bash -s`/quoted heredoc, never interpolated by the GitHub runner. Data import runs with `session_replication_role = replica` inside that transaction.
 9. Do not send production database dumps to GitHub Artifacts; temporary dumps live only on the runner and Beget work directory and are removed after the run.
 10. Compare deterministic row fingerprints for every public table plus Auth users/identities, require the target Storage bucket/object counts to match the verified empty source profile, compare public RLS policy fingerprint, and compare Realtime publication membership.
-11. Restart and verify every affected service by Docker Compose service name (`auth`, `rest`, `realtime`, `storage`, `kong`) rather than hard-coded container names, then smoke Auth and a public RPC through the Russian API endpoint.
+11. Restart and verify every affected service (`auth`, `rest`, `realtime`, `storage`, `kong`) by Docker Compose labels rather than hard-coded container names or `cd` into the root-owned compose directory, then smoke Auth and a public RPC through the Russian API endpoint.
 12. Switch the application only after database verification succeeds.
 13. Keep the source frozen until the Russian deployment is verified.
 14. On any failed migration verification, the workflow unfreezes the old source automatically; the Beget safety backup is retained for target repair/rollback.
@@ -90,3 +90,7 @@ After a successful cutover:
 - rotate any migration-only credentials;
 - remove temporary migration files from both runner and destination;
 - record the migration result and evidence in the deployment history.
+
+### Recovery after a failed post-apply run
+
+If a cutover fails after the Beget schema/data transaction has committed, the source is unfrozen and the target must not be reused implicitly. New runs normally restore their own current safety backup automatically on such failures. For a failure produced by an older cutover implementation that did not roll the target back, rerun the guarded workflow with `MIGRATE` and set `recover_from_run_id` to the exact failed GitHub Actions run ID. The script restores only `beget-pre-migration-backups/before-<run-id>-postgres.dump`, stops non-DB containers belonging to the same Docker Compose project during restore, verifies the restored target is fresh (`0 users`, no `public.help_requests`, `0 buckets`, `0 objects`), then takes a new safety backup and proceeds with the normal cutover. A missing, empty, nonnumeric, or non-fresh recovery backup fails closed before source freeze.
