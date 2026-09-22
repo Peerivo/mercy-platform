@@ -40,6 +40,8 @@ jobs:
         run: supabase start
       - name: Reproduce migrations from an empty database
         run: supabase db reset --no-seed
+      - name: Exercise cutover recovery against disposable PostgreSQL
+        run: bash scripts/test-cutover-restore.sh
       - name: Wait for Auth, REST and Realtime readiness
         run: |
           set -euo pipefail
