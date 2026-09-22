@@ -1,6 +1,12 @@
 import { serverSupabase } from "@/lib/supabase/server";
 import { Nearby } from "@/components/nearby";
 
+export const metadata = {
+  title: "Помощь рядом",
+  description: "Опубликованные и проверенные точки помощи.",
+  alternates: { canonical: "/nearby" },
+};
+
 export default async function NearbyPage({
   searchParams,
 }: {
