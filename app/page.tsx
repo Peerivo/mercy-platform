@@ -1,4 +1,10 @@
 import Link from "next/link";
+
+export const metadata = {
+  title: "Язык милосердия",
+  description: "Добровольная и практическая помощь людей людям.",
+  alternates: { canonical: "/" },
+};
 const areas = [
   {
     t: "Беременность и после рождения",

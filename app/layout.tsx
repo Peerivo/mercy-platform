@@ -11,8 +11,10 @@ import Script from "next/script";
 import { MobileMenu } from "@/components/mobile-menu";
 import { QuickExit } from "@/components/quick-exit";
 import { quickExitGuard } from "@/lib/quick-exit-guard";
+import { siteUrl } from "@/lib/config";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl()),
   title: "Язык милосердия",
   description: "Спокойная и практическая поддержка в трудной ситуации",
   robots: { index: true, follow: true },
