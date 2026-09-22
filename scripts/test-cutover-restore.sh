@@ -28,7 +28,7 @@ admin_psql() {
 }
 
 target_psql() {
-  docker run --rm --network host postgres:17-alpine psql "$target_url" -v ON_ERROR_STOP=1 "$@"
+  docker run --rm -i --network host postgres:17-alpine psql "$target_url" -v ON_ERROR_STOP=1 "$@"
 }
 
 admin_psql -c "drop database if exists mercy_restore_test with (force);" >/dev/null
