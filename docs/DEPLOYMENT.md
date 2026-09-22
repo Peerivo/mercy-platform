@@ -19,3 +19,10 @@ ChatGPT environment may run `npm ci && npm run check`; local Supabase requires D
 Обязательные build args: Supabase URL/publishable key, canonical `NEXT_PUBLIC_SITE_URL` и `GIT_SHA`; compose fail-fast проверяет первые три. Production Site URL должен быть HTTPS и точно присутствовать в Supabase Auth redirect allow-list вместе с `/auth/callback`. После immutable deploy запрос `GET /health` обязан вернуть `status=ok`, `environment=production`, ожидаемый SHA в `version` и `Cache-Control: no-store`; endpoint не проверяет БД и не выводит конфигурацию.
 
 Перед migration workflow зафиксируйте backup и сопоставьте `supabase_migrations.schema_migrations` с `supabase/migrations`. После migration проверьте `messages` в Realtime publication и RLS, затем выполните documented one-time `bootstrap_first_admin` через trusted SQL (не API). Smoke A и B выполняются отдельными USER/helper/COORDINATOR/ADMIN аккаунтами; отдельно подтвердите отрицательные проверки доступа. Не используйте seed в remote среде.
+
+
+## Russian application host
+
+The guarded application-container deployment to REG.RU is documented in `docs/REG_RU_DEPLOYMENT.md`. It is separate from the Beget Supabase data cutover and never migrates the database.
+
+Use `/health` for release liveness and exact revision evidence. Use `/health/data` for bounded anonymous database readiness; the latter returns only `ok/degraded`, never rows or configuration. A production deploy is not accepted until the candidate passes local and public HTTPS checks for both endpoints.
