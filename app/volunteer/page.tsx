@@ -1,5 +1,11 @@
 import { createOffer } from "./actions";
 
+export const metadata = {
+  title: "Хочу помочь",
+  description: "Предложите добровольную помощь людям, которым она нужна.",
+  alternates: { canonical: "/volunteer" },
+};
+
 export default async function Volunteer({
   searchParams,
 }: {
