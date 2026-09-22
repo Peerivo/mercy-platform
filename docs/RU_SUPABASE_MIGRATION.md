@@ -68,7 +68,7 @@ Run **Cut over Mercy Supabase to Beget** only after the preflight succeeds. The 
 11. Restart and verify every affected service (`auth`, `rest`, `realtime`, `storage`, `kong`) by Docker Compose labels rather than hard-coded container names or `cd` into the root-owned compose directory, then smoke Auth and a public RPC through the Russian API endpoint.
 12. Switch the application only after database verification succeeds.
 13. Keep the source frozen until the Russian deployment is verified.
-14. On any failed migration verification, the workflow unfreezes the old source automatically; the Beget safety backup is retained for target repair/rollback.
+14. On any failed migration verification after target mutation, the workflow first recreates the Beget `postgres` database from the retained safety backup, preserving archived owners/ACLs and verifying `supabase_auth_admin` / `supabase_storage_admin` access, then unfreezes the old source. The safety backup remains retained as evidence.
 
 ## Rollback
 
@@ -93,4 +93,7 @@ After a successful cutover:
 
 ### Recovery after a failed post-apply run
 
-If a cutover fails after the Beget schema/data transaction has committed, the source is unfrozen and the target must not be reused implicitly. New runs normally restore their own current safety backup automatically on such failures. For a failure produced by an older cutover implementation that did not roll the target back, rerun the guarded workflow with `MIGRATE` and set `recover_from_run_id` to the exact failed GitHub Actions run ID. The script restores only `beget-pre-migration-backups/before-<run-id>-postgres.dump`, stops non-DB containers belonging to the same Docker Compose project during restore, verifies the restored target is fresh (`0 users`, no `public.help_requests`, `0 buckets`, `0 objects`), then takes a new safety backup and proceeds with the normal cutover. A missing, empty, nonnumeric, or non-fresh recovery backup fails closed before source freeze.
+If a cutover fails after the Beget schema/data transaction has committed, the source is unfrozen and the target must not be reused implicitly. New runs normally restore their own current safety backup automatically on such failures. For a failure produced by an older cutover implementation that did not roll the target back, rerun the guarded workflow with `MIGRATE` and set `recover_from_run_id` to the exact failed GitHub Actions run ID. The script restores only `beget-pre-migration-backups/before-<run-id>-postgres.dump`, stops non-DB containers belonging to the same Docker Compose project, recreates the `postgres` database so post-backup Mercy objects/extensions cannot survive, restores the archive with ownership and ACL entries intact, verifies Auth/Storage service-role access and the fresh target profile (`0 users`, no `public.help_requests`, `0 buckets`, `0 objects`), then takes a new safety backup and proceeds with the normal cutover. A missing, empty, nonnumeric, or non-fresh recovery backup fails closed before source freeze.
+
+
+The CI disposable Supabase job also exercises the recovery strategy against a real PostgreSQL database: it takes a custom-format baseline dump with non-default owner/ACL, creates a post-backup object, recreates the database, restores the dump, and verifies that the extra object is gone while ownership and grants survive.
