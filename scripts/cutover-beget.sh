@@ -135,10 +135,10 @@ if [[ "${storage_buckets}" != "0" || "${storage_objects}" != "0" || "${mfa_facto
   exit 1
 fi
 
-target_fresh="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.objects);\"")"
-IFS='|' read -r target_users target_help_relation target_storage_objects <<< "${target_fresh}"
-if [[ "${target_users}" != "0" || -n "${target_help_relation}" || "${target_storage_objects}" != "0" ]]; then
-  echo "::error::Beget target is no longer fresh; refusing destructive cutover."
+target_fresh="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.buckets),(select count(*) from storage.objects);\"")"
+IFS='|' read -r target_users target_help_relation target_storage_buckets target_storage_objects <<< "${target_fresh}"
+if [[ "${target_users}" != "0" || -n "${target_help_relation}" || "${target_storage_buckets}" != "0" || "${target_storage_objects}" != "0" ]]; then
+  echo "::error::Beget target is no longer fresh; refusing destructive cutover. Expected zero users, no Mercy schema marker, and zero Storage buckets/objects."
   exit 1
 fi
 
