@@ -39,7 +39,8 @@ describe("Beget cutover freeze transport", () => {
 describe("Beget cutover remote execution", () => {
   test("runs remote shell loops on Beget instead of interpolating runner variables", () => {
     expect(script).toContain('ssh "${REMOTE}" bash -s -- "${REMOTE_WORK}" <<\'REMOTE\'');
-    expect(script).toContain('ssh "${REMOTE}" bash -s -- "${SUPABASE_DIR}" <<\'REMOTE\'');
+    expect(script).toContain('restart_target_services() {');
+    expect(script).toContain('ssh "${REMOTE}" bash -s <<\'REMOTE\'');
     expect(script).not.toContain('ssh "${REMOTE}" "set -euo pipefail');
   });
 
@@ -53,9 +54,11 @@ describe("Beget cutover remote execution", () => {
     expect(script).toContain("printf 'COMMIT;\\n'");
   });
 
-  test("restarts Supabase by compose service instead of a guessed realtime container name", () => {
+  test("restarts Supabase by compose service label instead of a guessed container name", () => {
     expect(script).toContain('services=(auth rest realtime storage kong)');
-    expect(script).toContain('docker compose restart "${services[@]}"');
+    expect(script).toContain('com.docker.compose.project');
+    expect(script).toContain('com.docker.compose.service=$service');
+    expect(script).toContain('docker restart "$cid"');
     expect(script).not.toContain('realtime-dev.supabase-realtime');
   });
 });
@@ -76,10 +79,61 @@ test("normalizes historical specialist Storage state to the verified empty sourc
 });
 
 test("rejects any pre-existing target Storage bucket before mutation", () => {
-  const freshnessQuery = script.match(/target_fresh=.*?storage\.objects[\s\S]*?fi/);
-  expect(freshnessQuery?.[0]).toContain("count(*) from storage.buckets");
-  expect(freshnessQuery?.[0]).toContain("target_storage_buckets target_storage_objects");
-  expect(freshnessQuery?.[0]).toContain('"${target_storage_buckets}" != "0"');
-  expect(script.indexOf("target_fresh=")).toBeLessThan(script.indexOf('echo "== Target safety backup =="'));
-  expect(script.indexOf("target_fresh=")).toBeLessThan(script.indexOf('echo "== Apply canonical Mercy schema and data on Beget =="'));
+  const targetProfile = script.match(/target_profile\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const freshnessGuard = script.match(/assert_target_fresh\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const freshnessInvocation = script.indexOf("\nassert_target_fresh\n");
+
+  expect(targetProfile).toContain("count(*) from storage.buckets");
+  expect(freshnessGuard).toContain("target_storage_buckets target_storage_objects");
+  expect(freshnessGuard).toContain('"${target_storage_buckets}" != "0"');
+  expect(freshnessInvocation).toBeGreaterThan(-1);
+  expect(freshnessInvocation).toBeLessThan(script.indexOf('echo "== Target safety backup =="'));
+  expect(freshnessInvocation).toBeLessThan(script.indexOf('echo "== Apply canonical Mercy schema and data on Beget =="'));
+});
+
+
+describe("Beget cutover recovery", () => {
+  test("supports explicit recovery from a retained failed-run safety backup before freshness gating", () => {
+    expect(script).toContain('RECOVER_FROM_RUN_ID="\${RECOVER_FROM_RUN_ID:-}"');
+    expect(script).toContain('recovery_backup="\${BACKUP_DIR}/before-\${RECOVER_FROM_RUN_ID}-postgres.dump"');
+    expect(script).toContain('restore_target_backup "${recovery_backup}"');
+    const recoveryCall = script.indexOf('restore_target_backup "${recovery_backup}"');
+    const freshnessInvocation = script.lastIndexOf("\nassert_target_fresh\n");
+    expect(recoveryCall).toBeGreaterThan(-1);
+    expect(freshnessInvocation).toBeGreaterThan(-1);
+    expect(recoveryCall).toBeLessThan(freshnessInvocation);
+  });
+
+  test("arms Beget rollback before remote target mutation", () => {
+    expect(script).toContain("target_mutated=0");
+    const arm = script.indexOf("target_mutated=1");
+    const apply = script.indexOf('ssh "\${REMOTE}" bash -s -- "\${REMOTE_WORK}" <<\'REMOTE\'');
+    expect(arm).toBeGreaterThan(-1);
+    expect(apply).toBeGreaterThan(-1);
+    expect(arm).toBeLessThan(apply);
+    expect(script).toContain('restore_target_backup "\${backup_prefix}-postgres.dump"');
+  });
+
+  test("restarts Supabase services without requiring access to the compose directory", () => {
+    expect(script).toContain("com.docker.compose.project");
+    expect(script).toContain("com.docker.compose.service=$service");
+    expect(script).toContain('docker restart "$cid"');
+    expect(script).not.toContain('cd "$supabase_dir"');
+    expect(script).not.toContain('SUPABASE_DIR="/opt/beget/supabase"');
+  });
+
+  test("recreates target safely while keeping the database container running", () => {
+    expect(script).toContain('docker ps --no-trunc -q --filter "label=com.docker.compose.project=$project"');
+    expect(script).toContain('docker stop "\${other_ids[@]}"');
+    expect(script).toContain("docker exec supabase-db dropdb");
+    expect(script).toContain("docker exec supabase-db createdb");
+    const restoreBlock = script.match(/restore_target_backup\(\) \{([\s\S]*?)\n\}\n\nrestart_target_services/)?.[1] ?? "";
+    expect(restoreBlock).toContain("docker exec -i supabase-db pg_restore");
+    expect(restoreBlock).toContain('--single-transaction < "$backup_file"');
+    expect(restoreBlock).not.toContain("--no-owner");
+    expect(restoreBlock).not.toContain("--no-privileges");
+    expect(script).toContain("SET LOCAL ROLE supabase_auth_admin;");
+    expect(script).toContain("SET LOCAL ROLE supabase_storage_admin;");
+    expect(script).toContain('[[ "$state" == "0||0|0" ]]');
+  });
 });

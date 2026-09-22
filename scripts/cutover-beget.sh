@@ -7,6 +7,7 @@ set -euo pipefail
 : "${OLD_SUPABASE_DB_URL:?OLD_SUPABASE_DB_URL required}"
 : "${TARGET_SUPABASE_URL:?TARGET_SUPABASE_URL required}"
 : "${TARGET_ANON_KEY:?TARGET_ANON_KEY required}"
+RECOVER_FROM_RUN_ID="${RECOVER_FROM_RUN_ID:-}"
 
 if [[ "${MIGRATION_CONFIRM}" != "MIGRATE" ]]; then
   echo "Migration confirmation is not MIGRATE; refusing to continue." >&2
@@ -65,9 +66,10 @@ source_dump() {
 remote_home="$(ssh "${REMOTE}" 'printf %s "$HOME"')"
 REMOTE_WORK="${remote_home}/mercy-cutover-${GITHUB_RUN_ID:-manual}"
 BACKUP_DIR="${remote_home}/beget-pre-migration-backups"
-SUPABASE_DIR="/opt/beget/supabase"
 frozen=0
 success=0
+target_mutated=0
+backup_prefix=""
 
 unfreeze_source() {
   cat > "${LOCAL_WORK}/unfreeze.sql" <<'SQL'
@@ -97,9 +99,135 @@ SQL
   source_psql_stdin < "${LOCAL_WORK}/unfreeze.sql" >/dev/null
 }
 
+target_profile() {
+  ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.buckets),(select count(*) from storage.objects);\""
+}
+
+assert_target_fresh() {
+  local target_fresh target_users target_help_relation target_storage_buckets target_storage_objects
+  target_fresh="$(target_profile)"
+  IFS='|' read -r target_users target_help_relation target_storage_buckets target_storage_objects <<< "${target_fresh}"
+  if [[ "${target_users}" != "0" || -n "${target_help_relation}" || "${target_storage_buckets}" != "0" || "${target_storage_objects}" != "0" ]]; then
+    echo "::error::Beget target is no longer fresh; refusing destructive cutover. Expected zero users, no Mercy schema marker, and zero Storage buckets/objects."
+    return 1
+  fi
+}
+
+restore_target_backup() {
+  local backup_file="$1"
+
+  ssh "${REMOTE}" bash -s -- "${backup_file}" <<'REMOTE'
+set -euo pipefail
+backup_file="$1"
+[[ -s "$backup_file" ]] || { echo "Safety backup is missing or empty: $backup_file" >&2; exit 1; }
+
+project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+[[ -n "$project" ]] || { echo "Cannot resolve Supabase compose project label" >&2; exit 1; }
+
+db_id="$(docker inspect -f '{{.Id}}' supabase-db)"
+mapfile -t project_ids < <(docker ps --no-trunc -q --filter "label=com.docker.compose.project=$project")
+other_ids=()
+for cid in "${project_ids[@]}"; do
+  [[ "$cid" == "$db_id" ]] || other_ids+=("$cid")
+done
+
+restart_others() {
+  if (( ${#other_ids[@]} > 0 )); then
+    docker start "${other_ids[@]}" >/dev/null 2>&1 || true
+  fi
+}
+trap restart_others EXIT
+
+if (( ${#other_ids[@]} > 0 )); then
+  docker stop "${other_ids[@]}" >/dev/null
+fi
+
+docker exec -i supabase-db pg_restore -l < "$backup_file" >/dev/null
+
+db_owner="$(docker exec supabase-db psql -U postgres -d template1 -Atc "select pg_get_userbyid(datdba) from pg_database where datname='postgres';")"
+[[ -n "$db_owner" ]] || { echo "Cannot resolve owner of target database" >&2; exit 1; }
+
+# Recreate the target database before restore. pg_restore --clean alone only
+# removes objects represented in the archive and can leave post-backup Mercy
+# objects or extensions behind.
+docker exec supabase-db dropdb \
+  -U postgres \
+  --maintenance-db=template1 \
+  --force \
+  postgres
+
+docker exec supabase-db createdb \
+  -U postgres \
+  --maintenance-db=template1 \
+  --template=template0 \
+  --owner="$db_owner" \
+  postgres
+
+# Preserve the archived object owners and ACLs. The baseline Supabase roles
+# remain cluster-wide across database recreation.
+docker exec -i supabase-db pg_restore \
+  -U postgres \
+  -d postgres \
+  --exit-on-error \
+  --single-transaction < "$backup_file"
+
+state="$(docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c "select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.buckets),(select count(*) from storage.objects);")"
+[[ "$state" == "0||0|0" ]] || { echo "Safety-backup restore did not produce a fresh target: $state" >&2; exit 1; }
+
+# Exercise restored service-role access rather than treating row counts as
+# sufficient evidence that ownership and grants survived.
+docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+BEGIN;
+SET LOCAL ROLE supabase_auth_admin;
+SELECT count(*) FROM auth.users;
+RESET ROLE;
+SET LOCAL ROLE supabase_storage_admin;
+SELECT count(*) FROM storage.objects;
+ROLLBACK;
+SQL
+
+restart_others
+trap - EXIT
+REMOTE
+}
+
+restart_target_services() {
+  ssh "${REMOTE}" bash -s <<'REMOTE'
+set -euo pipefail
+project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+[[ -n "$project" ]] || { echo "Cannot resolve Supabase compose project label" >&2; exit 1; }
+
+services=(auth rest realtime storage kong)
+for service in "${services[@]}"; do
+  cid="$(docker ps -aq \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=$service" | head -n 1)"
+  [[ -n "$cid" ]] || { echo "Cannot resolve container for Compose service: $service" >&2; exit 1; }
+
+  docker restart "$cid" >/dev/null
+
+  ok=0
+  for _ in $(seq 1 45); do
+    running="$(docker inspect -f '{{.State.Running}}' "$cid")"
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid")"
+    if [[ "$running" == "true" && ( "$health" == "healthy" || "$health" == "none" ) ]]; then
+      ok=1
+      break
+    fi
+    sleep 2
+  done
+  [[ "$ok" == "1" ]] || { echo "Service not ready: $service" >&2; exit 1; }
+done
+REMOTE
+}
+
 cleanup() {
   rc=$?
   set +e
+  if [[ "${success}" != "1" && "${target_mutated}" == "1" && -n "${backup_prefix}" ]]; then
+    echo "Migration did not complete after target mutation; restoring the current Beget safety backup."
+    restore_target_backup "${backup_prefix}-postgres.dump" || echo "::error::Automatic Beget rollback failed; retained backup: ${backup_prefix}-postgres.dump"
+  fi
   if [[ "${success}" != "1" && "${frozen}" == "1" ]]; then
     echo "Migration did not complete; unfreezing the old production database."
     unfreeze_source || echo "::error::Automatic source unfreeze failed; operator action is required."
@@ -121,6 +249,16 @@ if [[ "${repo_versions}" != "${source_versions}" ]]; then
   exit 1
 fi
 
+if [[ -n "${RECOVER_FROM_RUN_ID}" ]]; then
+  if [[ ! "${RECOVER_FROM_RUN_ID}" =~ ^[0-9]+$ ]]; then
+    echo "::error::RECOVER_FROM_RUN_ID must be a numeric GitHub Actions run id."
+    exit 1
+  fi
+  recovery_backup="${BACKUP_DIR}/before-${RECOVER_FROM_RUN_ID}-postgres.dump"
+  echo "== Restore Beget target from retained safety backup for failed run ${RECOVER_FROM_RUN_ID} =="
+  restore_target_backup "${recovery_backup}"
+fi
+
 source_auth_columns="$(source_psql -At -F '|' -c "select table_name,ordinal_position,column_name,udt_name,is_nullable from information_schema.columns where table_schema='auth' and table_name in ('users','identities') order by table_name,ordinal_position;")"
 target_auth_columns="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select table_name,ordinal_position,column_name,udt_name,is_nullable from information_schema.columns where table_schema='auth' and table_name in ('users','identities') order by table_name,ordinal_position;\"")"
 if [[ "${source_auth_columns}" != "${target_auth_columns}" ]]; then
@@ -135,12 +273,7 @@ if [[ "${storage_buckets}" != "0" || "${storage_objects}" != "0" || "${mfa_facto
   exit 1
 fi
 
-target_fresh="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.buckets),(select count(*) from storage.objects);\"")"
-IFS='|' read -r target_users target_help_relation target_storage_buckets target_storage_objects <<< "${target_fresh}"
-if [[ "${target_users}" != "0" || -n "${target_help_relation}" || "${target_storage_buckets}" != "0" || "${target_storage_objects}" != "0" ]]; then
-  echo "::error::Beget target is no longer fresh; refusing destructive cutover. Expected zero users, no Mercy schema marker, and zero Storage buckets/objects."
-  exit 1
-fi
+assert_target_fresh
 
 echo "== Target safety backup =="
 ssh "${REMOTE}" "mkdir -p '${BACKUP_DIR}' '${REMOTE_WORK}' && chmod 700 '${BACKUP_DIR}' '${REMOTE_WORK}'"
@@ -286,6 +419,10 @@ fi
 scp -q   "${LOCAL_WORK}/auth-users.sql"   "${LOCAL_WORK}/auth-identities.sql"   "${LOCAL_WORK}/public-data.sql"   "${REMOTE}:${REMOTE_WORK}/"
 
 echo "== Apply canonical Mercy schema and data on Beget =="
+# Arm target rollback before the remote mutation. If SSH drops after PostgreSQL
+# commits but before the runner receives exit status, cleanup must still restore
+# the retained baseline backup.
+target_mutated=1
 ssh "${REMOTE}" bash -s -- "${REMOTE_WORK}" <<'REMOTE'
 set -euo pipefail
 work="$1"
@@ -337,31 +474,7 @@ tar -xzf migrations.tgz
 REMOTE
 
 echo "== Restart and verify Supabase services =="
-ssh "${REMOTE}" bash -s -- "${SUPABASE_DIR}" <<'REMOTE'
-set -euo pipefail
-supabase_dir="$1"
-cd "$supabase_dir"
-
-services=(auth rest realtime storage kong)
-docker compose restart "${services[@]}" >/dev/null
-
-for service in "${services[@]}"; do
-  ok=0
-  for _ in $(seq 1 45); do
-    cid="$(docker compose ps -q "$service")"
-    if [[ -n "$cid" ]]; then
-      running="$(docker inspect -f '{{.State.Running}}' "$cid")"
-      health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid")"
-      if [[ "$running" == "true" && ( "$health" == "healthy" || "$health" == "none" ) ]]; then
-        ok=1
-        break
-      fi
-    fi
-    sleep 2
-  done
-  [[ "$ok" == "1" ]] || { echo "Service not ready: $service" >&2; exit 1; }
-done
-REMOTE
+restart_target_services
 
 fingerprint_target() {
   {
