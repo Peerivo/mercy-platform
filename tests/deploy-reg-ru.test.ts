@@ -50,3 +50,11 @@ describe("REG.RU production deployment safety contract", () => {
     expect(workflow).toContain(".version == $sha");
   });
 });
+
+
+it("verifies the exact candidate revision before promotion", () => {
+  const publicRevision = workflow.indexOf('grep -F "\\\"version\\\":\\\"\${IMAGE_TAG}\\\""');
+  const promote = workflow.indexOf('mv -f "\${NEXT_ENV}" "\${PROD_ENV}"');
+  expect(publicRevision).toBeGreaterThan(-1);
+  expect(promote).toBeGreaterThan(publicRevision);
+});
