@@ -1,5 +1,10 @@
 import { sendLoginLink } from "./actions";
 
+export const metadata = {
+  title: "Вход — Язык милосердия",
+  robots: { index: false, follow: false },
+};
+
 function safeNext(value: string | undefined) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return "/cabinet";
   return value.slice(0, 500);
