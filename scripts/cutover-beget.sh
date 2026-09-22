@@ -65,6 +65,7 @@ source_dump() {
 remote_home="$(ssh "${REMOTE}" 'printf %s "$HOME"')"
 REMOTE_WORK="${remote_home}/mercy-cutover-${GITHUB_RUN_ID:-manual}"
 BACKUP_DIR="${remote_home}/beget-pre-migration-backups"
+SUPABASE_DIR="/opt/beget/supabase"
 frozen=0
 success=0
 
@@ -134,10 +135,10 @@ if [[ "${storage_buckets}" != "0" || "${storage_objects}" != "0" || "${mfa_facto
   exit 1
 fi
 
-target_fresh="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.objects);\"")"
-IFS='|' read -r target_users target_help_relation target_storage_objects <<< "${target_fresh}"
-if [[ "${target_users}" != "0" || -n "${target_help_relation}" || "${target_storage_objects}" != "0" ]]; then
-  echo "::error::Beget target is no longer fresh; refusing destructive cutover."
+target_fresh="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.buckets),(select count(*) from storage.objects);\"")"
+IFS='|' read -r target_users target_help_relation target_storage_buckets target_storage_objects <<< "${target_fresh}"
+if [[ "${target_users}" != "0" || -n "${target_help_relation}" || "${target_storage_buckets}" != "0" || "${target_storage_objects}" != "0" ]]; then
+  echo "::error::Beget target is no longer fresh; refusing destructive cutover. Expected zero users, no Mercy schema marker, and zero Storage buckets/objects."
   exit 1
 fi
 
@@ -284,60 +285,79 @@ fi
 
 scp -q   "${LOCAL_WORK}/auth-users.sql"   "${LOCAL_WORK}/auth-identities.sql"   "${LOCAL_WORK}/public-data.sql"   "${REMOTE}:${REMOTE_WORK}/"
 
-echo "== Apply canonical Mercy schema on Beget =="
-ssh "${REMOTE}" "set -euo pipefail
-  cd '${REMOTE_WORK}'
-  tar -xzf migrations.tgz
-  for f in migrations/*.sql; do
-    docker cp \"$f\" supabase-db:/tmp/mercy-migration.sql
-    docker exec supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f /tmp/mercy-migration.sql >/dev/null
+echo "== Apply canonical Mercy schema and data on Beget =="
+ssh "${REMOTE}" bash -s -- "${REMOTE_WORK}" <<'REMOTE'
+set -euo pipefail
+work="$1"
+cd "$work"
+tar -xzf migrations.tgz
+
+{
+  printf 'BEGIN;\n'
+
+  for migration_file in migrations/*.sql; do
+    cat "$migration_file"
+    printf '\n'
   done
-  docker exec supabase-db rm -f /tmp/mercy-migration.sql"
 
-echo "== Restore auth identities and Mercy data =="
-ssh "${REMOTE}" "set -euo pipefail
-  cd '${REMOTE_WORK}'
-  {
-    printf 'BEGIN;\\nSET session_replication_role = replica;\\n'
-    cat auth-users.sql
-    cat auth-identities.sql
-    cat public-data.sql
-    printf '\\nSET session_replication_role = origin;\\nCOMMIT;\\n'
-  } > restore.sql
-  chmod 600 restore.sql
-  docker cp restore.sql supabase-db:/tmp/mercy-restore.sql
-  docker exec supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f /tmp/mercy-restore.sql >/dev/null
-  docker exec supabase-db rm -f /tmp/mercy-restore.sql"
+  # Historical specialist migrations create this bucket; the later removal migration
+  # drops DB objects but hosted Supabase required Storage API cleanup. The verified
+  # source profile has zero buckets/objects, so normalize the self-hosted target here.
+  printf "DELETE FROM storage.buckets WHERE id = 'qualification-documents';\n"
 
-echo "== Record applied Mercy migration history =="
-ssh "${REMOTE}" "set -euo pipefail
-  docker exec supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c \"create schema if not exists supabase_migrations; create table if not exists supabase_migrations.schema_migrations(version text primary key, statements text[], name text);\" >/dev/null
-  cd '${REMOTE_WORK}'
-  for f in migrations/*.sql; do
-    base=$(basename \"$f\")
-    version=${base%%_*}
-    name=${base#*_}
-    name=${name%.sql}
-    docker exec supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -v version=\"$version\" -v name=\"$name\" -c \"insert into supabase_migrations.schema_migrations(version,statements,name) values (:'version',null,:'name') on conflict(version) do update set name=excluded.name;\" >/dev/null
-  done"
+  printf 'SET session_replication_role = replica;\n'
+  cat auth-users.sql
+  cat auth-identities.sql
+  cat public-data.sql
+  printf '\nSET session_replication_role = origin;\n'
+
+  printf 'CREATE SCHEMA IF NOT EXISTS supabase_migrations;\n'
+  printf 'CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations(version text primary key, statements text[], name text);\n'
+
+  for migration_file in migrations/*.sql; do
+    base="$(basename "$migration_file")"
+    version="${base%%_*}"
+    migration_name="${base#*_}"
+    migration_name="${migration_name%.sql}"
+
+    if [[ ! "$version" =~ ^[0-9]+$ || ! "$migration_name" =~ ^[A-Za-z0-9_]+$ ]]; then
+      echo "Unsafe migration filename: $base" >&2
+      exit 1
+    fi
+
+    printf "INSERT INTO supabase_migrations.schema_migrations(version,statements,name) VALUES ('%s',NULL,'%s') ON CONFLICT(version) DO UPDATE SET name=excluded.name;\n" "$version" "$migration_name"
+  done
+
+  printf 'COMMIT;\n'
+} | docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null
+REMOTE
 
 echo "== Restart and verify Supabase services =="
-ssh "${REMOTE}" "docker restart supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-storage supabase-kong >/dev/null"
+ssh "${REMOTE}" bash -s -- "${SUPABASE_DIR}" <<'REMOTE'
+set -euo pipefail
+supabase_dir="$1"
+cd "$supabase_dir"
 
-ssh "${REMOTE}" "set -euo pipefail
-  for name in supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-storage supabase-kong; do
-    ok=0
-    for i in $(seq 1 45); do
-      running=$(docker inspect -f '{{.State.Running}}' \"$name\")
-      health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \"$name\")
-      if [ \"$running\" = true ] && { [ \"$health\" = healthy ] || [ \"$health\" = none ]; }; then
+services=(auth rest realtime storage kong)
+docker compose restart "${services[@]}" >/dev/null
+
+for service in "${services[@]}"; do
+  ok=0
+  for _ in $(seq 1 45); do
+    cid="$(docker compose ps -q "$service")"
+    if [[ -n "$cid" ]]; then
+      running="$(docker inspect -f '{{.State.Running}}' "$cid")"
+      health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid")"
+      if [[ "$running" == "true" && ( "$health" == "healthy" || "$health" == "none" ) ]]; then
         ok=1
         break
       fi
-      sleep 2
-    done
-    [ \"$ok\" = 1 ] || { echo \"Service not ready: $name\" >&2; exit 1; }
-  done"
+    fi
+    sleep 2
+  done
+  [[ "$ok" == "1" ]] || { echo "Service not ready: $service" >&2; exit 1; }
+done
+REMOTE
 
 fingerprint_target() {
   {
@@ -353,6 +373,12 @@ fingerprint_target > "${LOCAL_WORK}/target.after"
 if ! cmp -s "${LOCAL_WORK}/source.after" "${LOCAL_WORK}/target.after"; then
   echo "::error::Target row fingerprints do not match frozen source."
   diff -u "${LOCAL_WORK}/source.after" "${LOCAL_WORK}/target.after" || true
+  exit 1
+fi
+
+target_storage_profile="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select (select count(*) from storage.buckets),(select count(*) from storage.objects);\"")"
+if [[ "${target_storage_profile}" != "0|0" ]]; then
+  echo "::error::Target Storage profile differs from the verified empty source profile: ${target_storage_profile}"
   exit 1
 fi
 

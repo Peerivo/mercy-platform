@@ -44,7 +44,7 @@ It must pass all of these checks:
 3. The source database is reachable.
 4. The Beget `supabase-db` container is reachable.
 5. Source and target PostgreSQL versions are reported.
-6. The target has no Mercy users and no `public.help_requests` relation.
+6. The target has no Mercy users, no `public.help_requests` relation, and zero pre-existing Storage buckets/objects.
 7. Required extensions used by Mercy are available on the target via `pg_available_extensions`. They need not already be installed in the fresh database when the canonical Mercy migration installs them; specifically, `202609120001_initial.sql` installs PostGIS into schema `extensions`.
 8. No source data dump is created.
 9. No target database mutation occurs.
@@ -60,12 +60,12 @@ Run **Cut over Mercy Supabase to Beget** only after the preflight succeeds. The 
 3. Re-run source verification immediately after the freeze.
 4. Take and retain a safety backup of the fresh Beget target.
 5. Verify source migration history exactly matches the repository and `auth.users`/`auth.identities` column layouts match Beget.
-6. Refuse to continue if Storage is non-empty or MFA/SSO/non-email identities are present.
+6. Refuse to continue if the source Storage is non-empty, MFA/SSO/non-email identities are present, or the Beget target already contains any Storage bucket/object before mutation.
 7. Freeze all `public` table writes and Auth user/identity writes on the old source using temporary DB triggers inside one transaction. Stream the SQL to containerized `psql` with Docker stdin attached (`-i`), arm cleanup before execution, then verify the exact expected relation set has the trigger and report any missing relation. The failure trap removes these triggers automatically.
-8. Apply the canonical SQL migrations from `supabase/migrations` to the fresh Beget target, then restore `auth.users`, `auth.identities`, and `public` data with triggers disabled for the import.
+8. Apply the canonical SQL migrations from `supabase/migrations`, normalize the historical `qualification-documents` Storage bucket to the verified source profile (currently zero buckets/objects), restore `auth.users`, `auth.identities` and `public` data, and record migration history in one target PostgreSQL transaction. Remote loop variables must be evaluated on Beget via `ssh ... bash -s`/quoted heredoc, never interpolated by the GitHub runner. Data import runs with `session_replication_role = replica` inside that transaction.
 9. Do not send production database dumps to GitHub Artifacts; temporary dumps live only on the runner and Beget work directory and are removed after the run.
-10. Compare deterministic row fingerprints for every public table plus Auth users/identities, compare public RLS policy fingerprint, and compare Realtime publication membership.
-11. Restart and verify every affected service: Auth, REST/PostgREST, Realtime, Storage and Kong, then smoke Auth and a public RPC through the Russian API endpoint.
+10. Compare deterministic row fingerprints for every public table plus Auth users/identities, require the target Storage bucket/object counts to match the verified empty source profile, compare public RLS policy fingerprint, and compare Realtime publication membership.
+11. Restart and verify every affected service by Docker Compose service name (`auth`, `rest`, `realtime`, `storage`, `kong`) rather than hard-coded container names, then smoke Auth and a public RPC through the Russian API endpoint.
 12. Switch the application only after database verification succeeds.
 13. Keep the source frozen until the Russian deployment is verified.
 14. On any failed migration verification, the workflow unfreezes the old source automatically; the Beget safety backup is retained for target repair/rollback.
