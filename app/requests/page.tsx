@@ -1,5 +1,11 @@
 import Link from "next/link";
 
+export const metadata = {
+  title: "Просьбы о помощи",
+  description: "Опубликованные просьбы о добровольной и практической помощи.",
+  alternates: { canonical: "/requests" },
+};
+
 import { serverSupabase } from "@/lib/supabase/server";
 import { getPublicRequestStatus } from "@/lib/request-status";
 import { publicRequestSearchSchema } from "@/lib/validation";
