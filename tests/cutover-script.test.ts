@@ -66,3 +66,12 @@ test("normalizes historical specialist Storage state to the verified empty sourc
   expect(script).toContain('target_storage_profile=');
   expect(script).toContain('if [[ "${target_storage_profile}" != "0|0" ]]');
 });
+
+test("rejects any pre-existing target Storage bucket before mutation", () => {
+  const freshnessQuery = script.match(/target_fresh=.*?storage\.objects[\s\S]*?fi/);
+  expect(freshnessQuery?.[0]).toContain("count(*) from storage.buckets");
+  expect(freshnessQuery?.[0]).toContain("target_storage_buckets target_storage_objects");
+  expect(freshnessQuery?.[0]).toContain('"${target_storage_buckets}" != "0"');
+  expect(script.indexOf("target_fresh=")).toBeLessThan(script.indexOf('echo "== Target safety backup =="'));
+  expect(script.indexOf("target_fresh=")).toBeLessThan(script.indexOf('echo "== Apply canonical Mercy schema and data on Beget =="'));
+});
