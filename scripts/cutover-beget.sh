@@ -123,6 +123,7 @@ backup_file="$1"
 [[ -s "$backup_file" ]] || { echo "Safety backup is missing or empty: $backup_file" >&2; exit 1; }
 backup_prefix="${backup_file%-postgres.dump}"
 metadata_hash_file="${backup_prefix}-dbmeta.md5"
+state_file="${backup_prefix}.state"
 
 database_metadata_hash() {
   docker exec supabase-db psql -U postgres -d template1 -Atc "
@@ -192,10 +193,23 @@ if grep -Eq '[[:space:]]DATABASE[[:space:]].*postgres([[:space:]]|$)' "$archive_
   has_database_create=1
 fi
 
-if [[ "$has_database_create" != "1" ]]; then
-  # Legacy retained backups (including the failed run that prompted this
-  # recovery) predate --create. Capture only the current database-level
-  # metadata before dropping postgres; Mercy migrations do not mutate it.
+if [[ "$has_database_create" == "1" ]]; then
+  [[ -s "$metadata_hash_file" ]] || {
+    echo "Prepared safety backup is missing its database metadata fingerprint: $metadata_hash_file" >&2
+    exit 1
+  }
+  [[ -s "$state_file" && "$(tr -d '[:space:]' < "$state_file")" == "prepared" ]] || {
+    echo "Safety backup is not marked prepared; refusing destructive restore: $state_file" >&2
+    exit 1
+  }
+else
+  [[ "$(basename "$backup_file")" == "before-35770879007-postgres.dump" ]] || {
+    echo "Legacy safety backup is not an explicitly supported recovery archive: $backup_file" >&2
+    exit 1
+  }
+  # The one known retained legacy backup predates --create and prepared markers.
+  # Capture only the current database-level metadata before dropping postgres;
+  # Mercy migrations do not mutate it.
   metadata_dump="$(mktemp)"
   metadata_list="$(mktemp)"
   docker exec supabase-db pg_dump -U postgres -d postgres -Fc --create > "$metadata_dump"
@@ -311,7 +325,7 @@ if [[ -n "${RECOVER_FROM_RUN_ID}" ]]; then
     exit 1
   fi
   if [[ "${RECOVERY_RUN_VERIFIED}" != "1" ]]; then
-    echo "::error::Recovery run was not independently verified as a failed Mercy cutover."
+    echo "::error::Recovery run was not independently verified as a failed/interrupted Mercy cutover."
     exit 1
   fi
 
@@ -323,15 +337,15 @@ set -euo pipefail
 backup_dir="$1"
 recovery_prefix="$2"
 if find "$backup_dir" -maxdepth 1 -type f -name 'cutover-successful-*.marker' -print -quit | grep -q .; then
-  echo "A successful Beget cutover marker exists; failed-run recovery is disabled to protect live/post-cutover data." >&2
+  echo "A successful Beget cutover marker exists; failed/interrupted-run recovery is disabled to protect live/post-cutover data." >&2
   exit 1
 fi
 [[ -s "${recovery_prefix}-postgres.dump" ]] || { echo "Retained recovery backup is missing or empty" >&2; exit 1; }
-printf '%s\n' 'github-failure-verified' > "${recovery_prefix}.recovery-verified"
+printf '%s\n' 'github-terminal-run-verified' > "${recovery_prefix}.recovery-verified"
 chmod 600 "${recovery_prefix}.recovery-verified"
 REMOTE
 
-  echo "== Restore Beget target from retained safety backup for verified failed run ${RECOVER_FROM_RUN_ID} =="
+  echo "== Restore Beget target from retained safety backup for verified failed/interrupted run ${RECOVER_FROM_RUN_ID} =="
   restore_target_backup "${recovery_backup}"
 fi
 
