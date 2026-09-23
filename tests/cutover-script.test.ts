@@ -4,7 +4,9 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, test } from "vitest";
 
 const scriptPath = path.join(process.cwd(), "scripts", "cutover-beget.sh");
+const workflowPath = path.join(process.cwd(), ".github", "workflows", "cutover-to-beget.yml");
 const script = fs.readFileSync(scriptPath, "utf8");
+const workflow = fs.readFileSync(workflowPath, "utf8");
 
 describe("Beget cutover freeze transport", () => {
   test("has valid Bash syntax", () => {
@@ -95,7 +97,9 @@ test("rejects any pre-existing target Storage bucket before mutation", () => {
 describe("Beget cutover recovery", () => {
   test("supports explicit recovery from a retained failed-run safety backup before freshness gating", () => {
     expect(script).toContain('RECOVER_FROM_RUN_ID="\${RECOVER_FROM_RUN_ID:-}"');
-    expect(script).toContain('recovery_backup="\${BACKUP_DIR}/before-\${RECOVER_FROM_RUN_ID}-postgres.dump"');
+    expect(script).toContain('RECOVERY_RUN_VERIFIED="\${RECOVERY_RUN_VERIFIED:-0}"');
+    expect(script).toContain('if [[ "\${RECOVERY_RUN_VERIFIED}" != "1" ]]');
+    expect(script).toContain('recovery_backup="\${recovery_prefix}-postgres.dump"');
     expect(script).toContain('restore_target_backup "${recovery_backup}"');
     const recoveryCall = script.indexOf('restore_target_backup "${recovery_backup}"');
     const freshnessInvocation = script.lastIndexOf("\nassert_target_fresh\n");
@@ -122,13 +126,31 @@ describe("Beget cutover recovery", () => {
     expect(script).not.toContain('SUPABASE_DIR="/opt/beget/supabase"');
   });
 
+  test("captures database creation metadata in every new safety backup", () => {
+    expect(script).toContain("pg_dump -U postgres -d postgres -Fc --create");
+    expect(script).toContain('database_metadata_hash > "${backup_prefix}-dbmeta.md5"');
+    expect(script).toContain('cutover-successful-${GITHUB_RUN_ID:-manual}.marker');
+  });
+
+  test("authorizes failed-run recovery through GitHub Actions before the script can restore", () => {
+    expect(workflow).toContain("actions: read");
+    expect(workflow).toContain("Validate requested failed-run recovery");
+    expect(workflow).toContain('.conclusion == "failure"');
+    expect(workflow).toContain('.name == "Cut over Mercy Supabase to Beget"');
+    expect(workflow).toContain('echo "RECOVERY_RUN_VERIFIED=1" >> "${GITHUB_ENV}"');
+    expect(script).toContain("A successful Beget cutover marker exists; failed-run recovery is disabled");
+  });
+
   test("recreates target safely while keeping the database container running", () => {
     expect(script).toContain('docker ps --no-trunc -q --filter "label=com.docker.compose.project=$project"');
     expect(script).toContain('docker stop "\${other_ids[@]}"');
     expect(script).toContain("docker exec supabase-db dropdb");
-    expect(script).toContain("docker exec supabase-db createdb");
     const restoreBlock = script.match(/restore_target_backup\(\) \{([\s\S]*?)\n\}\n\nrestart_target_services/)?.[1] ?? "";
     expect(restoreBlock).toContain("docker exec -i supabase-db pg_restore");
+    expect(restoreBlock).toContain("--create");
+    expect(restoreBlock).toContain("database_metadata_hash");
+    expect(restoreBlock).toContain("metadata_dump");
+    expect(restoreBlock).toContain("metadata_list");
     expect(restoreBlock).toContain('--single-transaction < "$backup_file"');
     expect(restoreBlock).not.toContain("--no-owner");
     expect(restoreBlock).not.toContain("--no-privileges");
