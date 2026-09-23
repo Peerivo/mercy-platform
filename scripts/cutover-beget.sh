@@ -189,7 +189,7 @@ if [[ -s "$metadata_hash_file" ]]; then
 fi
 
 has_database_create=0
-if grep -Eq '[[:space:]]DATABASE[[:space:]].*postgres([[:space:]]|$)' "$archive_list"; then
+if [[ -s "$state_file" && -s "$metadata_hash_file" ]]; then
   has_database_create=1
 fi
 
@@ -214,7 +214,7 @@ else
   metadata_list="$(mktemp)"
   docker exec supabase-db pg_dump -U postgres -d postgres -Fc --create > "$metadata_dump"
   docker exec -i supabase-db pg_restore -l < "$metadata_dump"     | grep -E ' (DATABASE|DATABASE PROPERTIES|ACL - DATABASE) ' > "$metadata_list"
-  grep -Eq '[[:space:]]DATABASE[[:space:]].*postgres([[:space:]]|$)' "$metadata_list" || {
+  docker exec -i supabase-db pg_restore --create --schema-only -f - < "$metadata_dump" | grep -E '^CREATE DATABASE postgres([[:space:]]|;)' >/dev/null || {
     echo "Could not capture legacy database metadata before recovery" >&2
     exit 1
   }
@@ -400,7 +400,7 @@ database_metadata_hash() {
 
 docker exec supabase-db pg_dumpall -U postgres --globals-only > "${backup_prefix}-globals.sql"
 docker exec supabase-db pg_dump -U postgres -d postgres -Fc --create > "${backup_prefix}-postgres.dump"
-docker exec -i supabase-db pg_restore -l < "${backup_prefix}-postgres.dump" | grep -Eq '[[:space:]]DATABASE[[:space:]].*postgres([[:space:]]|$)' || {
+docker exec -i supabase-db pg_restore --create --schema-only -f - < "${backup_prefix}-postgres.dump" | grep -E '^CREATE DATABASE postgres([[:space:]]|;)' >/dev/null || {
   echo "Safety backup is missing database creation metadata" >&2
   exit 1
 }
