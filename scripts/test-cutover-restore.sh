@@ -77,7 +77,7 @@ pre_baseline="$(target_psql -Atc "select coalesce(to_regclass('public.baseline_r
 }
 echo "Recovery test baseline relation created."
 
-docker run --rm --network host postgres:17-alpine pg_dump "$target_url" -Fc --create > "$dump_file"
+docker run --rm --network host postgres:17-alpine pg_dump "$target_url" -Fc > "$dump_file"
 [[ -s "$dump_file" ]] || { echo "Recovery test dump is empty" >&2; exit 1; }
 docker run --rm -i postgres:17-alpine pg_restore --create --schema-only -f - < "$dump_file" | grep -E '^CREATE DATABASE mercy_restore_test([[:space:]]|;)' >/dev/null || {
   echo "Recovery test archive does not contain database creation metadata" >&2
