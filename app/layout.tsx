@@ -8,6 +8,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
+import { AuthEntry } from "@/components/auth-entry";
 import { MobileMenu } from "@/components/mobile-menu";
 import { QuickExit } from "@/components/quick-exit";
 import { quickExitGuard } from "@/lib/quick-exit-guard";
@@ -31,7 +32,6 @@ const navigation = [
   { href: "/help", label: "Нужна помощь" },
   { href: "/volunteer", label: "Хочу помочь" },
   { href: "/donate", label: "Поддержать" },
-  { href: "/cabinet", label: "Кабинет" },
 ] as const;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -61,6 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </nav>
 
             <div className="site-header-actions">
+              <AuthEntry className="btn secondary header-auth-entry" />
               <QuickExit />
               <MobileMenu items={navigation} />
             </div>
