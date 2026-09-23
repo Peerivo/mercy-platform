@@ -336,7 +336,10 @@ chmod 600 "${recovery_prefix}.recovery-verified"
 REMOTE
 
   echo "== Restore Beget target from retained safety backup for verified failed/interrupted run ${RECOVER_FROM_RUN_ID} =="
+  backup_prefix="${recovery_prefix}"
+  target_mutated=1
   restore_target_backup "${recovery_backup}"
+  target_mutated=0
 fi
 
 if [[ "${MIGRATION_CONFIRM}" == "RECOVER" ]]; then
