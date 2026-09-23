@@ -48,7 +48,7 @@ for role in mercy_restore_auth mercy_restore_storage mercy_restore_rest; do
 done
 admin_psql -c "grant mercy_restore_owner to postgres; grant mercy_restore_reader to postgres; grant mercy_restore_stranger to postgres;" >/dev/null
 admin_psql -c "create database mercy_restore_test owner mercy_restore_owner template template0;" >/dev/null
-admin_psql -c "revoke connect on database mercy_restore_test from public; grant connect on database mercy_restore_test to mercy_restore_reader; alter database mercy_restore_test set statement_timeout = '13s';" >/dev/null
+admin_psql -c "revoke connect on database mercy_restore_test from public; grant connect on database mercy_restore_test to mercy_restore_reader, mercy_restore_rest; alter database mercy_restore_test set statement_timeout = '13s';" >/dev/null
 
 target_psql <<'SQL' >/dev/null
 CREATE TABLE public.baseline_row(id integer primary key);
@@ -114,4 +114,17 @@ docker run --rm -i --network host postgres:17-alpine pg_restore   --dbname="$db_
 [[ "$(target_psql -Atc "set role mercy_restore_auth; select count(*) from auth.users;" | tail -n 1)" == "0" ]]
 [[ "$(target_psql -Atc "set role mercy_restore_storage; select count(*) from storage.objects;" | tail -n 1)" == "0" ]]
 [[ "$(target_psql -Atc "set role mercy_restore_rest; select id from public.rest_probe;" | tail -n 1)" == "9" ]]
+
+# Run the production recovery role verifier against the disposable restored
+# database, replacing only the role identifiers with the fixture service roles.
+role_sql="$(sed -n '/^-- BEGIN_BEGET_ROLE_VERIFICATION$/,/^-- END_BEGET_ROLE_VERIFICATION$/p' scripts/cutover-beget.sh)"
+[[ -n "$role_sql" ]] || { echo "Production role verification SQL was not found" >&2; exit 1; }
+role_sql="$(printf '%s\n' "$role_sql" |
+  sed -e 's/supabase_auth_admin/mercy_restore_auth/g' \
+      -e 's/supabase_storage_admin/mercy_restore_storage/g' \
+      -e 's/authenticator/mercy_restore_rest/g' \
+      -e 's/authenticated/mercy_restore_rest/g' \
+      -e 's/anon/mercy_restore_rest/g')"
+printf '%s\n' "$role_sql" | target_psql >/dev/null
+echo "Production recovery role verifier executed against restored Auth/REST/Storage roles."
 echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
