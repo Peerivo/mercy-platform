@@ -38,6 +38,7 @@ admin_psql -c "create role mercy_restore_owner;" >/dev/null
 admin_psql -c "create role mercy_restore_reader;" >/dev/null
 admin_psql -c "grant mercy_restore_owner to postgres; grant mercy_restore_reader to postgres;" >/dev/null
 admin_psql -c "create database mercy_restore_test owner mercy_restore_owner template template0;" >/dev/null
+admin_psql -c "revoke connect on database mercy_restore_test from public; grant connect on database mercy_restore_test to mercy_restore_reader; alter database mercy_restore_test set mercy.test_setting = 'preserved';" >/dev/null
 
 target_psql <<'SQL' >/dev/null
 CREATE TABLE public.baseline_row(id integer primary key);
@@ -53,30 +54,30 @@ pre_baseline="$(target_psql -Atc "select coalesce(to_regclass('public.baseline_r
 }
 echo "Recovery test baseline relation created."
 
-docker run --rm --network host postgres:17-alpine pg_dump "$target_url" -Fc > "$dump_file"
+docker run --rm --network host postgres:17-alpine pg_dump "$target_url" -Fc --create > "$dump_file"
 [[ -s "$dump_file" ]] || { echo "Recovery test dump is empty" >&2; exit 1; }
-docker run --rm -i postgres:17-alpine pg_restore -l < "$dump_file" | grep "baseline_row" >/dev/null || {
-  echo "Recovery test archive does not contain baseline_row" >&2
+docker run --rm -i postgres:17-alpine pg_restore -l < "$dump_file" | grep -E ' DATABASE .*mercy_restore_test' >/dev/null || {
+  echo "Recovery test archive does not contain database creation metadata" >&2
   exit 1
 }
-echo "Recovery test archive contains baseline relation."
+echo "Recovery test archive contains database metadata."
 
 target_psql -c "create table public.extra_after_backup(id integer);" >/dev/null
+admin_psql -c "alter database mercy_restore_test set mercy.test_setting = 'mutated';" >/dev/null
 echo "Recovery test post-backup mutation created."
 
-db_owner="$(admin_psql -Atc "select pg_get_userbyid(datdba) from pg_database where datname='mercy_restore_test';")"
-[[ "$db_owner" == "mercy_restore_owner" ]]
-
 admin_psql -c "drop database mercy_restore_test with (force);" >/dev/null
-admin_psql -c "create database mercy_restore_test owner mercy_restore_owner template template0;" >/dev/null
-echo "Recovery test database recreated."
+echo "Recovery test database dropped."
 
-docker run --rm -i --network host postgres:17-alpine pg_restore   --dbname="$target_url"   --exit-on-error   --single-transaction < "$dump_file"
+docker run --rm -i --network host postgres:17-alpine pg_restore   --dbname="$db_url"   --create   --exit-on-error < "$dump_file"
 
 [[ "$(target_psql -Atc "select coalesce(to_regclass('public.extra_after_backup')::text,'');")" == "" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='public.baseline_row'::regclass;")" == "mercy_restore_owner" ]]
 [[ "$(target_psql -Atc "select has_table_privilege('mercy_restore_reader','public.baseline_row','SELECT');")" == "t" ]]
 [[ "$(target_psql -Atc "set role mercy_restore_reader; select id from public.baseline_row;")" == "SET
 7" ]]
+[[ "$(admin_psql -Atc "select pg_get_userbyid(datdba) from pg_database where datname='mercy_restore_test';")" == "mercy_restore_owner" ]]
+[[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_reader','mercy_restore_test','CONNECT');")" == "t" ]]
+[[ "$(target_psql -Atc "show mercy.test_setting;")" == "preserved" ]]
 
-echo "Cutover recovery restore behavior verified against disposable PostgreSQL."
+echo "Cutover recovery restore preserves database metadata, object ownership and grants."
