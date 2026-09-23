@@ -1,12 +1,6 @@
 name: Inspect retained Beget safety archive
 
 on:
-  # Temporary, single-use read-only diagnostic after this reviewed change merges.
-  # Remove this push trigger in the next recovery-fix PR.
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/inspect-beget-safety-archive.yml
   workflow_dispatch:
     inputs:
       confirm:
@@ -40,16 +34,16 @@ permissions:
 
 jobs:
   inspect:
-    if: ${{ github.event_name == 'push' || inputs.confirm == 'INSPECT' }}
+    if: ${{ inputs.confirm == 'INSPECT' }}
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
       BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
-      RUN_ID: ${{ github.event_name == 'push' && '35770879007' || inputs.recover_from_run_id }}
-      TOC_ID: ${{ github.event_name == 'push' && '4300' || inputs.toc_id }}
-      INSPECTION_MODE: ${{ github.event_name == 'push' && 'GRAPHQL_CONTEXT' || inputs.inspection_mode }}
+      RUN_ID: ${{ inputs.recover_from_run_id }}
+      TOC_ID: ${{ inputs.toc_id }}
+      INSPECTION_MODE: ${{ inputs.inspection_mode }}
     steps:
       - name: Verify failed cutover identity
         shell: bash
