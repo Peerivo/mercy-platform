@@ -5,8 +5,10 @@ import { describe, expect, test } from "vitest";
 
 const scriptPath = path.join(process.cwd(), "scripts", "cutover-beget.sh");
 const workflowPath = path.join(process.cwd(), ".github", "workflows", "cutover-to-beget.yml");
+const preflightWorkflowPath = path.join(process.cwd(), ".github", "workflows", "migrate-to-beget.yml");
 const script = fs.readFileSync(scriptPath, "utf8");
 const workflow = fs.readFileSync(workflowPath, "utf8");
+const preflightWorkflow = fs.readFileSync(preflightWorkflowPath, "utf8");
 
 describe("Beget cutover freeze transport", () => {
   test("has valid Bash syntax", () => {
@@ -91,6 +93,14 @@ test("rejects any pre-existing target Storage bucket before mutation", () => {
   expect(freshnessInvocation).toBeGreaterThan(-1);
   expect(freshnessInvocation).toBeLessThan(script.indexOf('echo "== Target safety backup =="'));
   expect(freshnessInvocation).toBeLessThan(script.indexOf('echo "== Apply canonical Mercy schema and data on Beget =="'));
+});
+
+test("read-only Beget preflight queries and rejects non-empty Storage", () => {
+  expect(preflightWorkflow).toContain("(select count(*) from storage.buckets)");
+  expect(preflightWorkflow).toContain("(select count(*) from storage.objects)");
+  expect(preflightWorkflow).toContain("read -r pg users help_relation tables policies buckets objects");
+  expect(preflightWorkflow).toContain('[ "${buckets}" != "0" ]');
+  expect(preflightWorkflow).toContain('[ "${objects}" != "0" ]');
 });
 
 
