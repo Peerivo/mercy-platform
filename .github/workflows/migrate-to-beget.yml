@@ -114,15 +114,17 @@ jobs:
         run: |
           set -euo pipefail
           remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
-          result="$(ssh "${remote}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select current_setting('server_version'), (select count(*) from auth.users), coalesce(to_regclass('public.help_requests')::text,''), (select count(*) from pg_tables where schemaname='public'), (select count(*) from pg_policies where schemaname='public');\"")"
-          IFS='|' read -r pg users help_relation tables policies <<< "${result}"
+          result="$(ssh "${remote}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select current_setting('server_version'), (select count(*) from auth.users), coalesce(to_regclass('public.help_requests')::text,''), (select count(*) from pg_tables where schemaname='public'), (select count(*) from pg_policies where schemaname='public'), (select count(*) from storage.buckets), (select count(*) from storage.objects);\"")"
+          IFS='|' read -r pg users help_relation tables policies buckets objects <<< "${result}"
           printf 'Target PostgreSQL: %s\n' "${pg}"
           printf 'Target auth.users: %s\n' "${users}"
           printf 'Target Mercy help_requests relation: %s\n' "${help_relation:-absent}"
           printf 'Target public tables: %s\n' "${tables}"
           printf 'Target public policies: %s\n' "${policies}"
+          printf 'Target Storage buckets: %s\n' "${buckets}"
+          printf 'Target Storage objects: %s\n' "${objects}"
 
-          if [ "${users}" != "0" ] || [ -n "${help_relation}" ]; then
+          if [ "${users}" != "0" ] || [ -n "${help_relation}" ] || [ "${buckets}" != "0" ] || [ "${objects}" != "0" ]; then
             echo "::error::Beget target is not fresh for Mercy; preflight refuses to proceed."
             exit 1
           fi
