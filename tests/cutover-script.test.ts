@@ -159,7 +159,7 @@ describe("Beget cutover recovery", () => {
     expect(restoreBlock).toContain('state_file="${backup_prefix}.state"');
     expect(restoreBlock).toContain('"$(tr -d \'[:space:]\' < "$state_file")" == "prepared"');
     expect(restoreBlock).toContain('before-35770879007-postgres.dump');
-    expect(restoreBlock).toContain("Legacy safety backup is not an explicitly supported recovery archive");
+    expect(restoreBlock).toContain("Safety backup is not prepared, or is not the explicitly supported legacy archive");
   });
 
   test("recreates target safely while keeping the database container running", () => {
