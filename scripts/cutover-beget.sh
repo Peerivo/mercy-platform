@@ -302,7 +302,7 @@ REMOTE
   backup_prefix="${recovery_prefix}"
   target_mutated=1
   restore_target_backup "${recovery_backup}"
-  target_mutated=0
+  if [[ "${MIGRATION_CONFIRM}" != "RECOVER" ]]; then target_mutated=0; fi
 fi
 
 if [[ "${MIGRATION_CONFIRM}" == "RECOVER" ]]; then
@@ -310,9 +310,11 @@ if [[ "${MIGRATION_CONFIRM}" == "RECOVER" ]]; then
     echo "::error::RECOVER requires a verified failed/interrupted cutover run id." >&2
     exit 1
   }
+  restart_target_services
   assert_target_fresh
+  target_mutated=0
   success=1
-  echo "Recovery verified: Beget target is fresh; no source freeze or MIGRATE was run."
+  echo "Recovery verified: Beget target is fresh and services are ready; no source freeze or MIGRATE was run."
   exit 0
 fi
 
