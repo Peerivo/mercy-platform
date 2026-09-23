@@ -169,6 +169,34 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
   }
 });
 
+test("header uses one auth entry that becomes cabinet after sign-in", async ({ page }) => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "Вход", exact: true })).toBeVisible();
+  await expect(page.locator('nav.desktop-nav a[href="/cabinet"]')).toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto("/");
+  await page.locator(".mobile-menu summary").click();
+  await expect(
+    page.locator(".mobile-menu-panel").getByRole("link", { name: "Вход", exact: true })
+  ).toBeVisible();
+
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await register(page, `header-auth-${suffix}@mercy.invalid`);
+  await expect(page.getByRole("link", { name: "Кабинет", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Выйти", exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto("/cabinet");
+  await page.locator(".mobile-menu summary").click();
+  await expect(
+    page.locator(".mobile-menu-panel").getByRole("link", { name: "Кабинет", exact: true })
+  ).toBeVisible();
+});
+
 test("the production guard protects a genuinely BFCache-eligible document", async ({ browser }, testInfo) => {
   const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const lifecycle: LifecycleObservation[] = [];
