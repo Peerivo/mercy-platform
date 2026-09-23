@@ -99,6 +99,7 @@ SQL
 target_psql <<'SQL' >/dev/null
 CREATE SCHEMA graphql;
 CREATE SCHEMA graphql_public;
+GRANT USAGE ON SCHEMA graphql_public TO mercy_restore_rest;
 SQL
 docker exec "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 \
   -c "create extension pg_graphql with schema graphql;" >/dev/null
