@@ -171,12 +171,7 @@ restart_others() {
     docker start "${other_ids[@]}" >/dev/null 2>&1 || true
   fi
 }
-restore_error_log=""
-cleanup_restore() {
-  if [[ -n "$restore_error_log" ]]; then rm -f "$restore_error_log"; fi
-  restart_others
-}
-trap cleanup_restore EXIT
+trap restart_others EXIT
 
 if (( ${#other_ids[@]} > 0 )); then
   docker stop "${other_ids[@]}" >/dev/null
@@ -212,15 +207,11 @@ fi
 docker exec supabase-db dropdb -U supabase_admin --maintenance-db=template1 --force postgres
 # pg_restore prints failing SQL, including confidential database settings, on
 # stderr. Discard those details after a generic error; never emit them to CI.
-restore_error_log="$(mktemp)"
-chmod 600 "$restore_error_log"
 if ! docker exec -i supabase-db pg_restore -U supabase_admin -d template1 \
-  --create --exit-on-error < "$backup_file" 2>"$restore_error_log"; then
-  rm -f "$restore_error_log"
+  --create --exit-on-error < "$backup_file" 2>/dev/null; then
   echo "::error::Safety-backup restore failed; SQL details suppressed." >&2
   exit 1
 fi
-rm -f "$restore_error_log"
 
 post_restore_metadata_hash="$(database_metadata_hash)"
 [[ -n "$post_restore_metadata_hash" ]] || {
