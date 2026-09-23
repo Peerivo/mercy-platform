@@ -206,7 +206,13 @@ printf '%s\n' "$graphql_acl" |
   docker exec -i "$db_container" sh -c 'cat > "$1"' sh "$test_acl_list"
 docker exec -i "$db_container" pg_restore -U supabase_admin -d postgres --create --exit-on-error \
   --use-list="$test_main_list" < "$dump_file"
-printf 'Fixture database ACL TOC entries: %s\n' "$(printf '%s\n' "$toc_listing" | awk 'index($0, " ACL - DATABASE mercy_restore_test ") {n++} END {print n+0}')"
+printf 'Fixture database TOC entry types: %s\n' "$(printf '%s\n' "$toc_listing" | awk 'index($0, " DATABASE ") {print $4 ":" $5}' | paste -sd, -)"
+archive_sql="$(docker run --rm -i postgres:17-alpine pg_restore --create --schema-only -f - < "$dump_file")"
+printf 'Fixture archive database REVOKE/GRANT counts: %s\n' "$(printf '%s\n' "$archive_sql" |
+  awk '/^REVOKE .* ON DATABASE mercy_restore_test / {r++}
+       /^GRANT .* ON DATABASE mercy_restore_test / {g++}
+       END {print r+0 "|" g+0}')"
+unset archive_sql
 printf 'Fixture stranger CONNECT after main archive replay: %s\n' "$(admin_psql -Atc "select has_database_privilege('mercy_restore_stranger','mercy_restore_test','CONNECT');")"
 [[ "$(target_psql -Atc "select to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') is null;")" == "t" ]]
 wrapper_sql="$(sed -n '/^-- BEGIN_BEGET_GRAPHQL_WRAPPER$/,/^-- END_BEGET_GRAPHQL_WRAPPER$/p' scripts/cutover-beget.sh)"
