@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "Disposable recovery assertion failed at line ${LINENO}" >&2' ERR
 
 # Exercise the production sanitizer with a simulated failed restore; the SQL
 # contains a sentinel which must never appear in its diagnostic output.
