@@ -368,6 +368,13 @@ backup_prefix="${BACKUP_DIR}/before-${GITHUB_RUN_ID:-manual}"
 ssh "${REMOTE}" bash -s -- "${backup_prefix}" <<'REMOTE'
 set -euo pipefail
 backup_prefix="$1"
+umask 077
+for suffix in -globals.sql -postgres.dump -dbmeta.md5 .state; do
+  [[ ! -e "${backup_prefix}${suffix}" ]] || {
+    echo "A retained safety backup already exists for this run ID; refusing overwrite" >&2
+    exit 1
+  }
+done
 
 database_metadata_hash() {
   docker exec supabase-db psql -U postgres -d template1 -Atc "
