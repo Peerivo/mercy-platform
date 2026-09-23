@@ -30,7 +30,11 @@ PY
 )"
 
 dump_file="$(mktemp)"
+test_main_list=""
+test_acl_list=""
 cleanup() {
+  if [[ -n "$test_main_list" ]]; then docker exec "$db_container" rm -f "$test_main_list" >/dev/null 2>&1; fi
+  if [[ -n "$test_acl_list" ]]; then docker exec "$db_container" rm -f "$test_acl_list" >/dev/null 2>&1; fi
   set +e
   docker run --rm --network host postgres:17-alpine psql "$db_url" -v ON_ERROR_STOP=1     -c "drop database if exists mercy_restore_test with (force);" >/dev/null 2>&1
   docker run --rm --network host postgres:17-alpine psql "$db_url" -v ON_ERROR_STOP=1     -c "drop role if exists mercy_restore_stranger;" >/dev/null 2>&1
@@ -98,9 +102,12 @@ CREATE SCHEMA graphql_public;
 SQL
 docker exec "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 \
   -c "create extension pg_graphql with schema graphql;" >/dev/null
-target_psql <<'SQL' >/dev/null
-CREATE OR REPLACE FUNCTION graphql_public.graphql("operationName" text, query text, variables jsonb, extensions jsonb)
-RETURNS jsonb LANGUAGE sql AS 'select ''{}''::jsonb';
+docker exec -i "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+CREATE FUNCTION graphql_public.graphql("operationName" text DEFAULT NULL, query text DEFAULT NULL,
+  variables jsonb DEFAULT NULL, extensions jsonb DEFAULT NULL)
+RETURNS jsonb LANGUAGE sql AS 'select graphql.resolve(query := query, variables := coalesce(variables, ''{}''::jsonb), "operationName" := "operationName", extensions := extensions)';
+ALTER EXTENSION pg_graphql ADD FUNCTION graphql_public.graphql(text,text,jsonb,jsonb);
+REVOKE ALL ON FUNCTION graphql_public.graphql(text,text,jsonb,jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb,jsonb) TO mercy_restore_rest;
 SQL
 
@@ -157,9 +164,11 @@ mapfile -t graphql_rows <<< "$graphql_entries"
 (( ${#graphql_rows[@]} <= 20 ))
 printf '%s\n' "$graphql_entries" | grep -F ' SCHEMA - graphql_public ' >/dev/null
 printf '%s\n' "$graphql_entries" | grep -F ' EXTENSION - pg_graphql ' >/dev/null
-printf '%s\n' "$graphql_entries" | grep -F ' FUNCTION graphql_public graphql(' >/dev/null
+if printf '%s\n' "$graphql_entries" | grep -F ' FUNCTION graphql_public graphql(' >/dev/null; then
+  echo "Disposable GraphQL wrapper must be omitted as an extension member" >&2; exit 1
+fi
 printf '%s\n' "$graphql_entries" | grep -F ' ACL graphql_public FUNCTION graphql(' >/dev/null
-echo "Recovery test GraphQL archive context includes schema, extension, function and ACL."
+echo "Recovery test GraphQL archive reproduces schema, extension and orphan ACL."
 
 target_psql <<'SQL' >/dev/null
 CREATE TABLE public.help_requests(id integer PRIMARY KEY);
@@ -174,7 +183,35 @@ echo "Recovery test post-backup mutation created."
 admin_psql -c "drop database mercy_restore_test with (force);" >/dev/null
 echo "Recovery test database dropped."
 
-docker exec -i "$db_container" pg_restore -U supabase_admin -d postgres --create --exit-on-error < "$dump_file"
+# The function is an extension member: pg_dump omits its definition but keeps
+# its ACL. Apply all other archive entries first, create the canonical wrapper,
+# then replay the archived ACL exactly as production recovery does.
+graphql_acl="$(printf '%s\n' "$toc_listing" |
+  awk 'index($0, " ACL graphql_public FUNCTION graphql(\\"operationName\\" text, query text, variables jsonb, extensions jsonb) ") {print}')"
+[[ "$(printf '%s\n' "$graphql_acl" | wc -l)" == "1" ]]
+graphql_acl_id="${graphql_acl%%;*}"
+[[ "$graphql_acl_id" =~ ^[0-9]+$ ]]
+test_main_list="$(docker exec "$db_container" mktemp /tmp/mercy-restore-test-main.XXXXXXXX)"
+test_acl_list="$(docker exec "$db_container" mktemp /tmp/mercy-restore-test-acl.XXXXXXXX)"
+printf '%s\n' "$toc_listing" |
+  awk -v id="$graphql_acl_id" '$1 == id ";" {$0=";" $0} {print}' |
+  docker exec -i "$db_container" sh -c 'cat > "$1"' sh "$test_main_list"
+printf '%s\n' "$graphql_acl" |
+  docker exec -i "$db_container" sh -c 'cat > "$1"' sh "$test_acl_list"
+docker exec -i "$db_container" pg_restore -U supabase_admin -d postgres --create --exit-on-error \
+  --use-list="$test_main_list" < "$dump_file"
+[[ "$(target_psql -Atc "select to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') is null;")" == "t" ]]
+wrapper_sql="$(sed -n '/^-- BEGIN_BEGET_GRAPHQL_WRAPPER$/,/^-- END_BEGET_GRAPHQL_WRAPPER$/p' scripts/cutover-beget.sh)"
+[[ -n "$wrapper_sql" ]] || { echo "Production GraphQL wrapper SQL missing" >&2; exit 1; }
+printf '%s\n' "$wrapper_sql" |
+  docker exec -i "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 >/dev/null
+docker exec -i "$db_container" pg_restore -U supabase_admin -d mercy_restore_test --exit-on-error \
+  --use-list="$test_acl_list" < "$dump_file"
+[[ "$(target_psql -Atc "select pg_get_userbyid(proowner) from pg_proc where oid=to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)');")" == "supabase_admin" ]]
+[[ "$(target_psql -Atc "select has_function_privilege('mercy_restore_rest', 'graphql_public.graphql(text,text,jsonb,jsonb)', 'EXECUTE');")" == "t" ]]
+[[ "$(target_psql -Atc "select has_function_privilege('mercy_restore_reader', 'graphql_public.graphql(text,text,jsonb,jsonb)', 'EXECUTE');")" == "f" ]]
+[[ "$(target_psql -Atc "set role mercy_restore_rest; select jsonb_typeof(graphql_public.graphql(query => '{ __typename }'));" | tail -n 1)" == "object" ]]
+echo "Recovery test recreated wrapper and replayed archived ACL with role boundary."
 
 [[ "$(target_psql -Atc "select coalesce(to_regclass('public.extra_after_backup')::text,'');")" == "" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='public.baseline_row'::regclass;")" == "mercy_restore_owner" ]]
