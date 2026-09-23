@@ -10,8 +10,8 @@ set -euo pipefail
 RECOVER_FROM_RUN_ID="${RECOVER_FROM_RUN_ID:-}"
 RECOVERY_RUN_VERIFIED="${RECOVERY_RUN_VERIFIED:-0}"
 
-if [[ "${MIGRATION_CONFIRM}" != "MIGRATE" ]]; then
-  echo "Migration confirmation is not MIGRATE; refusing to continue." >&2
+if [[ "${MIGRATION_CONFIRM}" != "MIGRATE" && "${MIGRATION_CONFIRM}" != "RECOVER" ]]; then
+  echo "Confirmation must be MIGRATE or RECOVER; refusing to continue." >&2
   exit 1
 fi
 
@@ -309,16 +309,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "== Compatibility gates =="
-
-repo_versions="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sed 's/_.*//' | sort)"
-source_versions="$(source_psql -Atc "select version from supabase_migrations.schema_migrations order by version;")"
-if [[ "${repo_versions}" != "${source_versions}" ]]; then
-  echo "::error::Repository migration history differs from Mercy-prod."
-  diff -u <(printf '%s\n' "${source_versions}") <(printf '%s\n' "${repo_versions}") || true
-  exit 1
-fi
-
 if [[ -n "${RECOVER_FROM_RUN_ID}" ]]; then
   if [[ ! "${RECOVER_FROM_RUN_ID}" =~ ^[0-9]+$ ]]; then
     echo "::error::RECOVER_FROM_RUN_ID must be a numeric GitHub Actions run id."
@@ -348,6 +338,30 @@ REMOTE
   echo "== Restore Beget target from retained safety backup for verified failed/interrupted run ${RECOVER_FROM_RUN_ID} =="
   restore_target_backup "${recovery_backup}"
 fi
+
+if [[ "${MIGRATION_CONFIRM}" == "RECOVER" ]]; then
+  [[ -n "${RECOVER_FROM_RUN_ID}" ]] || {
+    echo "::error::RECOVER requires a verified failed/interrupted cutover run id." >&2
+    exit 1
+  }
+  assert_target_fresh
+  success=1
+  echo "Recovery verified: Beget target is fresh; no source freeze or MIGRATE was run."
+  exit 0
+fi
+
+echo "== Compatibility gates =="
+repo_versions="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sed 's/_.*//' | sort)"
+source_versions="$(source_psql -Atc "select version from supabase_migrations.schema_migrations order by version;")"
+if [[ "${repo_versions}" != "${source_versions}" ]]; then
+  echo "::error::Repository migration history differs from Mercy-prod."
+  diff -u <(printf '%s\n' "${source_versions}") <(printf '%s\n' "${repo_versions}") || true
+  exit 1
+fi
+
+
+
+
 
 source_auth_columns="$(source_psql -At -F '|' -c "select table_name,ordinal_position,column_name,udt_name,is_nullable from information_schema.columns where table_schema='auth' and table_name in ('users','identities') order by table_name,ordinal_position;")"
 target_auth_columns="$(ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select table_name,ordinal_position,column_name,udt_name,is_nullable from information_schema.columns where table_schema='auth' and table_name in ('users','identities') order by table_name,ordinal_position;\"")"
