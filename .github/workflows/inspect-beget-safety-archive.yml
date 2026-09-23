@@ -102,7 +102,9 @@ jobs:
             printf 'Archive TOC entry: %s\n' "$entry"
           elif [[ "$mode" == "GRAPHQL_CONTEXT" ]]; then
             entries_text="$(docker exec -i supabase-db pg_restore -l < "$backup" |
-              awk 'index($0, " graphql_public ") && index($0, "graphql(") {print}')"
+              awk 'index($0, " SCHEMA - graphql_public ") ||
+                   index($0, " EXTENSION - pg_graphql ") ||
+                   (index($0, " graphql_public ") && index($0, "graphql(")) {print}')"
             [[ -n "$entries_text" ]] || { echo "GraphQL TOC context missing"; exit 1; }
             mapfile -t entries <<< "$entries_text"
             (( ${#entries[@]} <= 20 )) || {
