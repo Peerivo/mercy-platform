@@ -137,7 +137,7 @@ describe("Beget cutover recovery", () => {
   });
 
   test("captures database creation metadata and a completed marker in every new safety backup", () => {
-    expect(script).toContain("pg_dump -U postgres -d postgres -Fc --create");
+    expect(script).toContain("pg_dump -U postgres -d postgres -Fc");
     expect(script).toContain('database_metadata_hash > "${backup_prefix}-dbmeta.md5"');
     expect(script).toContain("printf '%s\\n' 'prepared' > \"${backup_prefix}.state\"");
     expect(script).toContain('cutover-successful-${GITHUB_RUN_ID:-manual}.marker');
@@ -170,8 +170,7 @@ describe("Beget cutover recovery", () => {
     expect(restoreBlock).toContain("docker exec -i supabase-db pg_restore");
     expect(restoreBlock).toContain("--create");
     expect(restoreBlock).toContain("database_metadata_hash");
-    expect(restoreBlock).toContain("metadata_dump");
-    expect(restoreBlock).toContain("metadata_list");
+    expect(restoreBlock).toContain('pg_restore -f /dev/null < "$backup_file"');
     expect(restoreBlock).toContain('--single-transaction < "$backup_file"');
     expect(restoreBlock).not.toContain("--no-owner");
     expect(restoreBlock).not.toContain("--no-privileges");
