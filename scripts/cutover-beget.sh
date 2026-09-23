@@ -218,7 +218,7 @@ RESET ROLE;
 SET LOCAL ROLE supabase_storage_admin;
 SELECT count(*) FROM storage.objects;
 RESET ROLE;
-DO $
+DO $$
 BEGIN
   IF NOT has_database_privilege('authenticator', current_database(), 'CONNECT')
      OR NOT has_schema_privilege('anon', 'public', 'USAGE')
@@ -226,7 +226,7 @@ BEGIN
     RAISE EXCEPTION 'REST database role access was not restored';
   END IF;
 END
-$;
+$$;
 SET LOCAL ROLE authenticator;
 SELECT current_user;
 ROLLBACK;
