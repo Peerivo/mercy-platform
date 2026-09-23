@@ -8,6 +8,7 @@ set -euo pipefail
 : "${TARGET_SUPABASE_URL:?TARGET_SUPABASE_URL required}"
 : "${TARGET_ANON_KEY:?TARGET_ANON_KEY required}"
 RECOVER_FROM_RUN_ID="${RECOVER_FROM_RUN_ID:-}"
+RECOVERY_RUN_VERIFIED="${RECOVERY_RUN_VERIFIED:-0}"
 
 if [[ "${MIGRATION_CONFIRM}" != "MIGRATE" ]]; then
   echo "Migration confirmation is not MIGRATE; refusing to continue." >&2
@@ -120,6 +121,34 @@ restore_target_backup() {
 set -euo pipefail
 backup_file="$1"
 [[ -s "$backup_file" ]] || { echo "Safety backup is missing or empty: $backup_file" >&2; exit 1; }
+backup_prefix="${backup_file%-postgres.dump}"
+metadata_hash_file="${backup_prefix}-dbmeta.md5"
+
+database_metadata_hash() {
+  docker exec supabase-db psql -U postgres -d template1 -Atc "
+    with d as (
+      select d.*, t.spcname
+      from pg_database d
+      join pg_tablespace t on t.oid=d.dattablespace
+      where d.datname='postgres'
+    )
+    select md5(concat_ws('|',
+      pg_get_userbyid(d.datdba),
+      coalesce(d.datacl::text,''),
+      d.datconnlimit::text,
+      d.datistemplate::text,
+      d.datallowconn::text,
+      d.spcname,
+      d.datcollate,
+      d.datctype,
+      coalesce((
+        select string_agg(s.setrole::text || ':' || s.setconfig::text, '|' order by s.setrole, s.setconfig::text)
+        from pg_db_role_setting s
+        where s.setdatabase=d.oid
+      ), '')
+    ))
+    from d;"
+}
 
 project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
 [[ -n "$project" ]] || { echo "Cannot resolve Supabase compose project label" >&2; exit 1; }
@@ -142,40 +171,66 @@ if (( ${#other_ids[@]} > 0 )); then
   docker stop "${other_ids[@]}" >/dev/null
 fi
 
-docker exec -i supabase-db pg_restore -l < "$backup_file" >/dev/null
+archive_list="$(mktemp)"
+metadata_dump=""
+metadata_list=""
+cleanup_temp() {
+  rm -f "$archive_list" "$metadata_dump" "$metadata_list"
+  docker exec supabase-db rm -f /tmp/mercy-dbmeta.dump /tmp/mercy-dbmeta.list >/dev/null 2>&1 || true
+}
+trap 'cleanup_temp; restart_others' EXIT
 
-db_owner="$(docker exec supabase-db psql -U postgres -d template1 -Atc "select pg_get_userbyid(datdba) from pg_database where datname='postgres';")"
-[[ -n "$db_owner" ]] || { echo "Cannot resolve owner of target database" >&2; exit 1; }
+docker exec -i supabase-db pg_restore -l < "$backup_file" > "$archive_list"
+pre_restore_metadata_hash="$(database_metadata_hash)"
+expected_metadata_hash="$pre_restore_metadata_hash"
+if [[ -s "$metadata_hash_file" ]]; then
+  expected_metadata_hash="$(tr -d '[:space:]' < "$metadata_hash_file")"
+fi
 
-# Recreate the target database before restore. pg_restore --clean alone only
-# removes objects represented in the archive and can leave post-backup Mercy
-# objects or extensions behind.
-docker exec supabase-db dropdb \
-  -U postgres \
-  --maintenance-db=template1 \
-  --force \
-  postgres
+has_database_create=0
+if grep -Eq '[[:space:]]DATABASE[[:space:]].*postgres([[:space:]]|$)' "$archive_list"; then
+  has_database_create=1
+fi
 
-docker exec supabase-db createdb \
-  -U postgres \
-  --maintenance-db=template1 \
-  --template=template0 \
-  --owner="$db_owner" \
-  postgres
+if [[ "$has_database_create" != "1" ]]; then
+  # Legacy retained backups (including the failed run that prompted this
+  # recovery) predate --create. Capture only the current database-level
+  # metadata before dropping postgres; Mercy migrations do not mutate it.
+  metadata_dump="$(mktemp)"
+  metadata_list="$(mktemp)"
+  docker exec supabase-db pg_dump -U postgres -d postgres -Fc --create > "$metadata_dump"
+  docker exec -i supabase-db pg_restore -l < "$metadata_dump"     | grep -E ' (DATABASE|DATABASE PROPERTIES|ACL - DATABASE) ' > "$metadata_list"
+  grep -Eq '[[:space:]]DATABASE[[:space:]].*postgres([[:space:]]|$)' "$metadata_list" || {
+    echo "Could not capture legacy database metadata before recovery" >&2
+    exit 1
+  }
+  docker cp "$metadata_dump" supabase-db:/tmp/mercy-dbmeta.dump
+  docker cp "$metadata_list" supabase-db:/tmp/mercy-dbmeta.list
+fi
 
-# Preserve the archived object owners and ACLs. The baseline Supabase roles
-# remain cluster-wide across database recreation.
-docker exec -i supabase-db pg_restore \
-  -U postgres \
-  -d postgres \
-  --exit-on-error \
-  --single-transaction < "$backup_file"
+docker exec supabase-db dropdb   -U postgres   --maintenance-db=template1   --force   postgres
+
+if [[ "$has_database_create" == "1" ]]; then
+  # Current safety backups include database creation, database-level ACLs and
+  # ALTER DATABASE settings. Restore them from the archive itself.
+  docker exec -i supabase-db pg_restore     -U postgres     -d template1     --create     --exit-on-error < "$backup_file"
+else
+  # One-time compatibility path for the older retained backup. Recreate only
+  # the database metadata from the pre-drop donor, then load the old archive.
+  docker exec supabase-db pg_restore     -U postgres     -d template1     --create     --use-list=/tmp/mercy-dbmeta.list     --exit-on-error     /tmp/mercy-dbmeta.dump
+
+  docker exec -i supabase-db pg_restore     -U postgres     -d postgres     --exit-on-error     --single-transaction < "$backup_file"
+fi
+
+post_restore_metadata_hash="$(database_metadata_hash)"
+[[ -n "$expected_metadata_hash" && "$post_restore_metadata_hash" == "$expected_metadata_hash" ]] || {
+  echo "Database-level metadata fingerprint changed during recovery" >&2
+  exit 1
+}
 
 state="$(docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c "select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.buckets),(select count(*) from storage.objects);")"
 [[ "$state" == "0||0|0" ]] || { echo "Safety-backup restore did not produce a fresh target: $state" >&2; exit 1; }
 
-# Exercise restored service-role access rather than treating row counts as
-# sufficient evidence that ownership and grants survived.
 docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 BEGIN;
 SET LOCAL ROLE supabase_auth_admin;
@@ -186,6 +241,7 @@ SELECT count(*) FROM storage.objects;
 ROLLBACK;
 SQL
 
+cleanup_temp
 restart_others
 trap - EXIT
 REMOTE
@@ -254,8 +310,28 @@ if [[ -n "${RECOVER_FROM_RUN_ID}" ]]; then
     echo "::error::RECOVER_FROM_RUN_ID must be a numeric GitHub Actions run id."
     exit 1
   fi
-  recovery_backup="${BACKUP_DIR}/before-${RECOVER_FROM_RUN_ID}-postgres.dump"
-  echo "== Restore Beget target from retained safety backup for failed run ${RECOVER_FROM_RUN_ID} =="
+  if [[ "${RECOVERY_RUN_VERIFIED}" != "1" ]]; then
+    echo "::error::Recovery run was not independently verified as a failed Mercy cutover."
+    exit 1
+  fi
+
+  recovery_prefix="${BACKUP_DIR}/before-${RECOVER_FROM_RUN_ID}"
+  recovery_backup="${recovery_prefix}-postgres.dump"
+
+  ssh "${REMOTE}" bash -s -- "${BACKUP_DIR}" "${recovery_prefix}" <<'REMOTE'
+set -euo pipefail
+backup_dir="$1"
+recovery_prefix="$2"
+if find "$backup_dir" -maxdepth 1 -type f -name 'cutover-successful-*.marker' -print -quit | grep -q .; then
+  echo "A successful Beget cutover marker exists; failed-run recovery is disabled to protect live/post-cutover data." >&2
+  exit 1
+fi
+[[ -s "${recovery_prefix}-postgres.dump" ]] || { echo "Retained recovery backup is missing or empty" >&2; exit 1; }
+printf '%s\n' 'github-failure-verified' > "${recovery_prefix}.recovery-verified"
+chmod 600 "${recovery_prefix}.recovery-verified"
+REMOTE
+
+  echo "== Restore Beget target from retained safety backup for verified failed run ${RECOVER_FROM_RUN_ID} =="
   restore_target_backup "${recovery_backup}"
 fi
 
@@ -278,7 +354,46 @@ assert_target_fresh
 echo "== Target safety backup =="
 ssh "${REMOTE}" "mkdir -p '${BACKUP_DIR}' '${REMOTE_WORK}' && chmod 700 '${BACKUP_DIR}' '${REMOTE_WORK}'"
 backup_prefix="${BACKUP_DIR}/before-${GITHUB_RUN_ID:-manual}"
-ssh "${REMOTE}" "docker exec supabase-db pg_dumpall -U postgres --globals-only > '${backup_prefix}-globals.sql' && docker exec supabase-db pg_dump -U postgres -d postgres -Fc > '${backup_prefix}-postgres.dump' && chmod 600 '${backup_prefix}-globals.sql' '${backup_prefix}-postgres.dump'"
+ssh "${REMOTE}" bash -s -- "${backup_prefix}" <<'REMOTE'
+set -euo pipefail
+backup_prefix="$1"
+
+database_metadata_hash() {
+  docker exec supabase-db psql -U postgres -d template1 -Atc "
+    with d as (
+      select d.*, t.spcname
+      from pg_database d
+      join pg_tablespace t on t.oid=d.dattablespace
+      where d.datname='postgres'
+    )
+    select md5(concat_ws('|',
+      pg_get_userbyid(d.datdba),
+      coalesce(d.datacl::text,''),
+      d.datconnlimit::text,
+      d.datistemplate::text,
+      d.datallowconn::text,
+      d.spcname,
+      d.datcollate,
+      d.datctype,
+      coalesce((
+        select string_agg(s.setrole::text || ':' || s.setconfig::text, '|' order by s.setrole, s.setconfig::text)
+        from pg_db_role_setting s
+        where s.setdatabase=d.oid
+      ), '')
+    ))
+    from d;"
+}
+
+docker exec supabase-db pg_dumpall -U postgres --globals-only > "${backup_prefix}-globals.sql"
+docker exec supabase-db pg_dump -U postgres -d postgres -Fc --create > "${backup_prefix}-postgres.dump"
+docker exec -i supabase-db pg_restore -l < "${backup_prefix}-postgres.dump" | grep -Eq '[[:space:]]DATABASE[[:space:]].*postgres([[:space:]]|$)' || {
+  echo "Safety backup is missing database creation metadata" >&2
+  exit 1
+}
+database_metadata_hash > "${backup_prefix}-dbmeta.md5"
+printf '%s\n' 'prepared' > "${backup_prefix}.state"
+chmod 600 "${backup_prefix}-globals.sql" "${backup_prefix}-postgres.dump" "${backup_prefix}-dbmeta.md5" "${backup_prefix}.state"
+REMOTE
 
 tar -C supabase -czf "${LOCAL_WORK}/migrations.tgz" migrations
 scp -q "${LOCAL_WORK}/migrations.tgz" "${REMOTE}:${REMOTE_WORK}/migrations.tgz"
@@ -513,6 +628,7 @@ curl -fsS   -H "apikey: ${TARGET_ANON_KEY}"   -H "Authorization: Bearer ${TARGET
 curl -fsS   -H "apikey: ${TARGET_ANON_KEY}"   -H "Authorization: Bearer ${TARGET_ANON_KEY}"   -H "Content-Type: application/json"   -X POST   -d '{}'   "${TARGET_SUPABASE_URL}/rest/v1/rpc/list_public_help_requests" >/dev/null
 
 source_psql -Atc "update mercy_migration.state set frozen_until = now() + interval '24 hours' where singleton = true;" >/dev/null
+ssh "${REMOTE}" "printf '%s\n' 'database-cutover-verified' > '${BACKUP_DIR}/cutover-successful-${GITHUB_RUN_ID:-manual}.marker' && chmod 600 '${BACKUP_DIR}/cutover-successful-${GITHUB_RUN_ID:-manual}.marker'"
 success=1
 echo "Migration verified successfully."
 echo "The old Mercy database remains write-frozen until application cutover is verified."
