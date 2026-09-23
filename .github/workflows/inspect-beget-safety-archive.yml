@@ -101,10 +101,12 @@ jobs:
             [[ "$entry" =~ ^[[:print:]]+$ ]] || { echo "Unsafe archive index entry"; exit 1; }
             printf 'Archive TOC entry: %s\n' "$entry"
           elif [[ "$mode" == "GRAPHQL_CONTEXT" ]]; then
-            mapfile -t entries < <(docker exec -i supabase-db pg_restore -l < "$backup" |
-              awk '$0 ~ / graphql_public / && $0 ~ /graphql\\(/ {print}')
-            (( ${#entries[@]} > 0 && ${#entries[@]} <= 20 )) || {
-              echo "GraphQL TOC context missing or unexpectedly large"; exit 1;
+            entries_text="$(docker exec -i supabase-db pg_restore -l < "$backup" |
+              awk 'index($0, " graphql_public ") && index($0, "graphql(") {print}')"
+            [[ -n "$entries_text" ]] || { echo "GraphQL TOC context missing"; exit 1; }
+            mapfile -t entries <<< "$entries_text"
+            (( ${#entries[@]} <= 20 )) || {
+              echo "GraphQL TOC context unexpectedly large"; exit 1;
             }
             for entry in "${entries[@]}"; do
               [[ "$entry" =~ ^[[:print:]]+$ ]] || { echo "Unsafe archive index entry"; exit 1; }
@@ -115,9 +117,15 @@ jobs:
                      to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') is not null,
                      exists(select 1 from pg_extension where extname='pg_graphql'),
                      exists(select 1 from pg_available_extensions where name='pg_graphql');")"
-            [[ "$flags" =~ ^[tf]\\|[tf]\\|[tf]\\|[tf]$ ]] || {
+            IFS='|' read -r schema wrapper installed available <<< "$flags"
+            [[ "$flags" == "$schema|$wrapper|$installed|$available" ]] || {
               echo "Unexpected GraphQL catalog result"; exit 1;
             }
+            for bit in "$schema" "$wrapper" "$installed" "$available"; do
+              [[ "$bit" == "t" || "$bit" == "f" ]] || {
+                echo "Unexpected GraphQL catalog result"; exit 1;
+              }
+            done
             printf 'GraphQL catalog flags (schema|wrapper|installed_extension|available_extension): %s\n' "$flags"
           else
             echo "Invalid inspection mode"; exit 1
