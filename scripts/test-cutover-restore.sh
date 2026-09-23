@@ -58,7 +58,7 @@ admin_psql -c "revoke connect on database mercy_restore_test from public; grant 
 # A database-level custom GUC requires the Supabase superuser during restore.
 # This harmless fixture value exercises the same archive path as self-hosted JWT metadata.
 docker exec "$db_container" psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
-  -c "alter database mercy_restore_test set \"app.settings.restore_probe\" to 'fixture-only';" >/dev/null
+  -c "alter database mercy_restore_test set \"app.settings.jwt_secret\" to 'fixture-only';" >/dev/null
 
 target_psql <<'SQL' >/dev/null
 CREATE TABLE public.baseline_row(id integer primary key);
@@ -102,6 +102,7 @@ INSERT INTO storage.buckets(id) VALUES ('mercy');
 INSERT INTO storage.objects(id) VALUES (1);
 SQL
 admin_psql -c "alter database mercy_restore_test set statement_timeout = '29s';" >/dev/null
+[[ "$(target_psql -Atc 'show statement_timeout;')" == "29s" ]]
 echo "Recovery test post-backup mutation created."
 
 admin_psql -c "drop database mercy_restore_test with (force);" >/dev/null
@@ -118,7 +119,7 @@ docker exec -i "$db_container" pg_restore -U supabase_admin -d postgres --create
 [[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_reader','mercy_restore_test','CONNECT');")" == "t" ]]
 [[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_stranger','mercy_restore_test','CONNECT');")" == "f" ]]
 [[ "$(target_psql -Atc "show statement_timeout;")" == "13s" ]]
-[[ "$(target_psql -Atc 'show "app.settings.restore_probe";')" == "fixture-only" ]]
+[[ "$(target_psql -Atc 'show "app.settings.jwt_secret";')" == "fixture-only" ]]
 [[ "$(target_psql -Atc "select (select count(*) from auth.users), coalesce(to_regclass('public.help_requests')::text,''), (select count(*) from storage.buckets), (select count(*) from storage.objects);")" == "0||0|0" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='auth.users'::regclass;")" == "mercy_restore_auth" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='storage.objects'::regclass;")" == "mercy_restore_storage" ]]
