@@ -171,7 +171,14 @@ restart_others() {
     docker start "${other_ids[@]}" >/dev/null 2>&1 || true
   fi
 }
-trap restart_others EXIT
+restore_list=""
+acl_list=""
+cleanup_restore() {
+  if [[ -n "$restore_list" ]]; then docker exec supabase-db rm -f "$restore_list" >/dev/null 2>&1 || true; fi
+  if [[ -n "$acl_list" ]]; then docker exec supabase-db rm -f "$acl_list" >/dev/null 2>&1 || true; fi
+  restart_others
+}
+trap cleanup_restore EXIT
 
 if (( ${#other_ids[@]} > 0 )); then
   docker stop "${other_ids[@]}" >/dev/null
@@ -202,6 +209,38 @@ else
   legacy_backup=1
 fi
 
+# pg_graphql can own the public wrapper as an extension member. pg_dump then
+# archives its ACL but omits its CREATE FUNCTION. Restore every other TOC entry
+# first, recreate the official Supabase wrapper if absent, and replay the exact
+# archived ACL last. Do not skip its grants or synthesize replacement ACLs.
+toc_listing="$(docker exec -i supabase-db pg_restore -l < "$backup_file")"
+graphql_acl_rows="$(printf '%s\n' "$toc_listing" |
+  awk 'index($0, " ACL graphql_public FUNCTION graphql(\"operationName\" text, query text, variables jsonb, extensions jsonb) ") {print}')"
+if [[ -n "$graphql_acl_rows" ]]; then
+  mapfile -t graphql_acl_entries <<< "$graphql_acl_rows"
+  (( ${#graphql_acl_entries[@]} == 1 )) || {
+    echo "Ambiguous GraphQL wrapper ACL in safety archive" >&2; exit 1;
+  }
+  printf '%s\n' "$toc_listing" |
+    awk 'index($0, " SCHEMA - graphql_public ") {schema=1}
+         index($0, " EXTENSION - pg_graphql ") {extension=1}
+         END {exit !(schema && extension)}' || {
+      echo "GraphQL wrapper ACL has no archived schema/extension prerequisites" >&2; exit 1;
+    }
+  graphql_acl_id="${graphql_acl_entries[0]%%;*}"
+  [[ "$graphql_acl_id" =~ ^[0-9]+$ ]] || {
+    echo "Invalid GraphQL wrapper ACL TOC id" >&2; exit 1;
+  }
+  restore_list="$(docker exec supabase-db mktemp /tmp/mercy-restore-list.XXXXXXXX)"
+  acl_list="$(docker exec supabase-db mktemp /tmp/mercy-acl-list.XXXXXXXX)"
+  printf '%s\n' "$toc_listing" |
+    awk -v id="$graphql_acl_id" '$1 == id ";" {$0=";" $0} {print}' |
+    docker exec -i supabase-db sh -c 'cat > "$1"' sh "$restore_list"
+  printf '%s\n' "${graphql_acl_entries[0]}" |
+    docker exec -i supabase-db sh -c 'cat > "$1"' sh "$acl_list"
+fi
+unset toc_listing graphql_acl_rows
+
 # BEGIN_SAFE_PG_RESTORE_CLASSIFIER
 classify_restore_error() {
   local error_text="$1" category="other" toc="unknown"
@@ -225,14 +264,84 @@ classify_restore_error() {
 docker exec supabase-db dropdb -U supabase_admin --maintenance-db=template1 --force postgres
 # Keep pg_restore stderr in memory only. It can include confidential database
 # settings after "Command was:"; emit only a fixed category and numeric TOC id.
+restore_args=()
+if [[ -n "$restore_list" ]]; then restore_args+=(--use-list="$restore_list"); fi
 if ! restore_error="$(docker exec -i supabase-db pg_restore -U supabase_admin -d template1 \
-  --create --exit-on-error --verbose < "$backup_file" 2>&1 >/dev/null)"; then
+  --create --exit-on-error --verbose "${restore_args[@]}" < "$backup_file" 2>&1 >/dev/null)"; then
   safe_error="$(classify_restore_error "$restore_error")"
   unset restore_error
   echo "::error::Safety-backup restore failed ($safe_error); SQL details suppressed." >&2
   exit 1
 fi
 unset restore_error
+
+if [[ -n "$acl_list" ]]; then
+  wrapper_missing="$(docker exec supabase-db psql -U supabase_admin -d postgres -Atc "
+    select to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') is null;")"
+  [[ "$wrapper_missing" == "t" || "$wrapper_missing" == "f" ]] || {
+    echo "GraphQL wrapper catalog check failed" >&2; exit 1;
+  }
+  if [[ "$wrapper_missing" == "t" ]]; then
+    # The Supabase pg_graphql public wrapper from its canonical bootstrap:
+    # defaults/signature and named forwarding preserve API behavior.
+    docker exec -i supabase-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 >/dev/null <<'GRAPHQL_SQL'
+-- BEGIN_BEGET_GRAPHQL_WRAPPER
+CREATE FUNCTION graphql_public.graphql(
+  "operationName" text DEFAULT NULL,
+  query text DEFAULT NULL,
+  variables jsonb DEFAULT NULL,
+  extensions jsonb DEFAULT NULL
+) RETURNS jsonb LANGUAGE sql AS $graphql_wrapper$
+  SELECT graphql.resolve(
+    query := query,
+    variables := coalesce(variables, '{}'::jsonb),
+    "operationName" := "operationName",
+    extensions := extensions
+  );
+$graphql_wrapper$;
+-- END_BEGET_GRAPHQL_WRAPPER
+GRAPHQL_SQL
+  fi
+  # Replay the archive's own ACL after the wrapper exists; never replace it
+  # with guessed grants. Keep pg_restore SQL and setting values out of logs.
+  if ! restore_error="$(docker exec -i supabase-db pg_restore -U supabase_admin -d postgres \
+    --exit-on-error --verbose --use-list="$acl_list" < "$backup_file" 2>&1 >/dev/null)"; then
+    safe_error="$(classify_restore_error "$restore_error")"
+    unset restore_error
+    echo "::error::GraphQL ACL replay failed ($safe_error); SQL details suppressed." >&2
+    exit 1
+  fi
+  unset restore_error
+  # pg_restore --use-list omits database ACL commands stored in the custom
+  # archive's --create metadata rather than TOC rows. Replay only exact
+  # database GRANT/REVOKE statements from that archive, never guessed grants.
+  db_acl_sql="$(docker exec -i supabase-db pg_restore --create --schema-only -f - < "$backup_file" |
+    awk '/^(REVOKE|GRANT) .* ON DATABASE postgres (FROM|TO) .*;$/ {print}')"
+  if [[ -n "$db_acl_sql" ]]; then
+    if ! printf '%s\n' "$db_acl_sql" |
+      docker exec -i supabase-db psql -U supabase_admin -d template1 -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
+      echo "Archived database ACL replay failed; SQL details suppressed" >&2
+      exit 1
+    fi
+  fi
+  unset db_acl_sql
+  wrapper_access="$(docker exec supabase-db psql -U supabase_admin -d postgres -At -F '|' -c "
+    select pg_get_userbyid(p.proowner),
+           has_function_privilege('anon',p.oid,'EXECUTE'),
+           has_function_privilege('authenticated',p.oid,'EXECUTE'),
+           has_function_privilege('service_role',p.oid,'EXECUTE')
+    from pg_proc p
+    where p.oid=to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)');")"
+  [[ "$wrapper_access" == "supabase_admin|t|t|t" ]] || {
+    echo "Restored GraphQL wrapper owner or API-role grants are invalid" >&2; exit 1;
+  }
+  graphql_probe="$(docker exec supabase-db psql -U supabase_admin -d postgres -Atc "
+    set role anon;
+    select jsonb_typeof(graphql_public.graphql(query => '{ __typename }'));")"
+  [[ "$(printf '%s\n' "$graphql_probe" | tail -n 1)" == "object" ]] || {
+    echo "Restored GraphQL wrapper is not callable by anon" >&2; exit 1;
+  }
+fi
 
 post_restore_metadata_hash="$(database_metadata_hash)"
 [[ -n "$post_restore_metadata_hash" ]] || {
@@ -288,7 +397,7 @@ ROLLBACK;
 -- END_BEGET_ROLE_VERIFICATION
 SQL
 
-restart_others
+cleanup_restore
 trap - EXIT
 REMOTE
 }
