@@ -210,6 +210,7 @@ state="$(docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c "sel
 [[ "$state" == "0||0|0" ]] || { echo "Safety-backup restore did not produce a fresh target: $state" >&2; exit 1; }
 
 docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+-- BEGIN_BEGET_ROLE_VERIFICATION
 BEGIN;
 SET LOCAL ROLE supabase_auth_admin;
 SELECT count(*) FROM auth.users;
@@ -229,6 +230,7 @@ $;
 SET LOCAL ROLE authenticator;
 SELECT current_user;
 ROLLBACK;
+-- END_BEGET_ROLE_VERIFICATION
 SQL
 
 restart_others
