@@ -312,6 +312,19 @@ GRAPHQL_SQL
     exit 1
   fi
   unset restore_error
+  # pg_restore --use-list omits database ACL commands stored in the custom
+  # archive's --create metadata rather than TOC rows. Replay only exact
+  # database GRANT/REVOKE statements from that archive, never guessed grants.
+  db_acl_sql="$(docker exec -i supabase-db pg_restore --create --schema-only -f - < "$backup_file" |
+    awk '/^(REVOKE|GRANT) .* ON DATABASE postgres (FROM|TO) .*;$/ {print}')"
+  if [[ -n "$db_acl_sql" ]]; then
+    if ! printf '%s\n' "$db_acl_sql" |
+      docker exec -i supabase-db psql -U supabase_admin -d template1 -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
+      echo "Archived database ACL replay failed; SQL details suppressed" >&2
+      exit 1
+    fi
+  fi
+  unset db_acl_sql
   wrapper_access="$(docker exec supabase-db psql -U supabase_admin -d postgres -At -F '|' -c "
     select pg_get_userbyid(p.proowner),
            has_function_privilege('anon',p.oid,'EXECUTE'),
