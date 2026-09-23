@@ -90,6 +90,20 @@ CREATE POLICY rest_read ON public.rest_probe FOR SELECT TO mercy_restore_rest US
 GRANT SELECT ON public.rest_probe TO mercy_restore_rest;
 SQL
 
+# Include a real pg_graphql extension, schema, wrapper and ACL in the
+# disposable archive to exercise the production read-only context selector.
+target_psql <<'SQL' >/dev/null
+CREATE SCHEMA graphql;
+CREATE SCHEMA graphql_public;
+SQL
+docker exec "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 \
+  -c "create extension pg_graphql with schema graphql;" >/dev/null
+target_psql <<'SQL' >/dev/null
+CREATE OR REPLACE FUNCTION graphql_public.graphql("operationName" text, query text, variables jsonb, extensions jsonb)
+RETURNS jsonb LANGUAGE sql AS 'select ''{}''::jsonb';
+GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb,jsonb) TO mercy_restore_rest;
+SQL
+
 pre_baseline="$(target_psql -Atc "select coalesce(to_regclass('public.baseline_row')::text,'');")"
 [[ "$pre_baseline" == "baseline_row" || "$pre_baseline" == "public.baseline_row" ]] || {
   echo "Baseline test relation was not created: $pre_baseline" >&2
@@ -131,6 +145,21 @@ large_toc_entry="$(
 )"
 [[ "$large_toc_entry" == "1; 0 0 TABLE public baseline_row postgres" ]]
 echo "Recovery test archive index exact entry lookup passed."
+
+# Run the same bounded selector as the protected workflow on the actual
+# custom-format archive, including the independent schema/extension rows.
+graphql_entries="$(printf '%s\n' "$toc_listing" |
+  awk 'index($0, " SCHEMA - graphql_public ") ||
+       index($0, " EXTENSION - pg_graphql ") ||
+       (index($0, " graphql_public ") && index($0, "graphql(")) {print}')"
+[[ -n "$graphql_entries" ]]
+mapfile -t graphql_rows <<< "$graphql_entries"
+(( ${#graphql_rows[@]} <= 20 ))
+printf '%s\n' "$graphql_entries" | grep -F ' SCHEMA - graphql_public ' >/dev/null
+printf '%s\n' "$graphql_entries" | grep -F ' EXTENSION - pg_graphql ' >/dev/null
+printf '%s\n' "$graphql_entries" | grep -F ' FUNCTION graphql_public graphql(' >/dev/null
+printf '%s\n' "$graphql_entries" | grep -F ' ACL graphql_public FUNCTION graphql(' >/dev/null
+echo "Recovery test GraphQL archive context includes schema, extension, function and ACL."
 
 target_psql <<'SQL' >/dev/null
 CREATE TABLE public.help_requests(id integer PRIMARY KEY);

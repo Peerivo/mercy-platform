@@ -11,6 +11,14 @@ on:
           - CANCEL
           - INSPECT
         default: CANCEL
+      inspection_mode:
+        description: "TOC_ID or read-only GraphQL archive/catalog context"
+        required: true
+        type: choice
+        options:
+          - TOC_ID
+          - GRAPHQL_CONTEXT
+        default: TOC_ID
       recover_from_run_id:
         description: "Failed main-branch cutover run ID whose backup is retained"
         required: true
@@ -35,6 +43,7 @@ jobs:
       BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
       RUN_ID: ${{ inputs.recover_from_run_id }}
       TOC_ID: ${{ inputs.toc_id }}
+      INSPECTION_MODE: ${{ inputs.inspection_mode }}
     steps:
       - name: Verify failed cutover identity
         shell: bash
@@ -43,6 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RUN_ID" =~ ^[0-9]+$ && "$TOC_ID" =~ ^[0-9]+$ ]]
+          [[ "$INSPECTION_MODE" == "TOC_ID" || "$INSPECTION_MODE" == "GRAPHQL_CONTEXT" ]]
           run_json="$(curl --fail --silent --show-error \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
@@ -77,18 +87,51 @@ jobs:
           remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
           home="$(ssh "$remote" 'printf %s "$HOME"')"
           backup="${home}/beget-pre-migration-backups/before-${RUN_ID}-postgres.dump"
-          ssh "$remote" bash -s -- "$backup" "$TOC_ID" <<'REMOTE'
+          ssh "$remote" bash -s -- "$backup" "$TOC_ID" "$INSPECTION_MODE" <<'REMOTE'
           set -euo pipefail
           backup="$1"
           toc="$2"
+          mode="$3"
           [[ -s "$backup" ]] || { echo "Retained backup missing"; exit 1; }
-          entry="$(docker exec -i supabase-db pg_restore -l < "$backup" |
-            awk -v id="$toc" '$1 == id ";" && !found {entry=$0; found=1} END {if(found) print entry}')"
-          [[ -n "$entry" ]] || { echo "TOC entry absent"; exit 1; }
-          # pg_restore -l contains object metadata only, never CREATE/ALTER SQL
-          # or parameter values. Refuse control characters before printing.
-          [[ "$entry" =~ ^[[:print:]]+$ ]] || { echo "Unsafe archive index entry"; exit 1; }
-          printf 'Archive TOC entry: %s\n' "$entry"
+          if [[ "$mode" == "TOC_ID" ]]; then
+            entry="$(docker exec -i supabase-db pg_restore -l < "$backup" |
+              awk -v id="$toc" '$1 == id ";" && !found {entry=$0; found=1} END {if(found) print entry}')"
+            [[ -n "$entry" ]] || { echo "TOC entry absent"; exit 1; }
+            # pg_restore -l is object metadata, not SQL or parameter values.
+            [[ "$entry" =~ ^[[:print:]]+$ ]] || { echo "Unsafe archive index entry"; exit 1; }
+            printf 'Archive TOC entry: %s\n' "$entry"
+          elif [[ "$mode" == "GRAPHQL_CONTEXT" ]]; then
+            entries_text="$(docker exec -i supabase-db pg_restore -l < "$backup" |
+              awk 'index($0, " SCHEMA - graphql_public ") ||
+                   index($0, " EXTENSION - pg_graphql ") ||
+                   (index($0, " graphql_public ") && index($0, "graphql(")) {print}')"
+            [[ -n "$entries_text" ]] || { echo "GraphQL TOC context missing"; exit 1; }
+            mapfile -t entries <<< "$entries_text"
+            (( ${#entries[@]} <= 20 )) || {
+              echo "GraphQL TOC context unexpectedly large"; exit 1;
+            }
+            for entry in "${entries[@]}"; do
+              [[ "$entry" =~ ^[[:print:]]+$ ]] || { echo "Unsafe archive index entry"; exit 1; }
+              printf 'GraphQL TOC entry: %s\n' "$entry"
+            done
+            flags="$(docker exec supabase-db psql -U supabase_admin -d postgres -At -F '|' -c "
+              select exists(select 1 from pg_namespace where nspname='graphql_public'),
+                     to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') is not null,
+                     exists(select 1 from pg_extension where extname='pg_graphql'),
+                     exists(select 1 from pg_available_extensions where name='pg_graphql');")"
+            IFS='|' read -r schema wrapper installed available <<< "$flags"
+            [[ "$flags" == "$schema|$wrapper|$installed|$available" ]] || {
+              echo "Unexpected GraphQL catalog result"; exit 1;
+            }
+            for bit in "$schema" "$wrapper" "$installed" "$available"; do
+              [[ "$bit" == "t" || "$bit" == "f" ]] || {
+                echo "Unexpected GraphQL catalog result"; exit 1;
+              }
+            done
+            printf 'GraphQL catalog flags (schema|wrapper|installed_extension|available_extension): %s\n' "$flags"
+          else
+            echo "Invalid inspection mode"; exit 1
+          fi
           REMOTE
       - name: Remove SSH material
         if: always()
