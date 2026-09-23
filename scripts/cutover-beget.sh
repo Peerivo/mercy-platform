@@ -781,10 +781,13 @@ restart_target_services
 fingerprint_target() {
   {
     while IFS= read -r table; do
-      ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -Atc \"select 'public.${table}|' || count(*) || '|' || coalesce(md5(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text))),md5('')) from public.\\\"${table}\\\" t;\""
+      # ssh reads stdin by default. Inside this read loop that would consume the
+      # process-substitution table list after the first iteration, producing an
+      # incomplete target fingerprint. -n binds ssh stdin to /dev/null.
+      ssh -n "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -Atc \"select 'public.${table}|' || count(*) || '|' || coalesce(md5(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text))),md5('')) from public.\\\"${table}\\\" t;\""
     done < <(source_psql -Atc "select tablename from pg_tables where schemaname='public' order by tablename;")
-    ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -Atc \"select 'auth.users|' || count(*) || '|' || coalesce(md5(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text))),md5('')) from auth.users t;\""
-    ssh "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -Atc \"select 'auth.identities|' || count(*) || '|' || coalesce(md5(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text))),md5('')) from auth.identities t;\""
+    ssh -n "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -Atc \"select 'auth.users|' || count(*) || '|' || coalesce(md5(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text))),md5('')) from auth.users t;\""
+    ssh -n "${REMOTE}" "docker exec supabase-db psql -U postgres -d postgres -Atc \"select 'auth.identities|' || count(*) || '|' || coalesce(md5(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text))),md5('')) from auth.identities t;\""
   } | sort
 }
 
