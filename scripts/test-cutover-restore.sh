@@ -105,6 +105,20 @@ docker run --rm -i postgres:17-alpine pg_restore --create --schema-only -f - < "
 }
 echo "Recovery test archive contains database metadata."
 
+# Exercise the exact read-only TOC lookup used by the protected archive
+# inspection workflow against this real disposable custom-format backup.
+toc_listing="$(docker run --rm -i postgres:17-alpine pg_restore -l < "$dump_file")"
+metadata_toc_id="$(printf '%s\n' "$toc_listing" |
+  awk '/ DATABASE PROPERTIES / {sub(/;/, "", $1); print $1; exit}')"
+[[ "$metadata_toc_id" =~ ^[0-9]+$ ]] || { echo "Database metadata TOC entry missing" >&2; exit 1; }
+metadata_toc_entry="$(printf '%s\n' "$toc_listing" |
+  awk -v id="$metadata_toc_id" '$1 == id ";" {print; exit}')"
+[[ "$metadata_toc_entry" == *" DATABASE PROPERTIES "* ]] || {
+  echo "Exact TOC entry lookup returned the wrong object" >&2
+  exit 1
+}
+echo "Recovery test archive index exact entry lookup passed."
+
 target_psql <<'SQL' >/dev/null
 CREATE TABLE public.help_requests(id integer PRIMARY KEY);
 INSERT INTO auth.users(id) VALUES (1);
