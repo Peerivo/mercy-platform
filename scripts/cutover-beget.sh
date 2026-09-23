@@ -335,11 +335,12 @@ GRAPHQL_SQL
   [[ "$wrapper_access" == "supabase_admin|t|t|t" ]] || {
     echo "Restored GraphQL wrapper owner or API-role grants are invalid" >&2; exit 1;
   }
+  # Preserve the archive's schema ACL exactly. The retained baseline does
+  # not grant anon USAGE on graphql_public, so probe execution as the owner.
   graphql_probe="$(docker exec supabase-db psql -U supabase_admin -d postgres -Atc "
-    set role anon;
     select jsonb_typeof(graphql_public.graphql(query => '{ __typename }'));")"
-  [[ "$(printf '%s\n' "$graphql_probe" | tail -n 1)" == "object" ]] || {
-    echo "Restored GraphQL wrapper is not callable by anon" >&2; exit 1;
+  [[ "$graphql_probe" == "object" ]] || {
+    echo "Restored GraphQL wrapper is not callable by its owner" >&2; exit 1;
   }
 fi
 
