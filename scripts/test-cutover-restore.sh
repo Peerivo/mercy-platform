@@ -100,7 +100,6 @@ SQL
 target_psql <<'SQL' >/dev/null
 CREATE SCHEMA graphql;
 CREATE SCHEMA graphql_public;
-GRANT USAGE ON SCHEMA graphql_public TO mercy_restore_rest;
 SQL
 docker exec "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 \
   -c "create extension pg_graphql with schema graphql;" >/dev/null
@@ -225,8 +224,9 @@ unset archive_acl_sql
 [[ "$(target_psql -Atc "select pg_get_userbyid(proowner) from pg_proc where oid=to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)');")" == "supabase_admin" ]]
 [[ "$(target_psql -Atc "select has_function_privilege('mercy_restore_rest', 'graphql_public.graphql(text,text,jsonb,jsonb)', 'EXECUTE');")" == "t" ]]
 [[ "$(target_psql -Atc "select has_function_privilege('mercy_restore_reader', 'graphql_public.graphql(text,text,jsonb,jsonb)', 'EXECUTE');")" == "f" ]]
-[[ "$(target_psql -Atc "set role mercy_restore_rest; select jsonb_typeof(graphql_public.graphql(query => '{ __typename }'));" | tail -n 1)" == "object" ]]
-echo "Recovery test recreated wrapper and replayed archived ACL with role boundary."
+[[ "$(target_psql -Atc "select has_schema_privilege('mercy_restore_rest','graphql_public','USAGE');")" == "f" ]]
+[[ "$(docker exec "$db_container" psql -U supabase_admin -d mercy_restore_test -Atc "select jsonb_typeof(graphql_public.graphql(query => '{ __typename }'));")" == "object" ]]
+echo "Recovery test recreated wrapper and replayed archived ACL without widening schema access."
 
 [[ "$(target_psql -Atc "select coalesce(to_regclass('public.extra_after_backup')::text,'');")" == "" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='public.baseline_row'::regclass;")" == "mercy_restore_owner" ]]
