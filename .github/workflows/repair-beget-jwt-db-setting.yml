@@ -1,0 +1,177 @@
+name: Repair Beget JWT database setting
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type REPAIR_JWT_DB_SETTING to synchronize the Beget database setting with the already-rotated runtime secret"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercy-beget-jwt-db-setting
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: ${{ inputs.confirm == 'REPAIR_JWT_DB_SETTING' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require reviewed main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]] || {
+            echo "::error::JWT database-setting repair is allowed only from reviewed main."
+            exit 1
+          }
+
+      - name: Validate production SSH configuration
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            BEGET_SUPABASE_HOST \
+            BEGET_SUPABASE_USER \
+            BEGET_SUPABASE_SSH_KEY \
+            BEGET_SUPABASE_KNOWN_HOSTS
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing production configuration: ${name}"
+              missing=1
+            fi
+          done
+          test "${missing}" -eq 0
+
+      - name: Configure pinned SSH host key
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Synchronize database JWT setting without exposing the secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          ssh "${remote}" bash -s <<'REMOTE'
+          set -euo pipefail
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+          [[ -n "${project}" ]] || {
+            echo "Cannot resolve Supabase Compose project."
+            exit 1
+          }
+
+          get_service_id() {
+            local service="$1"
+            local ids=()
+            mapfile -t ids < <(
+              docker ps -aq \
+                --filter "label=com.docker.compose.project=${project}" \
+                --filter "label=com.docker.compose.service=${service}"
+            )
+            [[ "${#ids[@]}" == "1" ]] || {
+              echo "Expected exactly one container for Compose service: ${service}" >&2
+              exit 1
+            }
+            printf '%s' "${ids[0]}"
+          }
+
+          get_env_value() {
+            local cid="$1"
+            local key="$2"
+            docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${cid}" \
+              | sed -n "s/^${key}=//p" \
+              | head -n 1
+          }
+
+          db_cid="$(get_service_id db)"
+          auth_cid="$(get_service_id auth)"
+          rest_cid="$(get_service_id rest)"
+          storage_cid="$(get_service_id storage)"
+
+          auth_jwt="$(get_env_value "${auth_cid}" GOTRUE_JWT_SECRET)"
+          rest_jwt="$(get_env_value "${rest_cid}" PGRST_JWT_SECRET)"
+          storage_jwt="$(get_env_value "${storage_cid}" PGRST_JWT_SECRET || true)"
+
+          [[ -n "${auth_jwt}" && -n "${rest_jwt}" ]] || {
+            echo "Rotated runtime JWT secret is missing from Auth or REST container configuration." >&2
+            exit 1
+          }
+          [[ "${auth_jwt}" == "${rest_jwt}" ]] || {
+            echo "Auth and REST runtime JWT secrets are not synchronized." >&2
+            exit 1
+          }
+          if [[ -n "${storage_jwt}" && "${storage_jwt}" != "${rest_jwt}" ]]; then
+            echo "Storage runtime JWT secret is not synchronized with REST." >&2
+            exit 1
+          fi
+
+          before="$(
+            docker exec "${db_cid}" \
+              psql -U supabase_admin -d postgres -Atqc \
+              "select current_setting('app.settings.jwt_secret', true);"
+          )"
+
+          if [[ "${before}" == "${rest_jwt}" ]]; then
+            echo "Beget database JWT setting is already synchronized."
+            exit 0
+          fi
+
+          printf '%s\n' "${rest_jwt}" | docker exec -i "${db_cid}" sh -c '
+            set -eu
+            IFS= read -r jwt_secret
+            test -n "$jwt_secret"
+            export PGOPTIONS="-c app.settings.jwt_secret=$jwt_secret"
+            exec psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -q <<'"'"'SQL'"'"'
+          select rolsuper from pg_roles where rolname = current_user
+          \gset
+          \if :rolsuper
+          alter database postgres set "app.settings.jwt_secret" from current;
+          \else
+          \echo supabase_admin_is_not_superuser
+          \quit 1
+          \endif
+          SQL
+          '
+
+          after="$(
+            docker exec "${db_cid}" \
+              psql -U supabase_admin -d postgres -Atqc \
+              "select current_setting('app.settings.jwt_secret', true);"
+          )"
+          [[ "${after}" == "${rest_jwt}" ]] || {
+            echo "Database JWT setting verification failed." >&2
+            exit 1
+          }
+
+          echo "Beget database JWT setting synchronized and verified."
+          REMOTE
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519
