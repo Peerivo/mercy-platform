@@ -191,8 +191,8 @@ docker exec -i supabase-db pg_restore --create --schema-only -f - < "$backup_fil
   exit 1
 }
 
-pre_restore_metadata_hash="$(database_metadata_hash)"
-expected_metadata_hash="$pre_restore_metadata_hash"
+expected_metadata_hash=""
+legacy_backup=0
 if [[ -s "$metadata_hash_file" && -s "$state_file" &&
       "$(tr -d '[:space:]' < "$state_file")" == "prepared" ]]; then
   expected_metadata_hash="$(tr -d '[:space:]' < "$metadata_hash_file")"
@@ -202,6 +202,9 @@ else
     echo "Safety backup is not prepared, or is not the explicitly supported legacy archive" >&2
     exit 1
   }
+  # Run #7 predates fingerprint files. The current database may already be
+  # partially restored, so its metadata must never become the expected hash.
+  legacy_backup=1
 fi
 
 # -C is a pg_restore option. pg_dump --create is ignored for custom archives,
@@ -220,10 +223,31 @@ fi
 rm -f "$restore_error_log"
 
 post_restore_metadata_hash="$(database_metadata_hash)"
-[[ -n "$expected_metadata_hash" && "$post_restore_metadata_hash" == "$expected_metadata_hash" ]] || {
-  echo "Database-level metadata fingerprint changed during recovery" >&2
+[[ -n "$post_restore_metadata_hash" ]] || {
+  echo "Restored database metadata is unavailable" >&2
   exit 1
 }
+if [[ "$legacy_backup" == "1" ]]; then
+  # The archived run #7 database properties include a JWT setting. Check
+  # presence only; never print the value. pg_restore --exit-on-error already
+  # guarantees every archived owner, ACL and database-property statement ran.
+  legacy_settings_ok="$(docker exec supabase-db psql -U supabase_admin -d template1 -Atc "
+    select exists(
+      select 1 from pg_db_role_setting s
+      join pg_database d on d.oid=s.setdatabase
+      where d.datname='postgres' and s.setrole=0
+        and exists(select 1 from unnest(s.setconfig) v where v like 'app.settings.jwt_secret=%')
+    );")"
+  [[ "$legacy_settings_ok" == "t" ]] || {
+    echo "Legacy safety-backup database settings were not restored" >&2
+    exit 1
+  }
+else
+  [[ "$post_restore_metadata_hash" == "$expected_metadata_hash" ]] || {
+    echo "Database-level metadata fingerprint changed during recovery" >&2
+    exit 1
+  }
+fi
 
 state="$(docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c "select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.buckets),(select count(*) from storage.objects);")"
 [[ "$state" == "0||0|0" ]] || { echo "Safety-backup restore did not produce a fresh target: $state" >&2; exit 1; }
