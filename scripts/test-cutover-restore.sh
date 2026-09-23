@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Exercise the production sanitizer with a simulated failed restore; the SQL
+# contains a sentinel which must never appear in its diagnostic output.
+classifier="$(sed -n '/^# BEGIN_SAFE_PG_RESTORE_CLASSIFIER$/,/^# END_SAFE_PG_RESTORE_CLASSIFIER$/p' scripts/cutover-beget.sh)"
+[[ -n "$classifier" ]] || { echo "Restore diagnostic classifier missing" >&2; exit 1; }
+eval "$classifier"
+simulated_error=$'pg_restore: error: could not execute query: ERROR: permission denied to set parameter "app.settings.jwt_secret"\npg_restore: from TOC entry 4321; 0 0 DATABASE PROPERTIES postgres\nCommand was: ALTER DATABASE postgres SET "app.settings.jwt_secret" TO fixture-secret-do-not-log;'
+safe_result="$(classify_restore_error "$simulated_error")"
+[[ "$safe_result" == "category=restricted_parameter toc=4321" ]]
+[[ "$safe_result" != *"fixture-secret-do-not-log"* ]]
+
 db_url="$(supabase status -o env | sed -n 's/^DB_URL=//p' | tr -d '"')"
 [[ -n "$db_url" ]] || { echo "DB_URL was not reported by supabase status" >&2; exit 1; }
 

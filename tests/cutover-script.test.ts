@@ -171,7 +171,7 @@ describe("Beget cutover recovery", () => {
     expect(restoreBlock).toContain("--create");
     expect(restoreBlock).toContain("database_metadata_hash");
     expect(restoreBlock).toContain('pg_restore -f /dev/null < "$backup_file"');
-    expect(restoreBlock).toContain('--create --exit-on-error < "$backup_file"');
+    expect(restoreBlock).toContain('--create --exit-on-error --verbose < "$backup_file"');
     expect(restoreBlock).not.toContain("--no-owner");
     expect(restoreBlock).not.toContain("--no-privileges");
     expect(script).toContain("SET LOCAL ROLE supabase_auth_admin;");
