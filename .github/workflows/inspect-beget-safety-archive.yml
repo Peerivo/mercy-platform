@@ -1,0 +1,96 @@
+name: Inspect retained Beget safety archive
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Read-only archive index inspection; no database restore"
+        required: true
+        type: choice
+        options:
+          - CANCEL
+          - INSPECT
+        default: CANCEL
+      recover_from_run_id:
+        description: "Failed main-branch cutover run ID whose backup is retained"
+        required: true
+        type: string
+      toc_id:
+        description: "Numeric pg_restore archive TOC entry to inspect"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    if: ${{ inputs.confirm == 'INSPECT' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      RUN_ID: ${{ inputs.recover_from_run_id }}
+      TOC_ID: ${{ inputs.toc_id }}
+    steps:
+      - name: Verify failed cutover identity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ && "$TOC_ID" =~ ^[0-9]+$ ]]
+          run_json="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
+          printf '%s' "$run_json" | jq -e '
+            .name == "Cut over Mercy Supabase to Beget" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main" and
+            (.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") and
+            .path == ".github/workflows/cutover-to-beget.yml"
+          ' >/dev/null
+      - name: Configure pinned SSH
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$BEGET_SUPABASE_HOST"
+          test -n "$BEGET_SUPABASE_USER"
+          test -n "$BEGET_SUPABASE_SSH_KEY"
+          test -n "$BEGET_SUPABASE_KNOWN_HOSTS"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+      - name: Inspect archive index entry without SQL or values
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          home="$(ssh "$remote" 'printf %s "$HOME"')"
+          backup="${home}/beget-pre-migration-backups/before-${RUN_ID}-postgres.dump"
+          ssh "$remote" bash -s -- "$backup" "$TOC_ID" <<'REMOTE'
+          set -euo pipefail
+          backup="$1"
+          toc="$2"
+          [[ -s "$backup" ]] || { echo "Retained backup missing"; exit 1; }
+          entry="$(docker exec -i supabase-db pg_restore -l < "$backup" |
+            awk -v id="$toc" '$1 == id ";" {print; exit}')"
+          [[ -n "$entry" ]] || { echo "TOC entry absent"; exit 1; }
+          # pg_restore -l contains object metadata only, never CREATE/ALTER SQL
+          # or parameter values. Refuse control characters before printing.
+          [[ "$entry" =~ ^[[:print:]]+$ ]] || { echo "Unsafe archive index entry"; exit 1; }
+          printf 'Archive TOC entry: %s\n' "$entry"
+          REMOTE
+      - name: Remove SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519
