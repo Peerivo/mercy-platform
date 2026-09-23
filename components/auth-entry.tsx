@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
 import { browserSupabase } from "@/lib/supabase/client";
 
@@ -16,15 +17,16 @@ export function AuthEntry({ className, onNavigate }: AuthEntryProps) {
     let current = true;
     const supabase = browserSupabase();
 
-    void supabase.auth.getSession().then(({ data }) => {
+    void (async () => {
+      const result = await supabase.auth.getSession();
       if (current) {
-        setSignedIn(Boolean(data.session));
+        setSignedIn(Boolean(result.data.session));
       }
-    });
+    })();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       if (current) {
         setSignedIn(Boolean(session));
       }
