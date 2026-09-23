@@ -323,7 +323,12 @@ GRAPHQL_SQL
   graphql_probe="$(docker exec supabase-db psql -U supabase_admin -d postgres -Atc "
     set role anon;
     select jsonb_typeof(graphql_public.graphql(query => '{ __typename }'));")"
-  [[ "${graphql_probe##*
+  [[ "$(printf '%s\n' "$graphql_probe" | tail -n 1)" == "object" ]] || {
+    echo "Restored GraphQL wrapper is not callable by anon" >&2; exit 1;
+  }
+fi
+
+post_restore_metadata_hash="$(database_metadata_hash)"
 [[ -n "$post_restore_metadata_hash" ]] || {
   echo "Restored database metadata is unavailable" >&2
   exit 1
