@@ -114,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
-          result="$(ssh "${remote}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select current_setting('server_version'), (select count(*) from auth.users), coalesce(to_regclass('public.help_requests')::text,''), (select count(*) from pg_tables where schemaname='public'), (select count(*) from pg_policies where schemaname='public');\"")"
+          result="$(ssh "${remote}" "docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c \"select current_setting('server_version'), (select count(*) from auth.users), coalesce(to_regclass('public.help_requests')::text,''), (select count(*) from pg_tables where schemaname='public'), (select count(*) from pg_policies where schemaname='public'), (select count(*) from storage.buckets), (select count(*) from storage.objects);\"")"
           IFS='|' read -r pg users help_relation tables policies buckets objects <<< "${result}"
           printf 'Target PostgreSQL: %s\n' "${pg}"
           printf 'Target auth.users: %s\n' "${users}"
