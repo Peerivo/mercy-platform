@@ -379,7 +379,7 @@ database_metadata_hash() {
 }
 
 docker exec supabase-db pg_dumpall -U postgres --globals-only > "${backup_prefix}-globals.sql"
-docker exec supabase-db pg_dump -U postgres -d postgres -Fc --create > "${backup_prefix}-postgres.dump"
+docker exec supabase-db pg_dump -U postgres -d postgres -Fc > "${backup_prefix}-postgres.dump"
 docker exec -i supabase-db pg_restore --create --schema-only -f - < "${backup_prefix}-postgres.dump" | grep -E '^CREATE DATABASE postgres([[:space:]]|;)' >/dev/null || {
   echo "Safety backup is missing database creation metadata" >&2
   exit 1
