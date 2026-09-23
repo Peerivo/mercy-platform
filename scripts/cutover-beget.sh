@@ -172,69 +172,33 @@ if (( ${#other_ids[@]} > 0 )); then
   docker stop "${other_ids[@]}" >/dev/null
 fi
 
-archive_list="$(mktemp)"
-metadata_dump=""
-metadata_list=""
-cleanup_temp() {
-  rm -f "$archive_list" "$metadata_dump" "$metadata_list"
-  docker exec supabase-db rm -f /tmp/mercy-dbmeta.dump /tmp/mercy-dbmeta.list >/dev/null 2>&1 || true
+# Decode the full custom archive before dropping the target database. This
+# catches truncated payloads as well as malformed tables of contents.
+docker exec -i supabase-db pg_restore -f /dev/null < "$backup_file"
+docker exec -i supabase-db pg_restore --create --schema-only -f - < "$backup_file" \
+  | grep -E '^CREATE DATABASE postgres([[:space:]]|;)' >/dev/null || {
+  echo "Backup does not produce the expected postgres database" >&2
+  exit 1
 }
-trap 'cleanup_temp; restart_others' EXIT
 
-docker exec -i supabase-db pg_restore -l < "$backup_file" > "$archive_list"
 pre_restore_metadata_hash="$(database_metadata_hash)"
 expected_metadata_hash="$pre_restore_metadata_hash"
-if [[ -s "$metadata_hash_file" ]]; then
+if [[ -s "$metadata_hash_file" && -s "$state_file" &&
+      "$(tr -d '[:space:]' < "$state_file")" == "prepared" ]]; then
   expected_metadata_hash="$(tr -d '[:space:]' < "$metadata_hash_file")"
-fi
-
-has_database_create=0
-if [[ -s "$state_file" && -s "$metadata_hash_file" ]]; then
-  has_database_create=1
-fi
-
-if [[ "$has_database_create" == "1" ]]; then
-  [[ -s "$metadata_hash_file" ]] || {
-    echo "Prepared safety backup is missing its database metadata fingerprint: $metadata_hash_file" >&2
-    exit 1
-  }
-  [[ -s "$state_file" && "$(tr -d '[:space:]' < "$state_file")" == "prepared" ]] || {
-    echo "Safety backup is not marked prepared; refusing destructive restore: $state_file" >&2
-    exit 1
-  }
 else
-  [[ "$(basename "$backup_file")" == "before-35770879007-postgres.dump" ]] || {
-    echo "Legacy safety backup is not an explicitly supported recovery archive: $backup_file" >&2
+  [[ "$(basename "$backup_file")" == "before-35770879007-postgres.dump" &&
+     ! -e "$state_file" && ! -e "$metadata_hash_file" ]] || {
+    echo "Safety backup is not prepared, or is not the explicitly supported legacy archive" >&2
     exit 1
   }
-  # The one known retained legacy backup predates --create and prepared markers.
-  # Capture only the current database-level metadata before dropping postgres;
-  # Mercy migrations do not mutate it.
-  metadata_dump="$(mktemp)"
-  metadata_list="$(mktemp)"
-  docker exec supabase-db pg_dump -U postgres -d postgres -Fc --create > "$metadata_dump"
-  docker exec -i supabase-db pg_restore -l < "$metadata_dump"     | grep -E ' (DATABASE|DATABASE PROPERTIES|ACL - DATABASE) ' > "$metadata_list"
-  docker exec -i supabase-db pg_restore --create --schema-only -f - < "$metadata_dump" | grep -E '^CREATE DATABASE postgres([[:space:]]|;)' >/dev/null || {
-    echo "Could not capture legacy database metadata before recovery" >&2
-    exit 1
-  }
-  docker cp "$metadata_dump" supabase-db:/tmp/mercy-dbmeta.dump
-  docker cp "$metadata_list" supabase-db:/tmp/mercy-dbmeta.list
 fi
 
-docker exec supabase-db dropdb   -U postgres   --maintenance-db=template1   --force   postgres
-
-if [[ "$has_database_create" == "1" ]]; then
-  # Current safety backups include database creation, database-level ACLs and
-  # ALTER DATABASE settings. Restore them from the archive itself.
-  docker exec -i supabase-db pg_restore     -U postgres     -d template1     --create     --exit-on-error < "$backup_file"
-else
-  # One-time compatibility path for the older retained backup. Recreate only
-  # the database metadata from the pre-drop donor, then load the old archive.
-  docker exec supabase-db pg_restore     -U postgres     -d template1     --create     --use-list=/tmp/mercy-dbmeta.list     --exit-on-error     /tmp/mercy-dbmeta.dump
-
-  docker exec -i supabase-db pg_restore     -U postgres     -d postgres     --exit-on-error     --single-transaction < "$backup_file"
-fi
+# -C is a pg_restore option. pg_dump --create is ignored for custom archives,
+# including the retained run #7 archive; both formats carry database metadata.
+docker exec supabase-db dropdb -U postgres --maintenance-db=template1 --force postgres
+docker exec -i supabase-db pg_restore -U postgres -d template1 \
+  --create --exit-on-error < "$backup_file"
 
 post_restore_metadata_hash="$(database_metadata_hash)"
 [[ -n "$expected_metadata_hash" && "$post_restore_metadata_hash" == "$expected_metadata_hash" ]] || {
@@ -255,7 +219,6 @@ SELECT count(*) FROM storage.objects;
 ROLLBACK;
 SQL
 
-cleanup_temp
 restart_others
 trap - EXIT
 REMOTE
