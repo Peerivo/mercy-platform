@@ -232,11 +232,14 @@ project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.projec
 
 services=(auth rest realtime storage kong)
 for service in "${services[@]}"; do
-  cid="$(docker ps -aq \
+  mapfile -t service_ids < <(docker ps -aq \
     --filter "label=com.docker.compose.project=$project" \
-    --filter "label=com.docker.compose.service=$service" | head -n 1)"
-  [[ -n "$cid" ]] || { echo "Cannot resolve container for Compose service: $service" >&2; exit 1; }
-
+    --filter "label=com.docker.compose.service=$service")
+  [[ "${#service_ids[@]}" == "1" ]] || {
+    echo "Expected exactly one container for Compose service: $service" >&2
+    exit 1
+  }
+  cid="${service_ids[0]}"
   docker restart "$cid" >/dev/null
 
   ok=0
