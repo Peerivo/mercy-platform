@@ -104,17 +104,7 @@ docker run --rm -i --network host postgres:17-alpine pg_restore   --dbname="$db_
 [[ "$(target_psql -Atc "select (select count(*) from auth.users), coalesce(to_regclass('public.help_requests')::text,''), (select count(*) from storage.buckets), (select count(*) from storage.objects);")" == "0||0|0" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='auth.users'::regclass;")" == "supabase_auth_admin" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='storage.objects'::regclass;")" == "supabase_storage_admin" ]]
-[[ "$(target_psql -Atc "set role supabase_auth_admin; select count(*) from auth.users;")" == 
-
-echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
-SET\\n0' ]]
-[[ "$(target_psql -Atc "set role supabase_storage_admin; select count(*) from storage.objects;")" == 
-
-echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
-SET\\n0' ]]
-[[ "$(target_psql -Atc "set role anon; select id from public.rest_probe;")" == 
-
-echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
-SET\\n9' ]]
-
+[[ "$(target_psql -Atc "set role supabase_auth_admin; select count(*) from auth.users;" | tail -n 1)" == "0" ]]
+[[ "$(target_psql -Atc "set role supabase_storage_admin; select count(*) from storage.objects;" | tail -n 1)" == "0" ]]
+[[ "$(target_psql -Atc "set role anon; select id from public.rest_probe;" | tail -n 1)" == "9" ]]
 echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
