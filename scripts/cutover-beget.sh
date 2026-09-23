@@ -154,6 +154,11 @@ database_metadata_hash() {
 project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
 [[ -n "$project" ]] || { echo "Cannot resolve Supabase compose project label" >&2; exit 1; }
 
+# Supabase demotes postgres after bootstrap. Database-level custom GUCs in
+# the retained archive require the local supabase_admin superuser to restore.
+admin_superuser="$(docker exec supabase-db psql -U supabase_admin -d template1 -Atc 'select rolsuper from pg_roles where rolname=current_user')"
+[[ "$admin_superuser" == "t" ]] || { echo "Supabase administrative restore role is not a superuser" >&2; exit 1; }
+
 db_id="$(docker inspect -f '{{.Id}}' supabase-db)"
 mapfile -t project_ids < <(docker ps --no-trunc -q --filter "label=com.docker.compose.project=$project")
 other_ids=()
@@ -196,9 +201,18 @@ fi
 
 # -C is a pg_restore option. pg_dump --create is ignored for custom archives,
 # including the retained run #7 archive; both formats carry database metadata.
-docker exec supabase-db dropdb -U postgres --maintenance-db=template1 --force postgres
-docker exec -i supabase-db pg_restore -U postgres -d template1 \
-  --create --exit-on-error < "$backup_file"
+docker exec supabase-db dropdb -U supabase_admin --maintenance-db=template1 --force postgres
+# pg_restore prints failing SQL, including confidential database settings, on
+# stderr. Discard those details after a generic error; never emit them to CI.
+restore_error_log="$(mktemp)"
+chmod 600 "$restore_error_log"
+if ! docker exec -i supabase-db pg_restore -U supabase_admin -d template1 \
+  --create --exit-on-error < "$backup_file" 2>"$restore_error_log"; then
+  rm -f "$restore_error_log"
+  echo "::error::Safety-backup restore failed; SQL details suppressed." >&2
+  exit 1
+fi
+rm -f "$restore_error_log"
 
 post_restore_metadata_hash="$(database_metadata_hash)"
 [[ -n "$expected_metadata_hash" && "$post_restore_metadata_hash" == "$expected_metadata_hash" ]] || {
@@ -209,7 +223,7 @@ post_restore_metadata_hash="$(database_metadata_hash)"
 state="$(docker exec supabase-db psql -U postgres -d postgres -At -F '|' -c "select (select count(*) from auth.users),coalesce(to_regclass('public.help_requests')::text,''),(select count(*) from storage.buckets),(select count(*) from storage.objects);")"
 [[ "$state" == "0||0|0" ]] || { echo "Safety-backup restore did not produce a fresh target: $state" >&2; exit 1; }
 
-docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+docker exec -i supabase-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 -- BEGIN_BEGET_ROLE_VERIFICATION
 BEGIN;
 SET LOCAL ROLE supabase_auth_admin;
