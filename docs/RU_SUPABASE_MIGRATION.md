@@ -102,3 +102,7 @@ The CI disposable Supabase job exercises a custom-format backup without `pg_dump
 ### Recovery-only workflow
 
 Select `RECOVER` and the exact failed/interrupted run ID to restore the retained target safety backup. This mode finishes after the fresh-target and service-role checks. It neither freezes Mercy-prod nor applies migrations or starts `MIGRATE`. Confirm source remains unfrozen and rerun the read-only preflight, including users, Mercy relation marker, Storage buckets, and Storage objects. A later cutover requires a separate fresh `MIGRATE` approval. Keep retained backups until a complete successful cutover. Rerunning the same GitHub Actions run ID refuses to overwrite any retained safety-backup file; start a new reviewed run instead.
+
+### Archive index diagnostic after run #10
+
+Run #10 reported `missing_object` at TOC `4300` twice while preserving the retained backup and leaving the source unfrozen. Before another destructive `RECOVER`, use the protected read-only `Inspect retained Beget safety archive` workflow on `main` with failed cutover run `35770879007` and TOC `4300`. It verifies the run identity, reads one `pg_restore -l` index line without SQL/parameter values, and does not drop or restore a database. Investigate the missing dependency and fix it in a reviewed increment before retrying. The Beget target remains unverified.
