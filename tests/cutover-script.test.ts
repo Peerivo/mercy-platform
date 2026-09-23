@@ -95,7 +95,7 @@ test("rejects any pre-existing target Storage bucket before mutation", () => {
 
 
 describe("Beget cutover recovery", () => {
-  test("supports explicit recovery from a retained failed-run safety backup before freshness gating", () => {
+  test("supports explicit recovery from a retained failed/interrupted-run safety backup before freshness gating", () => {
     expect(script).toContain('RECOVER_FROM_RUN_ID="\${RECOVER_FROM_RUN_ID:-}"');
     expect(script).toContain('RECOVERY_RUN_VERIFIED="\${RECOVERY_RUN_VERIFIED:-0}"');
     expect(script).toContain('if [[ "\${RECOVERY_RUN_VERIFIED}" != "1" ]]');
@@ -126,19 +126,30 @@ describe("Beget cutover recovery", () => {
     expect(script).not.toContain('SUPABASE_DIR="/opt/beget/supabase"');
   });
 
-  test("captures database creation metadata in every new safety backup", () => {
+  test("captures database creation metadata and a completed marker in every new safety backup", () => {
     expect(script).toContain("pg_dump -U postgres -d postgres -Fc --create");
     expect(script).toContain('database_metadata_hash > "${backup_prefix}-dbmeta.md5"');
+    expect(script).toContain("printf '%s\\n' 'prepared' > \"${backup_prefix}.state\"");
     expect(script).toContain('cutover-successful-${GITHUB_RUN_ID:-manual}.marker');
   });
 
-  test("authorizes failed-run recovery through GitHub Actions before the script can restore", () => {
+  test("authorizes failed/interrupted-run recovery through GitHub Actions before the script can restore", () => {
     expect(workflow).toContain("actions: read");
-    expect(workflow).toContain("Validate requested failed-run recovery");
+    expect(workflow).toContain("Validate requested failed/interrupted-run recovery");
     expect(workflow).toContain('.conclusion == "failure"');
+    expect(workflow).toContain('.conclusion == "timed_out"');
+    expect(workflow).toContain('.conclusion == "cancelled"');
     expect(workflow).toContain('.name == "Cut over Mercy Supabase to Beget"');
     expect(workflow).toContain('echo "RECOVERY_RUN_VERIFIED=1" >> "${GITHUB_ENV}"');
-    expect(script).toContain("A successful Beget cutover marker exists; failed-run recovery is disabled");
+    expect(script).toContain("A successful Beget cutover marker exists; failed/interrupted-run recovery is disabled");
+  });
+
+  test("rejects incomplete new-format backups and restricts the legacy compatibility path", () => {
+    const restoreBlock = script.match(/restore_target_backup\(\) \{([\s\S]*?)\n\}\n\nrestart_target_services/)?.[1] ?? "";
+    expect(restoreBlock).toContain('state_file="${backup_prefix}.state"');
+    expect(restoreBlock).toContain('"$(tr -d \'[:space:]\' < "$state_file")" == "prepared"');
+    expect(restoreBlock).toContain('before-35770879007-postgres.dump');
+    expect(restoreBlock).toContain("Legacy safety backup is not an explicitly supported recovery archive");
   });
 
   test("recreates target safely while keeping the database container running", () => {
