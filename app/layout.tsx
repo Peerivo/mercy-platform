@@ -30,6 +30,7 @@ const navigation = [
   { href: "/nearby", label: "Помощь рядом" },
   { href: "/help", label: "Нужна помощь" },
   { href: "/volunteer", label: "Хочу помочь" },
+  { href: "/donate", label: "Поддержать" },
   { href: "/cabinet", label: "Кабинет" },
 ] as const;
 
@@ -76,7 +77,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <p>
                 <Link href="/feedback">Обратная связь</Link>
                 {" · "}
-                <Link href="/feedback?topic=support">Поддержать проект</Link>
+                <Link href="/donate">Поддержать проект</Link>
               </p>
             </div>
             <p className="footer-safety">
