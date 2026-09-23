@@ -93,11 +93,11 @@ SQL
 # Include a real pg_graphql extension, schema, wrapper and ACL in the
 # disposable archive to exercise the production read-only context selector.
 target_psql <<'SQL' >/dev/null
-CREATE SCHEMA extensions;
+CREATE SCHEMA graphql;
 CREATE SCHEMA graphql_public;
 SQL
 docker exec "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 \
-  -c "create extension pg_graphql with schema extensions;" >/dev/null
+  -c "create extension pg_graphql with schema graphql;" >/dev/null
 target_psql <<'SQL' >/dev/null
 CREATE OR REPLACE FUNCTION graphql_public.graphql("operationName" text, query text, variables jsonb, extensions jsonb)
 RETURNS jsonb LANGUAGE sql AS 'select ''{}''::jsonb';
