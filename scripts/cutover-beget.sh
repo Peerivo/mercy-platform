@@ -171,7 +171,12 @@ restart_others() {
     docker start "${other_ids[@]}" >/dev/null 2>&1 || true
   fi
 }
-trap restart_others EXIT
+restore_error_log=""
+cleanup_restore() {
+  if [[ -n "$restore_error_log" ]]; then rm -f "$restore_error_log"; fi
+  restart_others
+}
+trap cleanup_restore EXIT
 
 if (( ${#other_ids[@]} > 0 )); then
   docker stop "${other_ids[@]}" >/dev/null
