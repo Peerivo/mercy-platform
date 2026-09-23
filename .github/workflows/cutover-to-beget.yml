@@ -4,11 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: "Select MIGRATE to freeze old Mercy writes and migrate production data to Beget"
+        description: "Select RECOVER for failed-run backup only; MIGRATE requires separate fresh approval"
         required: true
         type: choice
         options:
           - CANCEL
+          - RECOVER
           - MIGRATE
         default: CANCEL
       recover_from_run_id:
@@ -27,7 +28,7 @@ concurrency:
 
 jobs:
   cutover:
-    if: ${{ inputs.confirm == 'MIGRATE' }}
+    if: ${{ inputs.confirm == 'RECOVER' || inputs.confirm == 'MIGRATE' }}
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -50,7 +51,7 @@ jobs:
           BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          test "${MIGRATION_CONFIRM}" = "MIGRATE"
+          [[ "${MIGRATION_CONFIRM}" == "MIGRATE" || "${MIGRATION_CONFIRM}" == "RECOVER" ]]
           missing=0
           for name in \
             BEGET_SUPABASE_HOST \
@@ -68,7 +69,7 @@ jobs:
           test "${missing}" -eq 0
 
       - name: Validate requested failed/interrupted-run recovery
-        if: ${{ inputs.recover_from_run_id != '' }}
+        if: ${{ inputs.recover_from_run_id != '' || inputs.confirm == 'RECOVER' }}
         shell: bash
         env:
           RECOVER_FROM_RUN_ID: ${{ inputs.recover_from_run_id }}
@@ -123,8 +124,12 @@ jobs:
       - name: Cutover result
         shell: bash
         run: |
-          echo "Mercy data is verified on Beget."
-          echo "Old Mercy writes remain frozen until the REG.RU application cutover is verified."
+          if [[ "${MIGRATION_CONFIRM}" == "RECOVER" ]]; then
+            echo "Beget baseline recovery verified; no MIGRATE or source freeze executed."
+          else
+            echo "Mercy data is verified on Beget."
+            echo "Old Mercy writes remain frozen until the REG.RU application cutover is verified."
+          fi
 
       - name: Remove runner SSH material
         if: always()
