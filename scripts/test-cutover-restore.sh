@@ -4,6 +4,12 @@ set -euo pipefail
 db_url="$(supabase status -o env | sed -n 's/^DB_URL=//p' | tr -d '"')"
 [[ -n "$db_url" ]] || { echo "DB_URL was not reported by supabase status" >&2; exit 1; }
 
+db_container="supabase_db_mercy-platform-integration"
+[[ "$(docker exec "$db_container" psql -U supabase_admin -d template1 -Atc 'select rolsuper from pg_roles where rolname=current_user')" == "t" ]] || {
+  echo "Disposable Supabase lacks the administrative restore role" >&2
+  exit 1
+}
+
 target_url="$(python3 - "$db_url" <<'PY'
 import sys
 from urllib.parse import urlparse, urlunparse
@@ -49,6 +55,10 @@ done
 admin_psql -c "grant mercy_restore_owner to postgres; grant mercy_restore_reader to postgres; grant mercy_restore_stranger to postgres;" >/dev/null
 admin_psql -c "create database mercy_restore_test owner mercy_restore_owner template template0;" >/dev/null
 admin_psql -c "revoke connect on database mercy_restore_test from public; grant connect on database mercy_restore_test to mercy_restore_reader, mercy_restore_rest; alter database mercy_restore_test set statement_timeout = '13s';" >/dev/null
+# A database-level custom GUC requires the Supabase superuser during restore.
+# This harmless fixture value exercises the same archive path as self-hosted JWT metadata.
+docker exec "$db_container" psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+  -c "alter database mercy_restore_test set \"app.settings.restore_probe\" to 'fixture-only';" >/dev/null
 
 target_psql <<'SQL' >/dev/null
 CREATE TABLE public.baseline_row(id integer primary key);
@@ -97,7 +107,7 @@ echo "Recovery test post-backup mutation created."
 admin_psql -c "drop database mercy_restore_test with (force);" >/dev/null
 echo "Recovery test database dropped."
 
-docker run --rm -i --network host postgres:17-alpine pg_restore   --dbname="$db_url"   --create   --exit-on-error < "$dump_file"
+docker exec -i "$db_container" pg_restore -U supabase_admin -d postgres --create --exit-on-error < "$dump_file"
 
 [[ "$(target_psql -Atc "select coalesce(to_regclass('public.extra_after_backup')::text,'');")" == "" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='public.baseline_row'::regclass;")" == "mercy_restore_owner" ]]
@@ -108,6 +118,7 @@ docker run --rm -i --network host postgres:17-alpine pg_restore   --dbname="$db_
 [[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_reader','mercy_restore_test','CONNECT');")" == "t" ]]
 [[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_stranger','mercy_restore_test','CONNECT');")" == "f" ]]
 [[ "$(target_psql -Atc "show statement_timeout;")" == "13s" ]]
+[[ "$(target_psql -Atc 'show "app.settings.restore_probe";')" == "fixture-only" ]]
 [[ "$(target_psql -Atc "select (select count(*) from auth.users), coalesce(to_regclass('public.help_requests')::text,''), (select count(*) from storage.buckets), (select count(*) from storage.objects);")" == "0||0|0" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='auth.users'::regclass;")" == "mercy_restore_auth" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='storage.objects'::regclass;")" == "mercy_restore_storage" ]]
