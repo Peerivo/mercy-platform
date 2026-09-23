@@ -48,6 +48,19 @@ CREATE TABLE public.baseline_row(id integer primary key);
 INSERT INTO public.baseline_row(id) VALUES (7);
 ALTER TABLE public.baseline_row OWNER TO mercy_restore_owner;
 GRANT SELECT ON public.baseline_row TO mercy_restore_reader;
+CREATE SCHEMA auth AUTHORIZATION supabase_auth_admin;
+CREATE TABLE auth.users(id integer PRIMARY KEY);
+ALTER TABLE auth.users OWNER TO supabase_auth_admin;
+CREATE SCHEMA storage AUTHORIZATION supabase_storage_admin;
+CREATE TABLE storage.buckets(id text PRIMARY KEY);
+CREATE TABLE storage.objects(id integer PRIMARY KEY);
+ALTER TABLE storage.buckets OWNER TO supabase_storage_admin;
+ALTER TABLE storage.objects OWNER TO supabase_storage_admin;
+CREATE TABLE public.rest_probe(id integer PRIMARY KEY);
+INSERT INTO public.rest_probe(id) VALUES (9);
+ALTER TABLE public.rest_probe ENABLE ROW LEVEL SECURITY;
+CREATE POLICY rest_read ON public.rest_probe FOR SELECT TO anon USING (true);
+GRANT SELECT ON public.rest_probe TO anon;
 SQL
 
 pre_baseline="$(target_psql -Atc "select coalesce(to_regclass('public.baseline_row')::text,'');")"
@@ -65,7 +78,12 @@ docker run --rm -i postgres:17-alpine pg_restore --create --schema-only -f - < "
 }
 echo "Recovery test archive contains database metadata."
 
-target_psql -c "create table public.extra_after_backup(id integer);" >/dev/null
+target_psql <<'SQL' >/dev/null
+CREATE TABLE public.help_requests(id integer PRIMARY KEY);
+INSERT INTO auth.users(id) VALUES (1);
+INSERT INTO storage.buckets(id) VALUES ('mercy');
+INSERT INTO storage.objects(id) VALUES (1);
+SQL
 admin_psql -c "alter database mercy_restore_test set statement_timeout = '29s';" >/dev/null
 echo "Recovery test post-backup mutation created."
 
@@ -83,5 +101,20 @@ docker run --rm -i --network host postgres:17-alpine pg_restore   --dbname="$db_
 [[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_reader','mercy_restore_test','CONNECT');")" == "t" ]]
 [[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_stranger','mercy_restore_test','CONNECT');")" == "f" ]]
 [[ "$(target_psql -Atc "show statement_timeout;")" == "13s" ]]
+[[ "$(target_psql -Atc "select (select count(*) from auth.users), coalesce(to_regclass('public.help_requests')::text,''), (select count(*) from storage.buckets), (select count(*) from storage.objects);")" == "0||0|0" ]]
+[[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='auth.users'::regclass;")" == "supabase_auth_admin" ]]
+[[ "$(target_psql -Atc "select pg_get_userbyid(relowner) from pg_class where oid='storage.objects'::regclass;")" == "supabase_storage_admin" ]]
+[[ "$(target_psql -Atc "set role supabase_auth_admin; select count(*) from auth.users;")" == 
+
+echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
+SET\\n0' ]]
+[[ "$(target_psql -Atc "set role supabase_storage_admin; select count(*) from storage.objects;")" == 
+
+echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
+SET\\n0' ]]
+[[ "$(target_psql -Atc "set role anon; select id from public.rest_probe;")" == 
+
+echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
+SET\\n9' ]]
 
 echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
