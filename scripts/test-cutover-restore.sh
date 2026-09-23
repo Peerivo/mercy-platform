@@ -187,7 +187,7 @@ echo "Recovery test database dropped."
 # its ACL. Apply all other archive entries first, create the canonical wrapper,
 # then replay the archived ACL exactly as production recovery does.
 graphql_acl="$(printf '%s\n' "$toc_listing" |
-  awk 'index($0, " ACL graphql_public FUNCTION graphql(\\"operationName\\" text, query text, variables jsonb, extensions jsonb) ") {print}')"
+  awk 'index($0, " ACL graphql_public FUNCTION graphql(\"operationName\" text, query text, variables jsonb, extensions jsonb) ") {print}')"
 [[ "$(printf '%s\n' "$graphql_acl" | wc -l)" == "1" ]]
 graphql_acl_id="${graphql_acl%%;*}"
 [[ "$graphql_acl_id" =~ ^[0-9]+$ ]]
