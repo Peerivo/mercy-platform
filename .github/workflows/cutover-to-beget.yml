@@ -12,7 +12,7 @@ on:
           - MIGRATE
         default: CANCEL
       recover_from_run_id:
-        description: "Optional failed cutover run ID whose retained Beget safety backup must be restored before MIGRATE"
+        description: "Optional failed/interrupted cutover run ID whose retained Beget safety backup must be restored before MIGRATE"
         required: false
         type: string
         default: ""
@@ -67,7 +67,7 @@ jobs:
           done
           test "${missing}" -eq 0
 
-      - name: Validate requested failed-run recovery
+      - name: Validate requested failed/interrupted-run recovery
         if: ${{ inputs.recover_from_run_id != '' }}
         shell: bash
         env:
@@ -89,11 +89,11 @@ jobs:
           printf '%s' "${run_json}" | jq -e '
             .name == "Cut over Mercy Supabase to Beget" and
             .event == "workflow_dispatch" and
-            .conclusion == "failure" and
+            (.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") and
             .head_branch == "main" and
             .path == ".github/workflows/cutover-to-beget.yml"
           ' >/dev/null || {
-            echo "::error::Requested recovery id is not a failed main-branch Mercy cutover run."
+            echo "::error::Requested recovery id is not a failed/interrupted main-branch Mercy cutover run."
             exit 1
           }
 
