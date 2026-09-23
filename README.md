@@ -9,9 +9,11 @@ npm ci
 npm run dev
 ```
 
-Откройте `/`, `/requests`, `/nearby`, `/auth`, `/help`, `/cabinet`, `/volunteer`. Рабочее место находится в `/staff/cases`; ADMIN-модерация предложений — `/staff/volunteers`, жалоб — `/staff/reports`. Проверки: `npm run check`; миграции локально: `npx supabase start && npx supabase db reset`. Seed намеренно требует `app.mercy_allow_test_seed=true` и предназначен только для disposable DB.
+Откройте `/`, `/requests`, `/nearby`, `/auth`, `/help`, `/cabinet`, `/volunteer`, `/donate`. Рабочее место находится в `/staff/cases`; ADMIN-модерация предложений — `/staff/volunteers`, жалоб — `/staff/reports`. Проверки: `npm run check`; миграции локально: `npx supabase start && npx supabase db reset`. Seed намеренно требует `app.mercy_allow_test_seed=true` и предназначен только для disposable DB.
 
 Медицинские услуги, профессиональные медицинские исполнители, проверка квалификаций/лицензий, booking и marketplace-функции не входят в Mercy.
+
+Пожертвования проекту вынесены в `/donate`: Mercy не обрабатывает платёжные данные, а переводит на проверенную страницу CloudTips. Деньги для конкретной просьбы не проходят через этот контур. Настройка и границы описаны в [`docs/DONATIONS.md`](docs/DONATIONS.md).
 
 `NEXT_PUBLIC_SUPABASE_URL` и `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` обязательны и безопасны для клиента в сочетании с RLS. Legacy anon key — только fallback. `NEXT_PUBLIC_SITE_URL` обязателен и задаёт Auth redirects; production значение должно быть canonical HTTPS URL. Все `NEXT_PUBLIC_*` встраиваются во время build: передавайте их как Docker build args, не ожидайте runtime-подмены. Privileged keys приложению не нужны. Полная локальная и CI-процедура, роли и защита от удалённой БД описаны в [`docs/TESTING.md`](docs/TESTING.md).
 
