@@ -202,16 +202,37 @@ else
   legacy_backup=1
 fi
 
+# BEGIN_SAFE_PG_RESTORE_CLASSIFIER
+classify_restore_error() {
+  local error_text="$1" category="other" toc="unknown"
+  case "$error_text" in
+    *"permission denied to set parameter"*) category="restricted_parameter" ;;
+    *"permission denied"*) category="permission" ;;
+    *"does not exist"*) category="missing_object" ;;
+    *"already exists"*) category="object_conflict" ;;
+    *"unrecognized configuration parameter"*) category="unknown_parameter" ;;
+    *"could not open extension control file"*) category="missing_extension" ;;
+    *"syntax error"*) category="syntax" ;;
+  esac
+  toc="$(printf '%s\n' "$error_text" | sed -nE 's/.*from TOC entry ([0-9]+);.*/\1/p' | head -n 1)"
+  [[ "$toc" =~ ^[0-9]+$ ]] || toc="unknown"
+  printf 'category=%s toc=%s\n' "$category" "$toc"
+}
+# END_SAFE_PG_RESTORE_CLASSIFIER
+
 # -C is a pg_restore option. pg_dump --create is ignored for custom archives,
 # including the retained run #7 archive; both formats carry database metadata.
 docker exec supabase-db dropdb -U supabase_admin --maintenance-db=template1 --force postgres
-# pg_restore prints failing SQL, including confidential database settings, on
-# stderr. Discard those details after a generic error; never emit them to CI.
-if ! docker exec -i supabase-db pg_restore -U supabase_admin -d template1 \
-  --create --exit-on-error < "$backup_file" 2>/dev/null; then
-  echo "::error::Safety-backup restore failed; SQL details suppressed." >&2
+# Keep pg_restore stderr in memory only. It can include confidential database
+# settings after "Command was:"; emit only a fixed category and numeric TOC id.
+if ! restore_error="$(docker exec -i supabase-db pg_restore -U supabase_admin -d template1 \
+  --create --exit-on-error --verbose < "$backup_file" 2>&1 >/dev/null)"; then
+  safe_error="$(classify_restore_error "$restore_error")"
+  unset restore_error
+  echo "::error::Safety-backup restore failed ($safe_error); SQL details suppressed." >&2
   exit 1
 fi
+unset restore_error
 
 post_restore_metadata_hash="$(database_metadata_hash)"
 [[ -n "$post_restore_metadata_hash" ]] || {
