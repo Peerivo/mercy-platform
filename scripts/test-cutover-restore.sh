@@ -206,14 +206,6 @@ printf '%s\n' "$graphql_acl" |
   docker exec -i "$db_container" sh -c 'cat > "$1"' sh "$test_acl_list"
 docker exec -i "$db_container" pg_restore -U supabase_admin -d postgres --create --exit-on-error \
   --use-list="$test_main_list" < "$dump_file"
-printf 'Fixture database TOC entry types: %s\n' "$(printf '%s\n' "$toc_listing" | awk 'index($0, " DATABASE ") {print $4 ":" $5}' | paste -sd, -)"
-archive_sql="$(docker run --rm -i postgres:17-alpine pg_restore --create --schema-only -f - < "$dump_file")"
-printf 'Fixture archive database REVOKE/GRANT counts: %s\n' "$(printf '%s\n' "$archive_sql" |
-  awk '/^REVOKE .* ON DATABASE mercy_restore_test / {r++}
-       /^GRANT .* ON DATABASE mercy_restore_test / {g++}
-       END {print r+0 "|" g+0}')"
-unset archive_sql
-printf 'Fixture stranger CONNECT after main archive replay: %s\n' "$(admin_psql -Atc "select has_database_privilege('mercy_restore_stranger','mercy_restore_test','CONNECT');")"
 [[ "$(target_psql -Atc "select to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') is null;")" == "t" ]]
 wrapper_sql="$(sed -n '/^-- BEGIN_BEGET_GRAPHQL_WRAPPER$/,/^-- END_BEGET_GRAPHQL_WRAPPER$/p' scripts/cutover-beget.sh)"
 [[ -n "$wrapper_sql" ]] || { echo "Production GraphQL wrapper SQL missing" >&2; exit 1; }
@@ -221,7 +213,15 @@ printf '%s\n' "$wrapper_sql" |
   docker exec -i "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 >/dev/null
 docker exec -i "$db_container" pg_restore -U supabase_admin -d mercy_restore_test --exit-on-error \
   --use-list="$test_acl_list" < "$dump_file"
-printf 'Fixture stranger CONNECT after GraphQL ACL replay: %s\n' "$(admin_psql -Atc "select has_database_privilege('mercy_restore_stranger','mercy_restore_test','CONNECT');")"
+# --use-list excludes database privileges encoded in archive --create
+# metadata. Apply the archived database GRANT/REVOKE statements only.
+archive_acl_sql="$(docker run --rm -i postgres:17-alpine pg_restore --create --schema-only -f - < "$dump_file" |
+  awk '/^(REVOKE|GRANT) .* ON DATABASE mercy_restore_test (FROM|TO) .*;$/ {print}')"
+[[ "$(printf '%s\n' "$archive_acl_sql" | awk '/^REVOKE / {r++} /^GRANT / {g++} END {print r+0 "|" g+0}')" == "1|3" ]]
+printf '%s\n' "$archive_acl_sql" |
+  docker exec -i "$db_container" psql -U supabase_admin -d template1 -v ON_ERROR_STOP=1 >/dev/null
+unset archive_acl_sql
+[[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_stranger','mercy_restore_test','CONNECT');")" == "f" ]]
 [[ "$(target_psql -Atc "select pg_get_userbyid(proowner) from pg_proc where oid=to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)');")" == "supabase_admin" ]]
 [[ "$(target_psql -Atc "select has_function_privilege('mercy_restore_rest', 'graphql_public.graphql(text,text,jsonb,jsonb)', 'EXECUTE');")" == "t" ]]
 [[ "$(target_psql -Atc "select has_function_privilege('mercy_restore_reader', 'graphql_public.graphql(text,text,jsonb,jsonb)', 'EXECUTE');")" == "f" ]]
