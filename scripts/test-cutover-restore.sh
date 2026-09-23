@@ -103,6 +103,10 @@ GRANT USAGE ON SCHEMA graphql_public TO mercy_restore_rest;
 SQL
 docker exec "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 \
   -c "create extension pg_graphql with schema graphql;" >/dev/null
+target_psql <<'SQL' >/dev/null
+GRANT USAGE ON SCHEMA graphql TO mercy_restore_rest;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA graphql TO mercy_restore_rest;
+SQL
 docker exec -i "$db_container" psql -U supabase_admin -d mercy_restore_test -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 CREATE FUNCTION graphql_public.graphql("operationName" text DEFAULT NULL, query text DEFAULT NULL,
   variables jsonb DEFAULT NULL, extensions jsonb DEFAULT NULL)
