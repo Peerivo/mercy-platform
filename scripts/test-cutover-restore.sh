@@ -17,6 +17,7 @@ dump_file="$(mktemp)"
 cleanup() {
   set +e
   docker run --rm --network host postgres:17-alpine psql "$db_url" -v ON_ERROR_STOP=1     -c "drop database if exists mercy_restore_test with (force);" >/dev/null 2>&1
+  docker run --rm --network host postgres:17-alpine psql "$db_url" -v ON_ERROR_STOP=1     -c "drop role if exists mercy_restore_stranger;" >/dev/null 2>&1
   docker run --rm --network host postgres:17-alpine psql "$db_url" -v ON_ERROR_STOP=1     -c "drop role if exists mercy_restore_reader;" >/dev/null 2>&1
   docker run --rm --network host postgres:17-alpine psql "$db_url" -v ON_ERROR_STOP=1     -c "drop role if exists mercy_restore_owner;" >/dev/null 2>&1
   rm -f "$dump_file"
@@ -32,13 +33,15 @@ target_psql() {
 }
 
 admin_psql -c "drop database if exists mercy_restore_test with (force);" >/dev/null
+admin_psql -c "drop role if exists mercy_restore_stranger;" >/dev/null
 admin_psql -c "drop role if exists mercy_restore_reader;" >/dev/null
 admin_psql -c "drop role if exists mercy_restore_owner;" >/dev/null
 admin_psql -c "create role mercy_restore_owner;" >/dev/null
 admin_psql -c "create role mercy_restore_reader;" >/dev/null
-admin_psql -c "grant mercy_restore_owner to postgres; grant mercy_restore_reader to postgres;" >/dev/null
+admin_psql -c "create role mercy_restore_stranger;" >/dev/null
+admin_psql -c "grant mercy_restore_owner to postgres; grant mercy_restore_reader to postgres; grant mercy_restore_stranger to postgres;" >/dev/null
 admin_psql -c "create database mercy_restore_test owner mercy_restore_owner template template0;" >/dev/null
-admin_psql -c "revoke connect on database mercy_restore_test from public; grant connect on database mercy_restore_test to mercy_restore_reader; alter database mercy_restore_test set mercy.test_setting = 'preserved';" >/dev/null
+admin_psql -c "revoke connect on database mercy_restore_test from public; grant connect on database mercy_restore_test to mercy_restore_reader; alter database mercy_restore_test set statement_timeout = '13s';" >/dev/null
 
 target_psql <<'SQL' >/dev/null
 CREATE TABLE public.baseline_row(id integer primary key);
@@ -63,7 +66,7 @@ docker run --rm -i postgres:17-alpine pg_restore -l < "$dump_file" | grep -E ' D
 echo "Recovery test archive contains database metadata."
 
 target_psql -c "create table public.extra_after_backup(id integer);" >/dev/null
-admin_psql -c "alter database mercy_restore_test set mercy.test_setting = 'mutated';" >/dev/null
+admin_psql -c "alter database mercy_restore_test set statement_timeout = '29s';" >/dev/null
 echo "Recovery test post-backup mutation created."
 
 admin_psql -c "drop database mercy_restore_test with (force);" >/dev/null
@@ -78,6 +81,7 @@ docker run --rm -i --network host postgres:17-alpine pg_restore   --dbname="$db_
 7" ]]
 [[ "$(admin_psql -Atc "select pg_get_userbyid(datdba) from pg_database where datname='mercy_restore_test';")" == "mercy_restore_owner" ]]
 [[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_reader','mercy_restore_test','CONNECT');")" == "t" ]]
-[[ "$(target_psql -Atc "show mercy.test_setting;")" == "preserved" ]]
+[[ "$(admin_psql -Atc "select has_database_privilege('mercy_restore_stranger','mercy_restore_test','CONNECT');")" == "f" ]]
+[[ "$(target_psql -Atc "show statement_timeout;")" == "13s" ]]
 
-echo "Cutover recovery restore preserves database metadata, object ownership and grants."
+echo "Cutover recovery restore preserves database metadata, object ownership, grants, database settings and PUBLIC CONNECT denial."
