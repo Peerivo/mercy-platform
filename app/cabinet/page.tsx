@@ -59,7 +59,7 @@ export default async function Cabinet() {
             </Link>
           )}
           <form action={signOut}>
-            <button className="btn secondary">Выйти</button>
+            <button className="btn secondary">Выйти из аккаунта</button>
           </form>
         </div>
       </header>
