@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AuthEntry } from "@/components/auth-entry";
 import { useCallback, useEffect, useRef } from "react";
 
 type NavigationItem = {
@@ -69,6 +70,7 @@ export function MobileMenu({ items }: { items: readonly NavigationItem[] }) {
             {item.label}
           </Link>
         ))}
+        <AuthEntry onNavigate={closeMenu} />
       </nav>
     </details>
   );
