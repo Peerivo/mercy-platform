@@ -83,7 +83,7 @@ jobs:
           toc="$2"
           [[ -s "$backup" ]] || { echo "Retained backup missing"; exit 1; }
           entry="$(docker exec -i supabase-db pg_restore -l < "$backup" |
-            awk -v id="$toc" '$1 == id ";" {print; exit}')"
+            awk -v id="$toc" '$1 == id ";" && !found {entry=$0; found=1} END {if(found) print entry}')"
           [[ -n "$entry" ]] || { echo "TOC entry absent"; exit 1; }
           # pg_restore -l contains object metadata only, never CREATE/ALTER SQL
           # or parameter values. Refuse control characters before printing.
