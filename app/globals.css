@@ -760,6 +760,10 @@ html[data-mercy-quick-exit-guard="1"] body {
     display: none;
   }
 
+  .header-auth-entry {
+    display: none;
+  }
+
   .mobile-menu {
     display: block;
   }
