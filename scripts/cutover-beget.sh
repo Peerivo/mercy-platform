@@ -285,6 +285,7 @@ if [[ -n "$acl_list" ]]; then
     # The Supabase pg_graphql public wrapper from its canonical bootstrap:
     # defaults/signature and named forwarding preserve API behavior.
     docker exec -i supabase-db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 >/dev/null <<'GRAPHQL_SQL'
+-- BEGIN_BEGET_GRAPHQL_WRAPPER
 CREATE FUNCTION graphql_public.graphql(
   "operationName" text DEFAULT NULL,
   query text DEFAULT NULL,
@@ -298,6 +299,7 @@ CREATE FUNCTION graphql_public.graphql(
     extensions := extensions
   );
 $graphql_wrapper$;
+-- END_BEGET_GRAPHQL_WRAPPER
 GRAPHQL_SQL
   fi
   # Replay the archive's own ACL after the wrapper exists; never replace it
