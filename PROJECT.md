@@ -33,3 +33,5 @@ Mercy связан с каноническим Peerivo Global Contract чере�
 После run #10 restore всё ещё остановлен (`missing_object`, archive TOC `4300`); перед следующей попыткой обязателен read-only просмотр индекса retained backup через защищённый workflow. Source остаётся размороженным, target не подтверждён fresh.
 
 Read-only archive inspection run `35829539729` identified TOC `4300` as an ACL entry on `graphql_public.graphql(text,text,jsonb,jsonb)` owned by `supabase_admin`. The protected inspector now checks the related archive TOC metadata and target GraphQL catalog flags without SQL or secret values before any further destructive recovery. The missing dependency is not yet established; Beget remains unverified fresh.
+
+Для диагностики недоступного browser `workflow_dispatch` временно добавлен read-only `push` триггер инспектора, ограниченный изменением самого workflow на `main`, точным failed run `35770879007`, TOC `4300` и `GRAPHQL_CONTEXT`. Это не восстановление; триггер удаляется следующим reviewed PR после получения результата.
