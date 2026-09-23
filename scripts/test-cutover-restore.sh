@@ -105,6 +105,33 @@ docker run --rm -i postgres:17-alpine pg_restore --create --schema-only -f - < "
 }
 echo "Recovery test archive contains database metadata."
 
+# Exercise the exact read-only TOC lookup used by the protected archive
+# inspection workflow against an actual custom-format backup entry.
+toc_listing="$(docker run --rm -i postgres:17-alpine pg_restore -l < "$dump_file")"
+expected_toc_entry="$(printf '%s\n' "$toc_listing" |
+  awk '$1 ~ /^[0-9]+;$/ {print; exit}')"
+[[ -n "$expected_toc_entry" ]] || { echo "Archive TOC contains no numeric entry" >&2; exit 1; }
+toc_id="$(printf '%s\n' "$expected_toc_entry" | awk '{sub(/;/, "", $1); print $1}')"
+[[ "$toc_id" =~ ^[0-9]+$ ]]
+actual_toc_entry="$(printf '%s\n' "$toc_listing" |
+  awk -v id="$toc_id" '$1 == id ";" && !found {entry=$0; found=1} END {if(found) print entry}')"
+[[ "$actual_toc_entry" == "$expected_toc_entry" ]] || {
+  echo "Exact TOC entry lookup returned the wrong object" >&2
+  exit 1
+}
+missing_toc_entry="$(printf '%s\n' "$toc_listing" |
+  awk -v id="999999999" '$1 == id ";" && !found {entry=$0; found=1} END {if(found) print entry}')"
+[[ -z "$missing_toc_entry" ]]
+# The first match precedes far more than a pipe buffer of output. Early exit
+# would SIGPIPE the producer under pipefail; the production selector consumes it.
+large_toc_entry="$(
+  { printf '1; 0 0 TABLE public baseline_row postgres\n'
+    seq 2 50000 | sed 's/$/; 0 0 TABLE public filler postgres/'
+  } | awk -v id="1" '$1 == id ";" && !found {entry=$0; found=1} END {if(found) print entry}'
+)"
+[[ "$large_toc_entry" == "1; 0 0 TABLE public baseline_row postgres" ]]
+echo "Recovery test archive index exact entry lookup passed."
+
 target_psql <<'SQL' >/dev/null
 CREATE TABLE public.help_requests(id integer PRIMARY KEY);
 INSERT INTO auth.users(id) VALUES (1);
