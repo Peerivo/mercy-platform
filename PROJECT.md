@@ -27,3 +27,5 @@ Mercy связан с каноническим Peerivo Global Contract чере�
 
 ## PLANNED / POST-MVP
 Организационные кабинеты, deletion operations, abuse controls, безопасные вложения/уведомления, локализации, улучшения каталога организаций, volunteer assignment, Peerivo integration и AI assistance по versioned consent contract и с coordinator approval.
+
+Recovery-only mode `RECOVER` в том же защищённом GitHub Actions workflow принимает только проверенный terminal failed/interrupted run ID, восстанавливает baseline Beget, доказывает свежесть и завершается до source freeze. Новый `MIGRATE` требует отдельного свежего решения; read-only preflight проверяет также пустые Storage buckets/objects.
