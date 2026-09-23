@@ -15,6 +15,8 @@ if [[ "${MIGRATION_CONFIRM}" != "MIGRATE" && "${MIGRATION_CONFIRM}" != "RECOVER"
   exit 1
 fi
 
+bash "$(dirname "${BASH_SOURCE[0]}")/check-beget-jwt-incident-gate.sh" "${MIGRATION_CONFIRM}"
+
 REMOTE="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
 LOCAL_WORK="/tmp/mercy-cutover-${GITHUB_RUN_ID:-manual}"
 SOURCE_ENV="/tmp/source-pg.env"
