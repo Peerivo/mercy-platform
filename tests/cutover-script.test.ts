@@ -180,3 +180,16 @@ describe("Beget cutover recovery", () => {
     expect(script).toContain('[[ "$state" == "0||0|0" ]]');
   });
 });
+
+
+describe("Beget target fingerprint transport", () => {
+  test("prevents ssh from consuming the public-table read loop stdin", () => {
+    const fingerprintBlock =
+      script.match(/fingerprint_target\(\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+
+    expect(fingerprintBlock).toContain('while IFS= read -r table; do');
+    expect(fingerprintBlock).toContain('ssh -n "${REMOTE}"');
+    expect(fingerprintBlock).not.toContain('      ssh "${REMOTE}" "docker exec supabase-db psql');
+    expect(fingerprintBlock).toContain("incomplete target fingerprint");
+  });
+});
