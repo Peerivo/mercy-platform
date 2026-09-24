@@ -176,6 +176,7 @@ test("header uses one auth entry that becomes cabinet after sign-in", async ({ p
   await page.goto("/");
   await expect(page.getByRole("link", { name: "Вход", exact: true })).toBeVisible();
   await expect(page.locator('nav.desktop-nav a[href="/cabinet"]')).toHaveCount(0);
+  await expect(page.locator("header").getByRole("button", { name: "Быстро скрыть приватную страницу" })).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto("/");
@@ -187,7 +188,8 @@ test("header uses one auth entry that becomes cabinet after sign-in", async ({ p
   await page.setViewportSize({ width: 1200, height: 900 });
   await register(page, `header-auth-${suffix}@mercy.invalid`);
   await expect(page.getByRole("link", { name: "Кабинет", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Выйти", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Выйти из аккаунта", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Быстро скрыть приватную страницу" })).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto("/cabinet");

@@ -8,6 +8,7 @@ import type { ChatMessage } from "@/lib/chat-history";
 import { ShareRequest } from "@/components/share-request";
 import { ReportRequest } from "@/components/report-request";
 import { RequestResponse } from "@/components/request-response";
+import { QuickExit } from "@/components/quick-exit";
 
 type SupportStep = {
   id: string;
@@ -133,6 +134,7 @@ export default async function Case({
       <div className="nav">
         <h1>Просьба № {r.case_number}</h1>
         {isCoordinator && <a href="/staff/cases">К назначенным обращениям</a>}
+        {canAccessPrivate && <QuickExit />}
       </div>
 
       <div className="card">
