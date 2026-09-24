@@ -10,7 +10,6 @@ import Link from "next/link";
 import Script from "next/script";
 import { AuthEntry } from "@/components/auth-entry";
 import { MobileMenu } from "@/components/mobile-menu";
-import { QuickExit } from "@/components/quick-exit";
 import { quickExitGuard } from "@/lib/quick-exit-guard";
 import { siteUrl } from "@/lib/config";
 
@@ -62,7 +61,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
             <div className="site-header-actions">
               <AuthEntry className="btn secondary header-auth-entry" />
-              <QuickExit />
               <MobileMenu items={navigation} />
             </div>
           </div>
