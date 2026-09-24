@@ -46,6 +46,17 @@ describe("REG.RU production deployment safety contract", () => {
     expect(healthData).toContain("await response.arrayBuffer()");
   });
 
+  it("uses a dedicated MTU-safe network without mutating global Docker settings", () => {
+    expect(workflow).toContain('NETWORK_NAME="mercy-reg-ru"');
+    expect(workflow).toContain('NETWORK_MTU="1400"');
+    expect(workflow).toContain('docker network create');
+    expect(workflow).toContain('com.docker.network.driver.mtu=${NETWORK_MTU}');
+    expect(workflow).toContain('--network "${NETWORK_NAME}"');
+    expect(workflow).toContain("Existing ${NETWORK_NAME} network has unexpected MTU");
+    expect(workflow).not.toMatch(/daemon\.json|systemctl\s+restart\s+docker|ip\s+link\s+set\s+docker0/i);
+  });
+
+
   it("PREPARE never changes DNS and VERIFY is public-read-only", () => {
     expect(workflow).toContain("REG_RU_CANDIDATE_READY");
     expect(workflow).toContain("REG_RU_PUBLIC_CUTOVER_VERIFIED");
