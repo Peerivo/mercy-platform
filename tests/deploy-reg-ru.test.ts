@@ -32,9 +32,11 @@ describe("REG.RU production deployment safety contract", () => {
   });
 
   it("arms rollback before removing an existing application container", () => {
-    const arm = workflow.indexOf("armed=1");
-    const remove = workflow.indexOf('docker rm -f "${CONTAINER_NAME}"');
-    expect(arm).toBeGreaterThan(-1);
+    const safetyComment = workflow.indexOf("Arm rollback before the first destructive production-host action");
+    const arm = workflow.indexOf("armed=1", safetyComment);
+    const remove = workflow.indexOf('docker rm -f "${CONTAINER_NAME}"', arm);
+    expect(safetyComment).toBeGreaterThan(-1);
+    expect(arm).toBeGreaterThan(safetyComment);
     expect(remove).toBeGreaterThan(arm);
   });
 
