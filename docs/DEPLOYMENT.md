@@ -19,3 +19,13 @@ ChatGPT environment may run `npm ci && npm run check`; local Supabase requires D
 Обязательные build args: Supabase URL/publishable key, canonical `NEXT_PUBLIC_SITE_URL` и `GIT_SHA`; compose fail-fast проверяет первые три. Production Site URL должен быть HTTPS и точно присутствовать в Supabase Auth redirect allow-list вместе с `/auth/callback`. После immutable deploy запрос `GET /health` обязан вернуть `status=ok`, `environment=production`, ожидаемый SHA в `version` и `Cache-Control: no-store`; endpoint не проверяет БД и не выводит конфигурацию.
 
 Перед migration workflow зафиксируйте backup и сопоставьте `supabase_migrations.schema_migrations` с `supabase/migrations`. После migration проверьте `messages` в Realtime publication и RLS, затем выполните documented one-time `bootstrap_first_admin` через trusted SQL (не API). Smoke A и B выполняются отдельными USER/helper/COORDINATOR/ADMIN аккаунтами; отдельно подтвердите отрицательные проверки доступа. Не используйте seed в remote среде.
+
+## REG.RU application cutover
+The canonical public website remains `https://mercy.peerivo.net`. The Russian hostname `https://язык-милосердия.рф` is a permanent 308 entry point to that canonical URL, while Supabase remains on Beget at `https://api.mercy.peerivo.net`.
+
+Use the protected workflow `Deploy REG.RU production` in two phases documented in `docs/REG_RU_DEPLOYMENT.md`:
+
+1. `PREPARE` stages the exact approved current-main image on REG.RU and verifies local liveness, bounded data readiness, exact SHA and redirect behavior without changing DNS.
+2. After a separately approved DNS cutover, `VERIFY` confirms the exact public revision, data readiness, Russian-host 308 path/query preservation and Beget Auth reachability.
+
+The REG.RU workflow never runs a database migration. The old managed Supabase remains write-frozen during the rollback window, and Vercel remains the application rollback host until the REG.RU cutover is accepted.
