@@ -157,11 +157,25 @@ jobs:
           PREVIOUS_ENV="${REMOTE_DIR}/.env.previous"
           CURRENT_IMAGE_FILE="${REMOTE_DIR}/current-image"
           PREVIOUS_IMAGE_FILE="${REMOTE_DIR}/previous-image"
+          NETWORK_NAME="mercy-reg-ru"
+          NETWORK_MTU="1400"
+
+          ensure_network() {
+            if docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then
+              configured_mtu="$(docker network inspect -f '{{ index .Options "com.docker.network.driver.mtu" }}' "${NETWORK_NAME}")"
+              if [ "${configured_mtu}" != "${NETWORK_MTU}" ]; then
+                echo "Existing ${NETWORK_NAME} network has unexpected MTU; refusing to mutate it." >&2
+                return 1
+              fi
+            else
+              docker network create                 --driver bridge                 --opt "com.docker.network.driver.mtu=${NETWORK_MTU}"                 "${NETWORK_NAME}" >/dev/null
+            fi
+          }
 
           start_container() {
             local image="${1:?image required}"
             local env_file="${2:?env file required}"
-            docker run -d               --name "${CONTAINER_NAME}"               --restart unless-stopped               --read-only               --tmpfs /tmp:rw,noexec,nosuid,size=64m               --env-file "${env_file}"               -p 127.0.0.1:3100:3000               "${image}" >/dev/null
+            docker run -d               --name "${CONTAINER_NAME}"               --restart unless-stopped               --read-only               --tmpfs /tmp:rw,noexec,nosuid,size=64m               --network "${NETWORK_NAME}"               --env-file "${env_file}"               -p 127.0.0.1:3100:3000               "${image}" >/dev/null
           }
 
           old_image=""
@@ -218,6 +232,11 @@ jobs:
           fi
 
           gzip -dc "${IMAGE_ARCHIVE}" | docker load >/dev/null
+
+          # REG.RU ens3 is MTU 1450 while Docker's default bridge is MTU 1500.
+          # A dedicated 1400-MTU bridge avoids PMTU black-holing without changing
+          # global Docker/firewall configuration on the host.
+          ensure_network
 
           # Arm rollback before the first destructive production-host action.
           armed=1

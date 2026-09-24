@@ -34,7 +34,7 @@ The workflow:
 3. validates the configured public Supabase key against Beget before any SSH;
 4. builds one immutable application image;
 5. uploads the image and candidate runtime environment to REG.RU;
-6. arms rollback before removing any existing REG.RU application container;
+6. creates/reuses the dedicated `mercy-reg-ru` Docker bridge at MTU 1400, then arms rollback before removing any existing REG.RU application container;
 7. starts the candidate on loopback `127.0.0.1:3100`;
 8. requires Docker health, bounded local `/health`, bounded local `/health/data`, exact Git SHA, and the local host-based 308 redirect contract;
 9. promotes the candidate environment only after all local gates pass;
@@ -92,6 +92,8 @@ Do not paste secret values into chat, PRs, issues, screenshots, or logs.
 The REG.RU host must provide Docker, gzip, curl and SSH access for the pinned deployment identity. The private deployment directory is `/opt/peerivo/mercy`.
 
 The application binds only to `127.0.0.1:3100`. The REG.RU reverse proxy is responsible for public HTTPS on ports 80/443 and for preserving the request Host header.
+
+REG.RU's public interface is MTU 1450 while Docker's default `docker0` bridge is MTU 1500. This was proven to black-hole larger TLS packets from the Beget API: host networking succeeded while the default bridge timed out, and a temporary MTU-1400 bridge succeeded. PREPARE therefore creates/reuses a dedicated `mercy-reg-ru` bridge with MTU 1400 and fails closed if an existing network with that name has a different MTU. It does not modify `docker0`, Docker daemon configuration, firewalld, or host interface MTU.
 
 ## Rollback
 
