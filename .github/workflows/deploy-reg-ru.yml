@@ -1,0 +1,382 @@
+name: Deploy REG.RU production
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "PREPARE stages current main on REG.RU; VERIFY checks the public cutover after DNS"
+        required: true
+        type: choice
+        options:
+          - PREPARE
+          - VERIFY
+      expected_sha:
+        description: "Exact reviewed 40-character main SHA"
+        required: true
+        type: string
+      confirm:
+        description: "Type the selected operation exactly"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercy-reg-ru-production
+  cancel-in-progress: false
+
+env:
+  SITE_URL: https://mercy.peerivo.net
+  RUSSIAN_HOST: xn----htbcggcjkhwxk7j6bn.xn--p1ai
+  EXPECTED_SUPABASE_URL: https://api.mercy.peerivo.net
+  IMAGE_NAME: mercy-platform
+  CONTAINER_NAME: mercy
+  REMOTE_DIR: /opt/peerivo/mercy
+
+jobs:
+  prepare:
+    if: ${{ inputs.operation == 'PREPARE' && inputs.confirm == 'PREPARE' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL || secrets.RESEND_FROM_EMAIL }}
+      FEEDBACK_TO_EMAIL: ${{ vars.FEEDBACK_TO_EMAIL || secrets.FEEDBACK_TO_EMAIL }}
+
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 1
+
+      - name: Require exact approved live main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.expected_sha }}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::expected_sha must be a 40-character lowercase commit SHA"
+            exit 1
+          }
+          test "${{ inputs.expected_sha }}" = "${GITHUB_SHA}" || {
+            echo "::error::Dispatch SHA does not match the explicitly approved SHA"
+            exit 1
+          }
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          current_main="$(git rev-parse refs/remotes/origin/main)"
+          test "${current_main}" = "${GITHUB_SHA}" || {
+            echo "::error::Dispatch revision is no longer current main"
+            exit 1
+          }
+
+      - name: Validate protected production configuration
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in REG_RU_HOST REG_RU_USER REG_RU_SSH_KEY REG_RU_KNOWN_HOSTS NEXT_PUBLIC_SUPABASE_URL RESEND_API_KEY RESEND_FROM_EMAIL FEEDBACK_TO_EMAIL; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing protected production configuration: ${name}"
+              missing=1
+            fi
+          done
+          if [ -z "${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}" ] && [ -z "${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}" ]; then
+            echo "::error::Set NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY or legacy NEXT_PUBLIC_SUPABASE_ANON_KEY"
+            missing=1
+          fi
+          test "${NEXT_PUBLIC_SUPABASE_URL:-}" = "${EXPECTED_SUPABASE_URL}" || {
+            echo "::error::NEXT_PUBLIC_SUPABASE_URL must be the canonical Beget API hostname"
+            missing=1
+          }
+          test "${missing}" -eq 0
+
+      - name: Verify configured public key against Beget before SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          client_key="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}}"
+          test -n "${client_key}"
+          curl --fail --silent --show-error --max-time 10             -H "apikey: ${client_key}"             "${EXPECTED_SUPABASE_URL}/auth/v1/health" >/dev/null
+          unset client_key
+
+      - name: Build immutable production image
+        shell: bash
+        env:
+          NEXT_PUBLIC_MAP_TILE_URL: https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
+          NEXT_PUBLIC_MAP_ATTRIBUTION: © OpenStreetMap contributors
+        run: |
+          set -euo pipefail
+          docker build             --build-arg NEXT_PUBLIC_SUPABASE_URL             --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY             --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY             --build-arg NEXT_PUBLIC_SITE_URL="${SITE_URL}"             --build-arg NEXT_PUBLIC_MAP_TILE_URL             --build-arg NEXT_PUBLIC_MAP_ATTRIBUTION             --build-arg GIT_SHA="${GITHUB_SHA}"             --label org.opencontainers.image.revision="${GITHUB_SHA}"             --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"             -t "${IMAGE_NAME}:${GITHUB_SHA}"             .
+
+          docker save "${IMAGE_NAME}:${GITHUB_SHA}" | gzip -1 > /tmp/mercy-image.tar.gz
+          test -s /tmp/mercy-image.tar.gz
+
+      - name: Prepare candidate runtime environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          {
+            printf 'NODE_ENV=production\n'
+            printf 'GIT_SHA=%s\n' "${GITHUB_SHA}"
+            printf 'NEXT_PUBLIC_SITE_URL=%s\n' "${SITE_URL}"
+            printf 'NEXT_PUBLIC_SUPABASE_URL=%s\n' "${NEXT_PUBLIC_SUPABASE_URL}"
+            printf 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=%s\n' "${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}"
+            printf 'NEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n' "${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}"
+            printf 'RESEND_API_KEY=%s\n' "${RESEND_API_KEY}"
+            printf 'RESEND_FROM_EMAIL=%s\n' "${RESEND_FROM_EMAIL}"
+            printf 'FEEDBACK_TO_EMAIL=%s\n' "${FEEDBACK_TO_EMAIL}"
+          } > /tmp/mercy.env
+
+      - name: Prepare transactional remote deployment script
+        shell: bash
+        run: |
+          cat > /tmp/deploy-mercy.sh <<'REMOTE_SCRIPT'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          IMAGE_NAME="${1:?image name required}"
+          IMAGE_TAG="${2:?image tag required}"
+          REMOTE_DIR="${3:?remote dir required}"
+          CONTAINER_NAME="${4:?container name required}"
+          RUSSIAN_HOST="${5:?Russian redirect host required}"
+
+          IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
+          IMAGE_ARCHIVE="${REMOTE_DIR}/mercy-image.tar.gz"
+          NEXT_ENV="${REMOTE_DIR}/.env.next"
+          PROD_ENV="${REMOTE_DIR}/.env.production"
+          PREVIOUS_ENV="${REMOTE_DIR}/.env.previous"
+          CURRENT_IMAGE_FILE="${REMOTE_DIR}/current-image"
+          PREVIOUS_IMAGE_FILE="${REMOTE_DIR}/previous-image"
+
+          start_container() {
+            local image="${1:?image required}"
+            local env_file="${2:?env file required}"
+            docker run -d               --name "${CONTAINER_NAME}"               --restart unless-stopped               --read-only               --tmpfs /tmp:rw,noexec,nosuid,size=64m               --env-file "${env_file}"               -p 127.0.0.1:3100:3000               "${image}" >/dev/null
+          }
+
+          old_image=""
+          if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+            old_image="$(docker inspect -f '{{.Config.Image}}' "${CONTAINER_NAME}")"
+          elif [ -s "${CURRENT_IMAGE_FILE}" ]; then
+            old_image="$(cat "${CURRENT_IMAGE_FILE}")"
+          fi
+
+          armed=0
+          phase="candidate"
+
+          rollback() {
+            set +e
+            trap - EXIT HUP INT TERM
+            echo "Deployment interrupted or failed; rolling back REG.RU candidate." >&2
+            docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+
+            rollback_env="${PROD_ENV}"
+            if [ "${phase}" != "candidate" ] && [ -s "${PREVIOUS_ENV}" ]; then
+              rollback_env="${PREVIOUS_ENV}"
+              cp -f "${PREVIOUS_ENV}" "${PROD_ENV}" || true
+              chmod 600 "${PROD_ENV}" || true
+            fi
+
+            if [ -n "${old_image}" ] && [ -s "${rollback_env}" ]; then
+              start_container "${old_image}" "${rollback_env}" || true
+            fi
+
+            rm -f "${NEXT_ENV}" "${IMAGE_ARCHIVE}"
+            if [ "${IMAGE}" != "${old_image}" ]; then
+              docker image rm "${IMAGE}" >/dev/null 2>&1 || true
+            fi
+          }
+
+          on_exit() {
+            code=$?
+            if [ "${code}" -ne 0 ] && [ "${armed}" -eq 1 ]; then
+              rollback
+            fi
+            exit "${code}"
+          }
+
+          trap on_exit EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          cd "${REMOTE_DIR}"
+          test -s "${IMAGE_ARCHIVE}"
+          test -s "${NEXT_ENV}"
+          if [ -n "${old_image}" ]; then
+            test -s "${PROD_ENV}"
+          fi
+
+          gzip -dc "${IMAGE_ARCHIVE}" | docker load >/dev/null
+
+          # Arm rollback before the first destructive production-host action.
+          armed=1
+          if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker rm -f "${CONTAINER_NAME}" >/dev/null
+          fi
+
+          start_container "${IMAGE}" "${NEXT_ENV}"
+
+          healthy=false
+          for _ in $(seq 1 45); do
+            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER_NAME}")"
+            if [ "${status}" = "healthy" ]; then
+              healthy=true
+              break
+            fi
+            if [ "${status}" = "unhealthy" ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${healthy}" != "true" ]; then
+            docker logs --tail=120 "${CONTAINER_NAME}" >&2 || true
+            false
+          fi
+
+          local_release="$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3100/health)"
+          printf '%s' "${local_release}" | grep -F '"status":"ok"' >/dev/null
+          printf '%s' "${local_release}" | grep -F "\"version\":\"${IMAGE_TAG}\"" >/dev/null
+
+          curl --fail --silent --show-error --max-time 10             http://127.0.0.1:3100/health/data >/dev/null
+
+          redirect_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             -H "Host: ${RUSSIAN_HOST}"             'http://127.0.0.1:3100/requests?cutover_probe=1')"
+          printf '%s\n' "${redirect_headers}" | head -n 1 | grep -E ' 308 ' >/dev/null
+          redirect_location="$(printf '%s\n' "${redirect_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
+          test "${redirect_location}" = 'https://mercy.peerivo.net/requests?cutover_probe=1'
+
+          if [ -n "${old_image}" ]; then
+            cp -f "${PROD_ENV}" "${PREVIOUS_ENV}"
+            chmod 600 "${PREVIOUS_ENV}"
+            printf '%s\n' "${old_image}" > "${PREVIOUS_IMAGE_FILE}"
+          else
+            rm -f "${PREVIOUS_ENV}" "${PREVIOUS_IMAGE_FILE}"
+          fi
+
+          phase="promoting"
+          mv -f "${NEXT_ENV}" "${PROD_ENV}"
+          chmod 600 "${PROD_ENV}"
+          printf '%s\n' "${IMAGE}" > "${CURRENT_IMAGE_FILE}"
+
+          phase="promoted"
+          armed=0
+          trap - EXIT HUP INT TERM
+          rm -f "${IMAGE_ARCHIVE}"
+
+          while IFS= read -r tag; do
+            [ -n "${tag}" ] || continue
+            if [ "${tag}" = "${IMAGE}" ] || [ "${tag}" = "${old_image}" ]; then
+              continue
+            fi
+            docker image rm "${tag}" >/dev/null 2>&1 || true
+          done < <(docker image ls "${IMAGE_NAME}" --format '{{.Repository}}:{{.Tag}}')
+
+          echo "REG_RU_CANDIDATE_READY sha=${IMAGE_TAG}"
+          REMOTE_SCRIPT
+          chmod 700 /tmp/deploy-mercy.sh
+
+      - name: Configure pinned SSH trust
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${REG_RU_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${REG_RU_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${REG_RU_USER}@${REG_RU_HOST}" true
+
+      - name: Upload immutable candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh "${remote}" "mkdir -p '${REMOTE_DIR}' && chmod 700 '${REMOTE_DIR}'"
+          scp -q /tmp/mercy-image.tar.gz "${remote}:${REMOTE_DIR}/mercy-image.tar.gz"
+          scp -q /tmp/mercy.env "${remote}:${REMOTE_DIR}/.env.next"
+          scp -q /tmp/deploy-mercy.sh "${remote}:${REMOTE_DIR}/deploy-mercy.sh"
+
+      - name: Stage REG.RU candidate with rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh "${remote}"             "chmod 700 '${REMOTE_DIR}/deploy-mercy.sh' && '${REMOTE_DIR}/deploy-mercy.sh' '${IMAGE_NAME}' '${GITHUB_SHA}' '${REMOTE_DIR}' '${CONTAINER_NAME}' '${RUSSIAN_HOST}'"
+
+      - name: Remove sensitive runner files
+        if: always()
+        shell: bash
+        run: |
+          rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts /tmp/mercy.env /tmp/deploy-mercy.sh /tmp/mercy-image.tar.gz
+
+  verify:
+    if: ${{ inputs.operation == 'VERIFY' && inputs.confirm == 'VERIFY' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Require exact live main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.expected_sha }}" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          test "${{ inputs.expected_sha }}" = "${GITHUB_SHA}" || {
+            echo "::error::VERIFY must target the same current main revision prepared for REG.RU"
+            exit 1
+          }
+
+      - name: Verify canonical production site and data path
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="$(curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health")"
+          printf '%s' "${release}" | jq -e --arg sha "${GITHUB_SHA}"             '.status == "ok" and .environment == "production" and .version == $sha' >/dev/null
+
+          data="$(curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health/data")"
+          printf '%s' "${data}" | jq -e '.status == "ok"' >/dev/null
+
+      - name: Verify Russian hostname permanently redirects to canonical site
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe="https://${RUSSIAN_HOST}/requests?cutover_probe=1"
+          code="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' "${probe}")"
+          test "${code}" = "308" || {
+            echo "::error::Russian hostname did not return HTTP 308"
+            exit 1
+          }
+          location="$(curl --silent --show-error --max-time 20 --dump-header - --output /dev/null "${probe}"             | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
+          test "${location}" = 'https://mercy.peerivo.net/requests?cutover_probe=1' || {
+            echo "::error::Russian hostname redirect target/path/query is wrong"
+            exit 1
+          }
+
+      - name: Verify Beget API with configured public key
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${NEXT_PUBLIC_SUPABASE_URL}" = "${EXPECTED_SUPABASE_URL}"
+          client_key="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}}"
+          test -n "${client_key}"
+          curl --fail --silent --show-error --max-time 10             -H "apikey: ${client_key}"             "${EXPECTED_SUPABASE_URL}/auth/v1/health" >/dev/null
+          unset client_key
+          echo "REG_RU_PUBLIC_CUTOVER_VERIFIED sha=${GITHUB_SHA}"
