@@ -54,7 +54,7 @@ function runScenario(scenario: string) {
       "    ;;",
       "esac",
       "",
-    ].join("\\n"),
+    ].join("\n"),
     "utf8",
   );
   fs.chmodSync(fakeCurl, 0o755);
