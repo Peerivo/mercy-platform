@@ -286,24 +286,25 @@ jobs:
             args+=(-f "${scratch_override}")
 
             "${args[@]}" config -q
-            local rendered compact
-            rendered="$("${args[@]}" config --format json)"
-            compact="$(printf '%s' "${rendered}" | tr -d '[:space:]')"
+
+            # Instantiate only a disposable one-off Auth container with a shell
+            # entrypoint and print exactly the four non-secret URL variables.
+            # This proves the merged service environment that the real Auth
+            # recreate will receive, without starting GoTrue or any dependency.
+            local rendered
+            rendered="$("${args[@]}" run --rm --no-deps -T --entrypoint /bin/sh auth -c \
+              'printf "%s\\n" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"')"
+            mapfile -t rendered_auth <<< "${rendered}"
             unset rendered
 
-            for expected in \
-              "\"API_EXTERNAL_URL\":\"${target_api}\"" \
-              "\"GOTRUE_SITE_URL\":\"${target_site}\"" \
-              "\"GOTRUE_URI_ALLOW_LIST\":\"${target_redirect}\"" \
-              "\"GOTRUE_JWT_ISSUER\":\"${target_api}\""
-            do
-              printf '%s' "${compact}" | grep -F "${expected}" >/dev/null || {
-                echo "Rendered Auth Compose configuration is not canonical; refusing host mutation." >&2
-                unset compact
-                return 1
-              }
-            done
-            unset compact
+            [[ "${#rendered_auth[@]}" -eq 4 \
+              && "${rendered_auth[0]}" == "${target_api}" \
+              && "${rendered_auth[1]}" == "${target_site}" \
+              && "${rendered_auth[2]}" == "${target_redirect}" \
+              && "${rendered_auth[3]}" == "${target_api}" ]] || {
+              echo "Rendered Auth Compose configuration is not canonical; refusing host mutation." >&2
+              return 1
+            }
           }
 
           auth_env_hash() {
