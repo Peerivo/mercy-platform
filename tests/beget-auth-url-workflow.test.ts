@@ -40,6 +40,14 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(workflow).not.toContain("PGRST_JWT_SECRET");
   });
 
+  it("handles root-owned Compose files without sudo or permission widening", () => {
+    expect(workflow).toContain("docker_read_host_file");
+    expect(workflow).toContain("docker_write_host_file");
+    expect(workflow).toContain("--project-directory");
+    expect(workflow).not.toContain("sudo -n");
+    expect(workflow).not.toMatch(/chmod\\s+(?:[0-7]*[2367]|[^\\n]*[+][^\\n]*w)[^\\n]*\\$\\{env_file\\}/);
+  });
+
   it("pins checkout and verifies public Auth health and the canonical callback", () => {
     expect(workflow).toContain(
       "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
