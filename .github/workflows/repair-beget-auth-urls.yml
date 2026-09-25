@@ -234,14 +234,10 @@ jobs:
           set_env_line() {
             local key="$1"
             local value="$2"
-            if privileged grep -q "^${key}=" "${env_file}"; then
-              privileged sed -i "s|^${key}=.*|${key}=${value}|" "${env_file}"
+            if grep -q "^${key}=" "${scratch_env}"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "${scratch_env}"
             else
-              if [[ "${use_sudo}" == "1" ]]; then
-                printf '%s=%s\n' "${key}" "${value}" | sudo -n tee -a "${env_file}" >/dev/null
-              else
-                printf '%s=%s\n' "${key}" "${value}" >> "${env_file}"
-              fi
+              printf '%s=%s\n' "${key}" "${value}" >> "${scratch_env}"
             fi
           }
 
