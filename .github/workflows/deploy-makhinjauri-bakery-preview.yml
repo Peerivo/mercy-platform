@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BAKERY_SHA: 4b55a9222e84a6dd93f1315cd8e2f2a041a542de
+  BAKERY_SHA: b8fd4e0934ae5272656416fa3f00bd66f2884b1f
   REMOTE_DIR: /opt/peerivo/makhinjauri-bakery-preview
   CONTAINER_NAME: makhinjauri-bakery-preview
   PORT: "3200"
