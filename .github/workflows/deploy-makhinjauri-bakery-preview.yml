@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BAKERY_SHA: 53e9f1b52619d966e5215ea6d5b2135297d7d6f0
+  BAKERY_SHA: 4b55a9222e84a6dd93f1315cd8e2f2a041a542de
   REMOTE_DIR: /opt/peerivo/makhinjauri-bakery-preview
   CONTAINER_NAME: makhinjauri-bakery-preview
   PORT: "3200"
@@ -53,7 +53,9 @@ jobs:
           test -f /tmp/bakery-site/index.html
           test -f /tmp/bakery-site/assets/hero-bakery.webp
           test -f /tmp/bakery-site/assets/cafe-interior.webp
-          test -f /tmp/bakery-site/assets/menu-sprite.webp
+          test -f /tmp/bakery-site/assets/menu/cake-custom.webp
+          test -f /tmp/bakery-site/assets/menu/pizza-classic.webp
+          test -f /tmp/bakery-site/assets/menu/burger-classic.webp
           tar -czf /tmp/bakery-site.tar.gz -C /tmp/bakery-site .
           test -s /tmp/bakery-site.tar.gz
 
