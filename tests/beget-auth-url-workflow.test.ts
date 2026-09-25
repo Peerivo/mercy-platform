@@ -70,13 +70,13 @@ describe("Repair Beget Auth URLs workflow", () => {
   });
 
   it("uses a final Auth-only override and proves its rendered environment before host mutation", () => {
-    expect(workflow).toContain('scratch_override="${scratch}/auth-url-override.yml"');
+    expect(remoteScript).toContain('scratch_override="${scratch}/auth-url-override.yml"');
     expect(remoteScript).toContain("GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}");
     expect(remoteScript).toContain("set_env_line GOTRUE_JWT_ISSUER");
     expect(remoteScript).toContain("validate_rendered_auth");
     expect(remoteScript).toContain("run --rm --no-deps -T --entrypoint /bin/sh auth");
-    expect(workflow).toContain('"${rendered_auth[0]}" == "${target_api}"');
-    expect(workflow).toContain('"${rendered_auth[3]}" == "${target_api}"');
+    expect(remoteScript).toContain('"${rendered_auth[0]}" == "${target_api}"');
+    expect(remoteScript).toContain('"${rendered_auth[3]}" == "${target_api}"');
     expect(remoteScript).toContain("Rendered Auth Compose configuration is not canonical");
     expect(remoteScript).toContain("compose_auth_up 1");
     expect(remoteScript).toContain("compose_auth_up 0");
@@ -90,8 +90,8 @@ describe("Repair Beget Auth URLs workflow", () => {
   });
 
   it("recovers from stale temporary Compose labels by rediscovering the canonical working-directory files", () => {
-    expect(workflow).toContain('case "${env_file}" in');
-    expect(workflow).toContain('*) env_file="${working_dir}/.env"');
+    expect(remoteScript).toContain('case "${env_file}" in');
+    expect(remoteScript).toContain('*) env_file="${working_dir}/.env"');
     expect(remoteScript).toContain("docker-compose.yml docker-compose.yaml compose.yml compose.yaml");
     expect(remoteScript).toContain("Cannot rediscover a canonical Compose base file under the working directory.");
   });
