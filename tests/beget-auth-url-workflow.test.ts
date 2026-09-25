@@ -50,12 +50,14 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(workflow).not.toMatch(/chmod\\s+(?:[0-7]*[2367]|[^\\n]*[+][^\\n]*w)[^\\n]*\\$\\{env_file\\}/);
   });
 
-  it("migrates only the known legacy JWT issuer wiring and rolls it back with the env file", () => {
-    expect(workflow).toContain("GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}/auth/v1");
-    expect(workflow).toContain("GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}");
-    expect(workflow).toContain("Expected exactly one supported GOTRUE_JWT_ISSUER mapping.");
+  it("normalizes all supported JWT issuer declarations in one pass and rolls them back", () => {
+    expect(workflow).toContain("issuer_config_touched=()");
+    expect(workflow).toContain("GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}");
+    expect(workflow).toContain("GOTRUE_JWT_ISSUER=${GOTRUE_JWT_ISSUER}");
+    expect(workflow).toContain("set_env_line GOTRUE_JWT_ISSUER");
+    expect(workflow).toContain("config -q");
     expect(workflow).toContain("scratch_config_backups");
-    expect(workflow).toContain("issuer_legacy");
+    expect(workflow).not.toContain("Expected exactly one supported GOTRUE_JWT_ISSUER mapping.");
   });
 
   it("pins checkout and verifies public Auth health and the canonical callback", () => {
