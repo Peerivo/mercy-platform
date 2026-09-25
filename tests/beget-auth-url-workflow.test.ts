@@ -50,15 +50,31 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(workflow).not.toMatch(/chmod\\s+(?:[0-7]*[2367]|[^\\n]*[+][^\\n]*w)[^\\n]*\\$\\{env_file\\}/);
   });
 
-  it("normalizes issuer derivation across all Compose files in one pass and rolls back every touched file", () => {
-    expect(workflow).toContain("issuer_config_touched=()");
-    expect(workflow).toContain("s|${API_EXTERNAL_URL}/auth/v1|${API_EXTERNAL_URL}|g");
-    expect(workflow).toContain("s|$API_EXTERNAL_URL/auth/v1|$API_EXTERNAL_URL|g");
+  it("uses a final Auth-only override and proves its rendered environment before host mutation", () => {
+    expect(workflow).toContain('scratch_override="${scratch}/auth-url-override.yml"');
+    expect(workflow).toContain("GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}");
     expect(workflow).toContain("set_env_line GOTRUE_JWT_ISSUER");
-    expect(workflow).toContain("config -q");
-    expect(workflow).toContain("scratch_config_backups");
-    expect(workflow).toContain('for index in "${issuer_config_touched[@]}"');
-    expect(workflow).not.toContain("Expected exactly one supported GOTRUE_JWT_ISSUER mapping.");
+    expect(workflow).toContain("validate_rendered_auth");
+    expect(workflow).toContain("run --rm --no-deps -T --entrypoint /bin/sh auth");
+    expect(workflow).toContain('"${rendered_auth[0]}" == "${target_api}"');
+    expect(workflow).toContain('"${rendered_auth[3]}" == "${target_api}"');
+    expect(workflow).toContain("Rendered Auth Compose configuration is not canonical");
+    expect(workflow).toContain("compose_auth_up 1");
+    expect(workflow).toContain("compose_auth_up 0");
+    expect(workflow).not.toContain("issuer_config_touched");
+    expect(workflow).not.toContain("scratch_config_backups");
+
+    const preflight = workflow.indexOf("validate_rendered_auth\n");
+    const hostWrite = workflow.indexOf('docker_write_host_file "${scratch_env}" "${env_file}"', preflight);
+    expect(preflight).toBeGreaterThan(-1);
+    expect(hostWrite).toBeGreaterThan(preflight);
+  });
+
+  it("recovers from stale temporary Compose labels by rediscovering the canonical working-directory files", () => {
+    expect(workflow).toContain('case "${env_file}" in');
+    expect(workflow).toContain('*) env_file="${working_dir}/.env"');
+    expect(workflow).toContain("docker-compose.yml docker-compose.yaml compose.yml compose.yaml");
+    expect(workflow).toContain("Cannot rediscover a canonical Compose base file under the working directory.");
   });
 
   it("pins checkout and verifies public Auth health and the canonical callback", () => {

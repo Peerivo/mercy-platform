@@ -144,43 +144,21 @@ jobs:
           working_dir="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "${auth_before}")"
           config_files_raw="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${auth_before}")"
           env_file_raw="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.environment_file" }}' "${auth_before}")"
-          [[ "${env_file_raw}" != "<no value>" ]] || env_file_raw=""
 
-          [[ "${working_dir}" == /* && -n "${config_files_raw}" && "${config_files_raw}" != "<no value>" ]] || {
-            echo "Compose project metadata is incomplete; refusing to mutate Auth." >&2
-            exit 1
-          }
-
-          if [[ -n "${env_file_raw}" ]]; then
-            env_file="${env_file_raw}"
-            [[ "${env_file}" == /* ]] || env_file="${working_dir}/${env_file}"
-          else
-            env_file="${working_dir}/.env"
-          fi
-
-          IFS=',' read -r -a raw_config_files <<< "${config_files_raw}"
-          config_files=()
-          for raw in "${raw_config_files[@]}"; do
-            file="${raw#"${raw%%[![:space:]]*}"}"
-            file="${file%"${file##*[![:space:]]}"}"
-            [[ -n "${file}" ]] || continue
-            [[ "${file}" == /* ]] || file="${working_dir}/${file}"
-            config_files+=("${file}")
-          done
-          [[ "${#config_files[@]}" -gt 0 ]] || {
-            echo "No Compose config files resolved." >&2
+          [[ "${working_dir}" == /* ]] || {
+            echo "Compose working directory metadata is invalid." >&2
             exit 1
           }
 
           # The deployment account intentionally has Docker access but no passwordless
-          # sudo. Root-owned Compose files are therefore materialized through the
-          # already-running Auth image instead of widening host filesystem permissions.
+          # sudo. Root-owned Compose files are materialized through a short-lived
+          # root helper container without widening host filesystem permissions.
           helper_image="$(docker inspect -f '{{.Config.Image}}' "${auth_before}")"
           scratch="$(mktemp -d /tmp/mercy-auth-url-repair.XXXXXXXX)"
           chmod 700 "${scratch}"
           scratch_env="${scratch}/env"
           scratch_configs=()
-          scratch_config_backups=()
+          scratch_override="${scratch}/auth-url-override.yml"
 
           docker_read_host_file() {
             local source="$1"
@@ -199,36 +177,86 @@ jobs:
               -c 'cat > /mercy-target' < "${source}"
           }
 
+          workdir_file_exists() {
+            local rel="$1"
+            docker run --rm --user 0:0 --entrypoint /bin/sh \
+              -v "${working_dir}:/mercy-workdir:ro" "${helper_image}" \
+              -c 'test -f "/mercy-workdir/$1"' sh "${rel}"
+          }
+
+          # Recreated Auth containers from earlier failed attempts can carry temporary
+          # config-file labels. Trust labels only when they still point inside the
+          # canonical Compose working directory; otherwise rediscover the standard
+          # root-owned Supabase Compose files from that directory.
+          env_file=""
+          if [[ -n "${env_file_raw}" && "${env_file_raw}" != "<no value>" ]]; then
+            env_file="${env_file_raw}"
+            [[ "${env_file}" == /* ]] || env_file="${working_dir}/${env_file}"
+          fi
+          case "${env_file}" in
+            "${working_dir}"/*) ;;
+            *) env_file="${working_dir}/.env" ;;
+          esac
+
+          config_files=()
+          labels_trusted=1
+          if [[ -z "${config_files_raw}" || "${config_files_raw}" == "<no value>" ]]; then
+            labels_trusted=0
+          else
+            IFS=',' read -r -a raw_config_files <<< "${config_files_raw}"
+            for raw in "${raw_config_files[@]}"; do
+              file="${raw#"${raw%%[![:space:]]*}"}"
+              file="${file%"${file##*[![:space:]]}"}"
+              [[ -n "${file}" ]] || continue
+              [[ "${file}" == /* ]] || file="${working_dir}/${file}"
+              case "${file}" in
+                "${working_dir}"/*) config_files+=("${file}") ;;
+                *) labels_trusted=0 ;;
+              esac
+            done
+          fi
+
+          if [[ "${labels_trusted}" != "1" || "${#config_files[@]}" -eq 0 ]]; then
+            config_files=()
+            base_rel=""
+            for candidate in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+              if workdir_file_exists "${candidate}"; then
+                base_rel="${candidate}"
+                break
+              fi
+            done
+            [[ -n "${base_rel}" ]] || {
+              echo "Cannot rediscover a canonical Compose base file under the working directory." >&2
+              exit 1
+            }
+            config_files+=("${working_dir}/${base_rel}")
+            for candidate in docker-compose.override.yml docker-compose.override.yaml compose.override.yml compose.override.yaml; do
+              if workdir_file_exists "${candidate}"; then
+                config_files+=("${working_dir}/${candidate}")
+              fi
+            done
+          fi
+
           docker_read_host_file "${env_file}" "${scratch_env}"
           for index in "${!config_files[@]}"; do
             copy="${scratch}/compose-${index}.yml"
-            backup_copy="${scratch}/compose-${index}.backup.yml"
             docker_read_host_file "${config_files[${index}]}" "${copy}"
-            cp -p "${copy}" "${backup_copy}"
             scratch_configs+=("${copy}")
-            scratch_config_backups+=("${backup_copy}")
           done
 
-          # Normalize every Compose file that still derives the issuer by
-          # appending /auth/v1 to API_EXTERNAL_URL. Formatting and file count may vary.
-          issuer_config_touched=()
-          for index in "${!scratch_configs[@]}"; do
-            before_hash="$(sha256sum "${scratch_configs[${index}]}" | awk '{print $1}')"
-            sed -i '/GOTRUE_JWT_ISSUER/ {
-              s|${API_EXTERNAL_URL}/auth/v1|${API_EXTERNAL_URL}|g
-              s|$API_EXTERNAL_URL/auth/v1|$API_EXTERNAL_URL|g
-            }' "${scratch_configs[${index}]}"
-            after_hash="$(sha256sum "${scratch_configs[${index}]}" | awk '{print $1}')"
-            if [[ "${after_hash}" != "${before_hash}" ]]; then
-              issuer_config_touched+=("${index}")
-            fi
-          done
-
-          privileged() {
-            "$@"
-          }
+          cat > "${scratch_override}" <<'OVERRIDE'
+          services:
+            auth:
+              environment:
+                API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+                GOTRUE_SITE_URL: ${SITE_URL}
+                GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+                GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}
+          OVERRIDE
+          chmod 600 "${scratch_override}"
 
           compose_auth_up() {
+            local use_override="${1:-1}"
             local args=(
               docker compose
               --project-name "${project}"
@@ -238,8 +266,45 @@ jobs:
             for file in "${scratch_configs[@]}"; do
               args+=(-f "${file}")
             done
+            if [[ "${use_override}" == "1" ]]; then
+              args+=(-f "${scratch_override}")
+            fi
             args+=(up -d --no-deps --force-recreate auth)
             "${args[@]}"
+          }
+
+          validate_rendered_auth() {
+            local args=(
+              docker compose
+              --project-name "${project}"
+              --project-directory "${working_dir}"
+              --env-file "${scratch_env}"
+            )
+            for file in "${scratch_configs[@]}"; do
+              args+=(-f "${file}")
+            done
+            args+=(-f "${scratch_override}")
+
+            "${args[@]}" config -q
+
+            # Instantiate only a disposable one-off Auth container with a shell
+            # entrypoint and print exactly the four non-secret URL variables.
+            # This proves the merged service environment that the real Auth
+            # recreate will receive, without starting GoTrue or any dependency.
+            local rendered
+            rendered="$("${args[@]}" run --rm --no-deps -T --entrypoint /bin/sh auth -c \
+              'printf "%s\\n" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"')"
+            mapfile -t rendered_auth <<< "${rendered}"
+            unset rendered
+
+            [[ "${#rendered_auth[@]}" -eq 4 \
+              && "${rendered_auth[0]}" == "${target_api}" \
+              && "${rendered_auth[1]}" == "${target_site}" \
+              && "${rendered_auth[2]}" == "${target_redirect}" \
+              && "${rendered_auth[3]}" == "${target_api}" ]] || {
+              echo "Rendered Auth Compose configuration is not canonical; refusing host mutation." >&2
+              return 1
+            }
           }
 
           auth_env_hash() {
@@ -275,8 +340,7 @@ jobs:
           if [[ "${site_before}" == "${target_site}" \
              && "${allow_before}" == "${target_redirect}" \
              && "${api_before}" == "${target_api}" \
-             && "${issuer_before}" == "${target_api}" \
-             && "${#issuer_config_touched[@]}" -eq 0 ]]; then
+             && "${issuer_before}" == "${target_api}" ]]; then
             echo "Auth URL configuration is already canonical."
             echo "AUTH_URL_REPAIR_ALREADY_OK=1"
             exit 0
@@ -293,11 +357,7 @@ jobs:
             set +e
             cp -p "${backup}" "${scratch_env}"
             docker_write_host_file "${scratch_env}" "${env_file}"
-            for index in "${issuer_config_touched[@]}"; do
-              cp -p "${scratch_config_backups[${index}]}" "${scratch_configs[${index}]}"
-              docker_write_host_file "${scratch_configs[${index}]}" "${config_files[${index}]}"
-            done
-            if compose_auth_up >/dev/null 2>&1; then
+            if compose_auth_up 0 >/dev/null 2>&1; then
               sleep 3
               restored="$(get_service_id auth 2>/dev/null)"
               if [[ -n "${restored}" \
@@ -335,23 +395,11 @@ jobs:
           set_env_line API_EXTERNAL_URL "${target_api}"
           set_env_line GOTRUE_JWT_ISSUER "${target_api}"
 
-          validate_args=(
-            docker compose
-            --project-name "${project}"
-            --project-directory "${working_dir}"
-            --env-file "${scratch_env}"
-          )
-          for file in "${scratch_configs[@]}"; do
-            validate_args+=(-f "${file}")
-          done
-          "${validate_args[@]}" config -q
+          # Prove the exact rendered Auth environment before changing any host file.
+          validate_rendered_auth
 
           docker_write_host_file "${scratch_env}" "${env_file}"
-          for index in "${issuer_config_touched[@]}"; do
-            docker_write_host_file "${scratch_configs[${index}]}" "${config_files[${index}]}"
-          done
-
-          compose_auth_up
+          compose_auth_up 1
 
           auth_after=""
           for _ in $(seq 1 30); do
