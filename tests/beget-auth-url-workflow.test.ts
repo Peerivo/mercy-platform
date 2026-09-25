@@ -124,8 +124,8 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(workflow).toContain("/auth/v1/settings");
     expect(workflow).toContain("${TARGET_SITE_URL}/auth/callback");
     expect(workflow).toContain(
-      '"${TARGET_SITE_URL}/auth?error=callback"*|"/auth?error=callback"*',
+      'bash scripts/verify-auth-callback-surface.sh "${TARGET_SITE_URL}"',
     );
-    expect(workflow).toContain("AUTH_MAGIC_LINK_REDIRECT_CONFIGURATION_VERIFIED=1");
+    expect(workflow).not.toContain('case "${location}" in');
   });
 });
