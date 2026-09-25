@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authLoginNotice } from "@/lib/auth-login-notice";
+import { authLoginNotice } from "../lib/auth-login-notice";
 
 describe("authLoginNotice", () => {
   it("treats the email-send rate limit as a recently sent link, not a delivery failure", () => {
