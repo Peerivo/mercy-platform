@@ -133,7 +133,7 @@ jobs:
               | awk 'tolower($1)=="location:" {print $2; exit}'
           )"
           case "${location}" in
-            "${TARGET_SITE_URL}/auth?error=callback"*) ;;
+            "${TARGET_SITE_URL}/auth?error=callback"*|"/auth?error=callback"*) ;;
             *)
               echo "::error::Public Auth callback did not stay on canonical Mercy origin"
               exit 1
