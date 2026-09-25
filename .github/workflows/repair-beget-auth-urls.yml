@@ -339,8 +339,7 @@ OVERRIDE
           if [[ "${site_before}" == "${target_site}" \
              && "${allow_before}" == "${target_redirect}" \
              && "${api_before}" == "${target_api}" \
-             && "${issuer_before}" == "${target_api}" \
-             && "${#issuer_config_touched[@]}" -eq 0 ]]; then
+             && "${issuer_before}" == "${target_api}" ]]; then
             echo "Auth URL configuration is already canonical."
             echo "AUTH_URL_REPAIR_ALREADY_OK=1"
             exit 0
@@ -357,11 +356,7 @@ OVERRIDE
             set +e
             cp -p "${backup}" "${scratch_env}"
             docker_write_host_file "${scratch_env}" "${env_file}"
-            for index in "${issuer_config_touched[@]}"; do
-              cp -p "${scratch_config_backups[${index}]}" "${scratch_configs[${index}]}"
-              docker_write_host_file "${scratch_configs[${index}]}" "${config_files[${index}]}"
-            done
-            if compose_auth_up >/dev/null 2>&1; then
+            if compose_auth_up 0 >/dev/null 2>&1; then
               sleep 3
               restored="$(get_service_id auth 2>/dev/null)"
               if [[ -n "${restored}" \
@@ -399,23 +394,11 @@ OVERRIDE
           set_env_line API_EXTERNAL_URL "${target_api}"
           set_env_line GOTRUE_JWT_ISSUER "${target_api}"
 
-          validate_args=(
-            docker compose
-            --project-name "${project}"
-            --project-directory "${working_dir}"
-            --env-file "${scratch_env}"
-          )
-          for file in "${scratch_configs[@]}"; do
-            validate_args+=(-f "${file}")
-          done
-          "${validate_args[@]}" config -q
+          # Prove the exact rendered Auth environment before changing any host file.
+          validate_rendered_auth
 
           docker_write_host_file "${scratch_env}" "${env_file}"
-          for index in "${issuer_config_touched[@]}"; do
-            docker_write_host_file "${scratch_configs[${index}]}" "${config_files[${index}]}"
-          done
-
-          compose_auth_up
+          compose_auth_up 1
 
           auth_after=""
           for _ in $(seq 1 30); do
