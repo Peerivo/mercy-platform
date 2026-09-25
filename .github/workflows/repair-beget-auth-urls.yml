@@ -209,20 +209,21 @@ jobs:
             scratch_config_backups+=("${backup_copy}")
           done
 
-          # Normalize every supported Auth issuer declaration instead of assuming
-          # there is exactly one Compose file or one legacy formatting style.
-          # The canonical value itself lives in the protected env file.
+          # Normalize every Compose file that still derives the issuer by
+          # appending /auth/v1 to API_EXTERNAL_URL. Formatting and file count may vary.
           issuer_config_touched=()
           for index in "${!scratch_configs[@]}"; do
             before_hash="$(sha256sum "${scratch_configs[${index}]}" | awk '{print $1}')"
+            sed -i '/GOTRUE_JWT_ISSUER/ {
+              s|${API_EXTERNAL_URL}/auth/v1|${API_EXTERNAL_URL}|g
+              s|$API_EXTERNAL_URL/auth/v1|$API_EXTERNAL_URL|g
+            }' "${scratch_configs[${index}]}"
+            after_hash="$(sha256sum "${scratch_configs[${index}]}" | awk '{print $1}')"
+            if [[ "${after_hash}" != "${before_hash}" ]]; then
+              issuer_config_touched+=("${index}")
+            fi
+          done
 
-            sed -E -i \
-              -e 's|^([[:space:]]*)GOTRUE_JWT_ISSUER[[:space:]]*:.*$|\\1GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}|' \
-              -e 's|^([[:space:]]*-[[:space:]]*)GOTRUE_JWT_ISSUER=.*$|\\1GOTRUE_JWT_ISSUER=${GOTRUE_JWT_ISSUER}|' \
-              -e 's|^([[:space:]]*-[[:space:]]*)GOTRUE_JWT_ISSUER[[:space:]]*$|\\1GOTRUE_JWT_ISSUER=${GOTRUE_JWT_ISSUER}|' \
-              "${scratch_configs[${index}]}"
-
-            active_issuer_lines="$(grep -Ec '^[[:space:]]*(GOTRUE_JWT_ISSUER:[[:space:]]*\\$\\{GOTRUE_JWT_ISSUER\\}|-[[:space:]]*GOTRUE_JWT_ISSUER=\\$\\{GOTRUE_JWT_ISSUER\\})[[:space:]]*
           privileged() {
             "$@"
           }
@@ -265,7 +266,6 @@ jobs:
           allow_before="$(get_env_value "${auth_before}" GOTRUE_URI_ALLOW_LIST)"
           api_before="$(get_env_value "${auth_before}" API_EXTERNAL_URL)"
           issuer_before="$(get_env_value "${auth_before}" GOTRUE_JWT_ISSUER)"
-          issuer_env_before="$(sed -n 's/^GOTRUE_JWT_ISSUER=//p' "${scratch_env}" | head -n 1)"
 
           declare -A other_before
           for service in db rest realtime storage kong; do
@@ -276,7 +276,6 @@ jobs:
              && "${allow_before}" == "${target_redirect}" \
              && "${api_before}" == "${target_api}" \
              && "${issuer_before}" == "${target_api}" \
-             && "${issuer_env_before}" == "${target_api}" \
              && "${#issuer_config_touched[@]}" -eq 0 ]]; then
             echo "Auth URL configuration is already canonical."
             echo "AUTH_URL_REPAIR_ALREADY_OK=1"
@@ -336,8 +335,6 @@ jobs:
           set_env_line API_EXTERNAL_URL "${target_api}"
           set_env_line GOTRUE_JWT_ISSUER "${target_api}"
 
-          # Fail before touching host files if the normalized Compose set cannot
-          # be rendered with the canonical environment.
           validate_args=(
             docker compose
             --project-name "${project}"
@@ -353,235 +350,6 @@ jobs:
           for index in "${issuer_config_touched[@]}"; do
             docker_write_host_file "${scratch_configs[${index}]}" "${config_files[${index}]}"
           done
-
-          compose_auth_up
-
-          auth_after=""
-          for _ in $(seq 1 30); do
-            auth_after="$(get_service_id auth 2>/dev/null || true)"
-            [[ -n "${auth_after}" ]] || {
-              sleep 2
-              continue
-            }
-            state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${auth_after}")"
-            if [[ "${state}" == "healthy" || "${state}" == "running" ]]; then
-              break
-            fi
-            if [[ "${state}" == "unhealthy" || "${state}" == "exited" || "${state}" == "dead" ]]; then
-              echo "Auth service failed after recreate." >&2
-              exit 1
-            fi
-            sleep 2
-          done
-
-          [[ -n "${auth_after}" && "${auth_after}" != "${auth_before}" ]] || {
-            echo "Auth container was not recreated." >&2
-            exit 1
-          }
-          [[ "$(docker inspect -f '{{.Config.Image}}' "${auth_after}")" == "${image_before}" ]] || {
-            echo "Auth image changed unexpectedly." >&2
-            exit 1
-          }
-          [[ "$(auth_env_hash "${auth_after}")" == "${hash_before}" ]] || {
-            echo "Auth environment changed outside the approved URL variables." >&2
-            exit 1
-          }
-          [[ "$(get_env_value "${auth_after}" GOTRUE_SITE_URL)" == "${target_site}" ]] || {
-            echo "GOTRUE_SITE_URL verification failed." >&2
-            exit 1
-          }
-          [[ "$(get_env_value "${auth_after}" GOTRUE_URI_ALLOW_LIST)" == "${target_redirect}" ]] || {
-            echo "GOTRUE_URI_ALLOW_LIST verification failed." >&2
-            exit 1
-          }
-          [[ "$(get_env_value "${auth_after}" API_EXTERNAL_URL)" == "${target_api}" ]] || {
-            echo "API_EXTERNAL_URL verification failed." >&2
-            exit 1
-          }
-          [[ "$(get_env_value "${auth_after}" GOTRUE_JWT_ISSUER)" == "${target_api}" ]] || {
-            echo "GOTRUE_JWT_ISSUER verification failed." >&2
-            exit 1
-          }
-
-          for service in db rest realtime storage kong; do
-            [[ "$(get_service_id "${service}")" == "${other_before[$service]}" ]] || {
-              echo "Non-Auth service changed unexpectedly: ${service}" >&2
-              exit 1
-            }
-          done
-
-          rm -f "${backup}"
-          rm -rf "${scratch}"
-          trap - EXIT HUP INT TERM
-          echo "AUTH_URL_REPAIR_OK=1"
-          REMOTE
-
-      - name: Verify public Auth health and callback surface
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --max-time 15 \
-            -H "apikey: ${TARGET_PUBLIC_KEY}" \
-            "${TARGET_SUPABASE_URL}/auth/v1/health" >/dev/null
-
-          settings="$(
-            curl --fail --silent --show-error --max-time 15 \
-              -H "apikey: ${TARGET_PUBLIC_KEY}" \
-              "${TARGET_SUPABASE_URL}/auth/v1/settings"
-          )"
-          printf '%s' "${settings}" | jq -e 'type == "object"' >/dev/null
-
-          headers="$(
-            curl --silent --show-error --max-time 15 \
-              --dump-header - --output /dev/null \
-              "${TARGET_SITE_URL}/auth/callback"
-          )"
-          printf '%s\n' "${headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
-          location="$(
-            printf '%s\n' "${headers}" \
-              | tr -d '\r' \
-              | awk 'tolower($1)=="location:" {print $2; exit}'
-          )"
-          case "${location}" in
-            "${TARGET_SITE_URL}/auth?error=callback"*) ;;
-            *)
-              echo "::error::Public Auth callback did not stay on canonical Mercy origin"
-              exit 1
-              ;;
-          esac
-
-          echo "AUTH_MAGIC_LINK_REDIRECT_CONFIGURATION_VERIFIED=1"
-
-      - name: Remove runner SSH material
-        if: always()
-        shell: bash
-        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
- "${scratch_configs[${index}]}" || true)"
-            all_issuer_lines="$(grep -Ec '^[[:space:]]*(-[[:space:]]*)?GOTRUE_JWT_ISSUER([[:space:]]*:|=|[[:space:]]*$)' "${scratch_configs[${index}]}" || true)"
-            [[ "${active_issuer_lines}" == "${all_issuer_lines}" ]] || {
-              echo "Unsupported GOTRUE_JWT_ISSUER declaration remains after normalization." >&2
-              exit 1
-            }
-
-            after_hash="$(sha256sum "${scratch_configs[${index}]}" | awk '{print $1}')"
-            if [[ "${after_hash}" != "${before_hash}" ]]; then
-              issuer_config_touched+=("${index}")
-            fi
-          done
-
-          privileged() {
-            "$@"
-          }
-
-          compose_auth_up() {
-            local args=(
-              docker compose
-              --project-name "${project}"
-              --project-directory "${working_dir}"
-              --env-file "${scratch_env}"
-            )
-            for file in "${scratch_configs[@]}"; do
-              args+=(-f "${file}")
-            done
-            args+=(up -d --no-deps --force-recreate auth)
-            "${args[@]}"
-          }
-
-          auth_env_hash() {
-            docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" \
-              | grep -Ev '^(GOTRUE_SITE_URL|GOTRUE_URI_ALLOW_LIST|API_EXTERNAL_URL|GOTRUE_JWT_ISSUER)=' \
-              | LC_ALL=C sort \
-              | sha256sum \
-              | awk '{print $1}'
-          }
-
-          set_env_line() {
-            local key="$1"
-            local value="$2"
-            if grep -q "^${key}=" "${scratch_env}"; then
-              sed -i "s|^${key}=.*|${key}=${value}|" "${scratch_env}"
-            else
-              printf '%s=%s\n' "${key}" "${value}" >> "${scratch_env}"
-            fi
-          }
-
-          image_before="$(docker inspect -f '{{.Config.Image}}' "${auth_before}")"
-          hash_before="$(auth_env_hash "${auth_before}")"
-          site_before="$(get_env_value "${auth_before}" GOTRUE_SITE_URL)"
-          allow_before="$(get_env_value "${auth_before}" GOTRUE_URI_ALLOW_LIST)"
-          api_before="$(get_env_value "${auth_before}" API_EXTERNAL_URL)"
-          issuer_before="$(get_env_value "${auth_before}" GOTRUE_JWT_ISSUER)"
-
-          declare -A other_before
-          for service in db rest realtime storage kong; do
-            other_before["${service}"]="$(get_service_id "${service}")"
-          done
-
-          if [[ "${site_before}" == "${target_site}" \
-             && "${allow_before}" == "${target_redirect}" \
-             && "${api_before}" == "${target_api}" \
-             && "${issuer_before}" == "${target_api}" \
-             && "${issuer_legacy}" -eq 0 ]]; then
-            echo "Auth URL configuration is already canonical."
-            echo "AUTH_URL_REPAIR_ALREADY_OK=1"
-            exit 0
-          fi
-
-          backup="${scratch}/env.backup"
-          cp -p "${scratch_env}" "${backup}"
-          chmod 600 "${backup}"
-          backup_hash="$(sha256sum "${backup}" | awk '{print $1}')"
-          echo "Auth configuration backup created: sha256=${backup_hash}"
-
-          rollback_ok=0
-          rollback() {
-            set +e
-            cp -p "${backup}" "${scratch_env}"
-            docker_write_host_file "${scratch_env}" "${env_file}"
-            if [[ "${issuer_legacy}" -eq 1 && "${issuer_config_index}" -ge 0 ]]; then
-              cp -p "${scratch_config_backups[${issuer_config_index}]}" "${scratch_configs[${issuer_config_index}]}"
-              docker_write_host_file "${scratch_configs[${issuer_config_index}]}" "${config_files[${issuer_config_index}]}"
-            fi
-            if compose_auth_up >/dev/null 2>&1; then
-              sleep 3
-              restored="$(get_service_id auth 2>/dev/null)"
-              if [[ -n "${restored}" \
-                 && "$(auth_env_hash "${restored}")" == "${hash_before}" \
-                 && "$(get_env_value "${restored}" GOTRUE_SITE_URL)" == "${site_before}" \
-                 && "$(get_env_value "${restored}" GOTRUE_URI_ALLOW_LIST)" == "${allow_before}" \
-                 && "$(get_env_value "${restored}" API_EXTERNAL_URL)" == "${api_before}" \
-                 && "$(get_env_value "${restored}" GOTRUE_JWT_ISSUER)" == "${issuer_before}" ]]; then
-                rollback_ok=1
-                echo "Auth URL repair rolled back and verified."
-              fi
-            fi
-            if [[ "${rollback_ok}" == "1" ]]; then
-              rm -f "${backup}"
-            else
-              echo "Rollback could not be fully verified; protected backup retained at ${backup}." >&2
-            fi
-          }
-
-          on_exit() {
-            code=$?
-            trap - EXIT HUP INT TERM
-            if [[ "${code}" -ne 0 ]]; then
-              rollback
-            fi
-            exit "${code}"
-          }
-          trap on_exit EXIT
-          trap 'exit 129' HUP
-          trap 'exit 130' INT
-          trap 'exit 143' TERM
-
-          set_env_line SITE_URL "${target_site}"
-          set_env_line ADDITIONAL_REDIRECT_URLS "${target_redirect}"
-          set_env_line API_EXTERNAL_URL "${target_api}"
-          docker_write_host_file "${scratch_env}" "${env_file}"
-          if [[ "${issuer_legacy}" -eq 1 ]]; then
-            docker_write_host_file "${scratch_configs[${issuer_config_index}]}" "${config_files[${issuer_config_index}]}"
-          fi
 
           compose_auth_up
 
