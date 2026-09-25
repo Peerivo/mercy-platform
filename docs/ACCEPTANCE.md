@@ -1,6 +1,7 @@
 # Acceptance
 
 ## Automated status
+- Application container dependency coverage must remain provable: the repository must not contain `compose.yaml`, `compose.yml`, `docker-compose.yaml`, or `docker-compose.yml`; CI/Vercel/REG.RU build from the digest-pinned `Dockerfile`, while Beget's self-hosted Supabase Compose is remote infrastructure discovered through Docker labels rather than a repository application manifest.
 - `Repair Beget Auth URLs` must remain `workflow_dispatch`-only. Its remote host shell body lives in `scripts/repair-beget-auth-urls-remote.sh`, and CI must pass `bash -n` for that script so repair-logic edits are syntax-checked without turning the protected workflow into a push-triggered validation surface.
 - `.peerivo/global-contract.json` must exist and bind `Peerivo/mercy-platform` to the current canonical Global Contract authority with the exact required version, digest and Git SHA; agents must resolve the authority from the binding before effectful work and fail closed for missing/stale authority-changing bindings.
 - Unit validation: help request, volunteer offer, moderation and staff workspace schemas are covered. Specialist/provider validation is intentionally absent because that contour is not part of Mercy.
