@@ -184,7 +184,7 @@ jobs:
           docker_read_host_file() {
             local source="$1"
             local destination="$2"
-            docker run --rm --entrypoint /bin/sh \
+            docker run --rm --user 0:0 --entrypoint /bin/sh \
               -v "${source}:/mercy-source:ro" "${helper_image}" \
               -c 'cat /mercy-source' > "${destination}"
             chmod 600 "${destination}"
@@ -193,7 +193,7 @@ jobs:
           docker_write_host_file() {
             local source="$1"
             local destination="$2"
-            docker run --rm -i --entrypoint /bin/sh \
+            docker run --rm -i --user 0:0 --entrypoint /bin/sh \
               -v "${destination}:/mercy-target" "${helper_image}" \
               -c 'cat > /mercy-target' < "${source}"
           }
