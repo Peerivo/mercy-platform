@@ -43,6 +43,8 @@ describe("Repair Beget Auth URLs workflow", () => {
   it("handles root-owned Compose files without sudo or permission widening", () => {
     expect(workflow).toContain("docker_read_host_file");
     expect(workflow).toContain("docker_write_host_file");
+    expect(workflow).toContain("docker run --rm --user 0:0");
+    expect(workflow).toContain("docker run --rm -i --user 0:0");
     expect(workflow).toContain("--project-directory");
     expect(workflow).not.toContain("sudo -n");
     expect(workflow).not.toMatch(/chmod\\s+(?:[0-7]*[2367]|[^\\n]*[+][^\\n]*w)[^\\n]*\\$\\{env_file\\}/);
