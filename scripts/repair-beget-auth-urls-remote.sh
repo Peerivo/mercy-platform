@@ -164,7 +164,7 @@ compose_auth_up() {
     args+=(-f "${scratch_override}")
   fi
   args+=(up -d --no-deps --force-recreate auth)
-  "${args[@]}"
+  "${args[@]}" </dev/null
 }
 
 validate_rendered_auth() {
@@ -179,7 +179,7 @@ validate_rendered_auth() {
   done
   args+=(-f "${scratch_override}")
 
-  "${args[@]}" config -q
+  "${args[@]}" config -q </dev/null
 
   # Instantiate only a disposable one-off Auth container with a shell
   # entrypoint and print exactly the four non-secret URL variables.
@@ -187,7 +187,7 @@ validate_rendered_auth() {
   # recreate will receive, without starting GoTrue or any dependency.
   local rendered
   rendered="$("${args[@]}" run --rm --no-deps -T --entrypoint /bin/sh auth -c \
-    'printf "%s\\n" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"')"
+    'printf "%s\\n" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"' </dev/null)"
   mapfile -t rendered_auth <<< "${rendered}"
   unset rendered
 

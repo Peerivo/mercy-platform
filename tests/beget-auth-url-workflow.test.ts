@@ -47,6 +47,26 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(remoteScript).toMatch(/^set -Eeuo pipefail\n/);
   });
 
+  it("detaches Compose commands from streamed bash stdin before host mutation", () => {
+    expect(remoteScript).toContain('"${args[@]}" config -q </dev/null');
+    expect(remoteScript).toContain('"${args[@]}" </dev/null');
+    expect(remoteScript).toContain(
+      '\'printf "%s\\\\n" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"\' </dev/null)',
+    );
+
+    const preflightRun = remoteScript.indexOf(
+      "run --rm --no-deps -T --entrypoint /bin/sh auth",
+    );
+    const detachedRunStdin = remoteScript.indexOf("</dev/null)", preflightRun);
+    const hostWrite = remoteScript.indexOf(
+      'docker_write_host_file "${scratch_env}" "${env_file}"',
+    );
+
+    expect(preflightRun).toBeGreaterThan(-1);
+    expect(detachedRunStdin).toBeGreaterThan(preflightRun);
+    expect(hostWrite).toBeGreaterThan(detachedRunStdin);
+  });
+
   it("recreates only Auth, preserves the image and all non-URL Auth environment, and has rollback", () => {
     expect(remoteScript).toContain("up -d --no-deps --force-recreate auth");
     expect(remoteScript).toContain("Auth environment changed outside the approved URL variables.");
@@ -103,6 +123,9 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(workflow).toContain("/auth/v1/health");
     expect(workflow).toContain("/auth/v1/settings");
     expect(workflow).toContain("${TARGET_SITE_URL}/auth/callback");
+    expect(workflow).toContain(
+      '"${TARGET_SITE_URL}/auth?error=callback"*|"/auth?error=callback"*',
+    );
     expect(workflow).toContain("AUTH_MAGIC_LINK_REDIRECT_CONFIGURATION_VERIFIED=1");
   });
 });
