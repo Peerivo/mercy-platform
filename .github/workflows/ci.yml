@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Validate production Auth repair shell syntax
+        run: bash -n scripts/repair-beget-auth-urls-remote.sh
       - uses: actions/setup-node@v7
         with:
           node-version: 22

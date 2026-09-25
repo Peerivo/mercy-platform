@@ -1,0 +1,355 @@
+set -Eeuo pipefail
+
+run_id="${1:?run id required}"
+target_site="${2:?site URL required}"
+target_redirect="${3:?redirect URL required}"
+target_api="${4:?API external URL required}"
+
+project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+[[ -n "${project}" ]] || {
+  echo "Cannot resolve Supabase Compose project." >&2
+  exit 1
+}
+
+get_service_id() {
+  local service="$1"
+  local ids=()
+  mapfile -t ids < <(
+    docker ps -aq \
+      --filter "label=com.docker.compose.project=${project}" \
+      --filter "label=com.docker.compose.service=${service}"
+  )
+  [[ "${#ids[@]}" == "1" ]] || {
+    echo "Expected exactly one container for Compose service: ${service}" >&2
+    return 1
+  }
+  printf '%s' "${ids[0]}"
+}
+
+get_env_value() {
+  local cid="$1"
+  local key="$2"
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${cid}" \
+    | sed -n "s/^${key}=//p" \
+    | head -n 1
+}
+
+auth_before="$(get_service_id auth)"
+working_dir="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "${auth_before}")"
+config_files_raw="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${auth_before}")"
+env_file_raw="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.environment_file" }}' "${auth_before}")"
+
+[[ "${working_dir}" == /* ]] || {
+  echo "Compose working directory metadata is invalid." >&2
+  exit 1
+}
+
+# The deployment account intentionally has Docker access but no passwordless
+# sudo. Root-owned Compose files are materialized through a short-lived
+# root helper container without widening host filesystem permissions.
+helper_image="$(docker inspect -f '{{.Config.Image}}' "${auth_before}")"
+scratch="$(mktemp -d /tmp/mercy-auth-url-repair.XXXXXXXX)"
+chmod 700 "${scratch}"
+scratch_env="${scratch}/env"
+scratch_configs=()
+scratch_override="${scratch}/auth-url-override.yml"
+
+docker_read_host_file() {
+  local source="$1"
+  local destination="$2"
+  docker run --rm --user 0:0 --entrypoint /bin/sh \
+    -v "${source}:/mercy-source:ro" "${helper_image}" \
+    -c 'cat /mercy-source' > "${destination}"
+  chmod 600 "${destination}"
+}
+
+docker_write_host_file() {
+  local source="$1"
+  local destination="$2"
+  docker run --rm -i --user 0:0 --entrypoint /bin/sh \
+    -v "${destination}:/mercy-target" "${helper_image}" \
+    -c 'cat > /mercy-target' < "${source}"
+}
+
+workdir_file_exists() {
+  local rel="$1"
+  docker run --rm --user 0:0 --entrypoint /bin/sh \
+    -v "${working_dir}:/mercy-workdir:ro" "${helper_image}" \
+    -c 'test -f "/mercy-workdir/$1"' sh "${rel}"
+}
+
+# Recreated Auth containers from earlier failed attempts can carry temporary
+# config-file labels. Trust labels only when they still point inside the
+# canonical Compose working directory; otherwise rediscover the standard
+# root-owned Supabase Compose files from that directory.
+env_file=""
+if [[ -n "${env_file_raw}" && "${env_file_raw}" != "<no value>" ]]; then
+  env_file="${env_file_raw}"
+  [[ "${env_file}" == /* ]] || env_file="${working_dir}/${env_file}"
+fi
+case "${env_file}" in
+  "${working_dir}"/*) ;;
+  *) env_file="${working_dir}/.env" ;;
+esac
+
+config_files=()
+labels_trusted=1
+if [[ -z "${config_files_raw}" || "${config_files_raw}" == "<no value>" ]]; then
+  labels_trusted=0
+else
+  IFS=',' read -r -a raw_config_files <<< "${config_files_raw}"
+  for raw in "${raw_config_files[@]}"; do
+    file="${raw#"${raw%%[![:space:]]*}"}"
+    file="${file%"${file##*[![:space:]]}"}"
+    [[ -n "${file}" ]] || continue
+    [[ "${file}" == /* ]] || file="${working_dir}/${file}"
+    case "${file}" in
+      "${working_dir}"/*) config_files+=("${file}") ;;
+      *) labels_trusted=0 ;;
+    esac
+  done
+fi
+
+if [[ "${labels_trusted}" != "1" || "${#config_files[@]}" -eq 0 ]]; then
+  config_files=()
+  base_rel=""
+  for candidate in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+    if workdir_file_exists "${candidate}"; then
+      base_rel="${candidate}"
+      break
+    fi
+  done
+  [[ -n "${base_rel}" ]] || {
+    echo "Cannot rediscover a canonical Compose base file under the working directory." >&2
+    exit 1
+  }
+  config_files+=("${working_dir}/${base_rel}")
+  for candidate in docker-compose.override.yml docker-compose.override.yaml compose.override.yml compose.override.yaml; do
+    if workdir_file_exists "${candidate}"; then
+      config_files+=("${working_dir}/${candidate}")
+    fi
+  done
+fi
+
+docker_read_host_file "${env_file}" "${scratch_env}"
+for index in "${!config_files[@]}"; do
+  copy="${scratch}/compose-${index}.yml"
+  docker_read_host_file "${config_files[${index}]}" "${copy}"
+  scratch_configs+=("${copy}")
+done
+
+cat > "${scratch_override}" <<'OVERRIDE'
+services:
+  auth:
+    environment:
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}
+OVERRIDE
+chmod 600 "${scratch_override}"
+
+compose_auth_up() {
+  local use_override="${1:-1}"
+  local args=(
+    docker compose
+    --project-name "${project}"
+    --project-directory "${working_dir}"
+    --env-file "${scratch_env}"
+  )
+  for file in "${scratch_configs[@]}"; do
+    args+=(-f "${file}")
+  done
+  if [[ "${use_override}" == "1" ]]; then
+    args+=(-f "${scratch_override}")
+  fi
+  args+=(up -d --no-deps --force-recreate auth)
+  "${args[@]}"
+}
+
+validate_rendered_auth() {
+  local args=(
+    docker compose
+    --project-name "${project}"
+    --project-directory "${working_dir}"
+    --env-file "${scratch_env}"
+  )
+  for file in "${scratch_configs[@]}"; do
+    args+=(-f "${file}")
+  done
+  args+=(-f "${scratch_override}")
+
+  "${args[@]}" config -q
+
+  # Instantiate only a disposable one-off Auth container with a shell
+  # entrypoint and print exactly the four non-secret URL variables.
+  # This proves the merged service environment that the real Auth
+  # recreate will receive, without starting GoTrue or any dependency.
+  local rendered
+  rendered="$("${args[@]}" run --rm --no-deps -T --entrypoint /bin/sh auth -c \
+    'printf "%s\\n" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"')"
+  mapfile -t rendered_auth <<< "${rendered}"
+  unset rendered
+
+  [[ "${#rendered_auth[@]}" -eq 4 \
+    && "${rendered_auth[0]}" == "${target_api}" \
+    && "${rendered_auth[1]}" == "${target_site}" \
+    && "${rendered_auth[2]}" == "${target_redirect}" \
+    && "${rendered_auth[3]}" == "${target_api}" ]] || {
+    echo "Rendered Auth Compose configuration is not canonical; refusing host mutation." >&2
+    return 1
+  }
+}
+
+auth_env_hash() {
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" \
+    | grep -Ev '^(GOTRUE_SITE_URL|GOTRUE_URI_ALLOW_LIST|API_EXTERNAL_URL|GOTRUE_JWT_ISSUER)=' \
+    | LC_ALL=C sort \
+    | sha256sum \
+    | awk '{print $1}'
+}
+
+set_env_line() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" "${scratch_env}"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "${scratch_env}"
+  else
+    printf '%s=%s\n' "${key}" "${value}" >> "${scratch_env}"
+  fi
+}
+
+image_before="$(docker inspect -f '{{.Config.Image}}' "${auth_before}")"
+hash_before="$(auth_env_hash "${auth_before}")"
+site_before="$(get_env_value "${auth_before}" GOTRUE_SITE_URL)"
+allow_before="$(get_env_value "${auth_before}" GOTRUE_URI_ALLOW_LIST)"
+api_before="$(get_env_value "${auth_before}" API_EXTERNAL_URL)"
+issuer_before="$(get_env_value "${auth_before}" GOTRUE_JWT_ISSUER)"
+
+declare -A other_before
+for service in db rest realtime storage kong; do
+  other_before["${service}"]="$(get_service_id "${service}")"
+done
+
+if [[ "${site_before}" == "${target_site}" \
+   && "${allow_before}" == "${target_redirect}" \
+   && "${api_before}" == "${target_api}" \
+   && "${issuer_before}" == "${target_api}" ]]; then
+  echo "Auth URL configuration is already canonical."
+  echo "AUTH_URL_REPAIR_ALREADY_OK=1"
+  exit 0
+fi
+
+backup="${scratch}/env.backup"
+cp -p "${scratch_env}" "${backup}"
+chmod 600 "${backup}"
+backup_hash="$(sha256sum "${backup}" | awk '{print $1}')"
+echo "Auth configuration backup created: sha256=${backup_hash}"
+
+rollback_ok=0
+rollback() {
+  set +e
+  cp -p "${backup}" "${scratch_env}"
+  docker_write_host_file "${scratch_env}" "${env_file}"
+  if compose_auth_up 0 >/dev/null 2>&1; then
+    sleep 3
+    restored="$(get_service_id auth 2>/dev/null)"
+    if [[ -n "${restored}" \
+       && "$(auth_env_hash "${restored}")" == "${hash_before}" \
+       && "$(get_env_value "${restored}" GOTRUE_SITE_URL)" == "${site_before}" \
+       && "$(get_env_value "${restored}" GOTRUE_URI_ALLOW_LIST)" == "${allow_before}" \
+       && "$(get_env_value "${restored}" API_EXTERNAL_URL)" == "${api_before}" \
+       && "$(get_env_value "${restored}" GOTRUE_JWT_ISSUER)" == "${issuer_before}" ]]; then
+      rollback_ok=1
+      echo "Auth URL repair rolled back and verified."
+    fi
+  fi
+  if [[ "${rollback_ok}" == "1" ]]; then
+    rm -f "${backup}"
+  else
+    echo "Rollback could not be fully verified; protected backup retained at ${backup}." >&2
+  fi
+}
+
+on_exit() {
+  code=$?
+  trap - EXIT HUP INT TERM
+  if [[ "${code}" -ne 0 ]]; then
+    rollback
+  fi
+  exit "${code}"
+}
+trap on_exit EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+set_env_line SITE_URL "${target_site}"
+set_env_line ADDITIONAL_REDIRECT_URLS "${target_redirect}"
+set_env_line API_EXTERNAL_URL "${target_api}"
+set_env_line GOTRUE_JWT_ISSUER "${target_api}"
+
+# Prove the exact rendered Auth environment before changing any host file.
+validate_rendered_auth
+
+docker_write_host_file "${scratch_env}" "${env_file}"
+compose_auth_up 1
+
+auth_after=""
+for _ in $(seq 1 30); do
+  auth_after="$(get_service_id auth 2>/dev/null || true)"
+  [[ -n "${auth_after}" ]] || {
+    sleep 2
+    continue
+  }
+  state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${auth_after}")"
+  if [[ "${state}" == "healthy" || "${state}" == "running" ]]; then
+    break
+  fi
+  if [[ "${state}" == "unhealthy" || "${state}" == "exited" || "${state}" == "dead" ]]; then
+    echo "Auth service failed after recreate." >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+[[ -n "${auth_after}" && "${auth_after}" != "${auth_before}" ]] || {
+  echo "Auth container was not recreated." >&2
+  exit 1
+}
+[[ "$(docker inspect -f '{{.Config.Image}}' "${auth_after}")" == "${image_before}" ]] || {
+  echo "Auth image changed unexpectedly." >&2
+  exit 1
+}
+[[ "$(auth_env_hash "${auth_after}")" == "${hash_before}" ]] || {
+  echo "Auth environment changed outside the approved URL variables." >&2
+  exit 1
+}
+[[ "$(get_env_value "${auth_after}" GOTRUE_SITE_URL)" == "${target_site}" ]] || {
+  echo "GOTRUE_SITE_URL verification failed." >&2
+  exit 1
+}
+[[ "$(get_env_value "${auth_after}" GOTRUE_URI_ALLOW_LIST)" == "${target_redirect}" ]] || {
+  echo "GOTRUE_URI_ALLOW_LIST verification failed." >&2
+  exit 1
+}
+[[ "$(get_env_value "${auth_after}" API_EXTERNAL_URL)" == "${target_api}" ]] || {
+  echo "API_EXTERNAL_URL verification failed." >&2
+  exit 1
+}
+[[ "$(get_env_value "${auth_after}" GOTRUE_JWT_ISSUER)" == "${target_api}" ]] || {
+  echo "GOTRUE_JWT_ISSUER verification failed." >&2
+  exit 1
+}
+
+for service in db rest realtime storage kong; do
+  [[ "$(get_service_id "${service}")" == "${other_before[$service]}" ]] || {
+    echo "Non-Auth service changed unexpectedly: ${service}" >&2
+    exit 1
+  }
+done
+
+rm -f "${backup}"
+rm -rf "${scratch}"
+trap - EXIT HUP INT TERM
+echo "AUTH_URL_REPAIR_OK=1"
