@@ -217,7 +217,7 @@ jobs:
 
           auth_env_hash() {
             docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" \
-              | grep -Ev '^(GOTRUE_SITE_URL|GOTRUE_URI_ALLOW_LIST|API_EXTERNAL_URL)=' \
+              | grep -Ev '^(GOTRUE_SITE_URL|GOTRUE_URI_ALLOW_LIST|API_EXTERNAL_URL|GOTRUE_JWT_ISSUER)=' \
               | LC_ALL=C sort \
               | sha256sum \
               | awk '{print $1}'
@@ -242,6 +242,7 @@ jobs:
           site_before="$(get_env_value "${auth_before}" GOTRUE_SITE_URL)"
           allow_before="$(get_env_value "${auth_before}" GOTRUE_URI_ALLOW_LIST)"
           api_before="$(get_env_value "${auth_before}" API_EXTERNAL_URL)"
+          issuer_before="$(get_env_value "${auth_before}" GOTRUE_JWT_ISSUER)"
 
           declare -A other_before
           for service in db rest realtime storage kong; do
@@ -273,7 +274,8 @@ jobs:
                  && "$(auth_env_hash "${restored}")" == "${hash_before}" \
                  && "$(get_env_value "${restored}" GOTRUE_SITE_URL)" == "${site_before}" \
                  && "$(get_env_value "${restored}" GOTRUE_URI_ALLOW_LIST)" == "${allow_before}" \
-                 && "$(get_env_value "${restored}" API_EXTERNAL_URL)" == "${api_before}" ]]; then
+                 && "$(get_env_value "${restored}" API_EXTERNAL_URL)" == "${api_before}" \
+                 && "$(get_env_value "${restored}" GOTRUE_JWT_ISSUER)" == "${issuer_before}" ]]; then
                 rollback_ok=1
                 echo "Auth URL repair rolled back and verified."
               fi
@@ -344,6 +346,10 @@ jobs:
           }
           [[ "$(get_env_value "${auth_after}" API_EXTERNAL_URL)" == "${target_api}" ]] || {
             echo "API_EXTERNAL_URL verification failed." >&2
+            exit 1
+          }
+          [[ "$(get_env_value "${auth_after}" GOTRUE_JWT_ISSUER)" == "${target_api}" ]] || {
+            echo "GOTRUE_JWT_ISSUER verification failed." >&2
             exit 1
           }
 
