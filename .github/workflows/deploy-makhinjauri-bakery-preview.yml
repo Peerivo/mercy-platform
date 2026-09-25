@@ -3,7 +3,9 @@ name: Deploy Makhinjauri bakery preview
 on:
   push:
     branches:
-      - ops/makhinjauri-bakery-preview-20260925
+      - main
+    paths:
+      - .github/workflows/deploy-makhinjauri-bakery-preview.yml
 
 permissions:
   contents: read
@@ -20,6 +22,7 @@ env:
 
 jobs:
   deploy:
+    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
