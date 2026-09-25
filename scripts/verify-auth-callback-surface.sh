@@ -55,7 +55,10 @@ is_callback_hop() {
 current="${site}/auth/callback"
 for _ in 1 2 3 4; do
   mapfile -t response < <(
-    "${curl_bin}" --silent --show-error --max-time 15       --output /dev/null       --write-out '%{http_code}\n%{redirect_url}\n'       "${current}"
+    "${curl_bin}" --silent --show-error --max-time 15 \
+      --output /dev/null \
+      --write-out '%{http_code}\n%{redirect_url}\n' \
+      "${current}"
   )
 
   code="${response[0]:-}"
