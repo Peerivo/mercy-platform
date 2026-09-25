@@ -180,6 +180,7 @@ jobs:
           chmod 700 "${scratch}"
           scratch_env="${scratch}/env"
           scratch_configs=()
+          scratch_config_backups=()
 
           docker_read_host_file() {
             local source="$1"
@@ -201,9 +202,40 @@ jobs:
           docker_read_host_file "${env_file}" "${scratch_env}"
           for index in "${!config_files[@]}"; do
             copy="${scratch}/compose-${index}.yml"
+            backup_copy="${scratch}/compose-${index}.backup.yml"
             docker_read_host_file "${config_files[${index}]}" "${copy}"
+            cp -p "${copy}" "${backup_copy}"
             scratch_configs+=("${copy}")
+            scratch_config_backups+=("${backup_copy}")
           done
+
+          # Supabase changed the self-hosted Auth template in July 2026:
+          # API_EXTERNAL_URL now includes /auth/v1 and GOTRUE_JWT_ISSUER must
+          # reference it directly. Older compose files append /auth/v1 again.
+          issuer_occurrences=0
+          issuer_legacy=0
+          issuer_config_index=-1
+          for index in "${!scratch_configs[@]}"; do
+            count="$(grep -Ec '^[[:space:]]*GOTRUE_JWT_ISSUER:' "${scratch_configs[${index}]}" || true)"
+            issuer_occurrences=$((issuer_occurrences + count))
+            if grep -Fq 'GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}/auth/v1' "${scratch_configs[${index}]}"; then
+              issuer_legacy=$((issuer_legacy + 1))
+              issuer_config_index="${index}"
+            elif grep -Fq 'GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}' "${scratch_configs[${index}]}"; then
+              issuer_config_index="${index}"
+            elif [[ "${count}" -gt 0 ]]; then
+              echo "Unsupported GOTRUE_JWT_ISSUER wiring in Compose configuration." >&2
+              exit 1
+            fi
+          done
+          [[ "${issuer_occurrences}" -eq 1 && "${issuer_config_index}" -ge 0 && "${issuer_legacy}" -le 1 ]] || {
+            echo "Expected exactly one supported GOTRUE_JWT_ISSUER mapping." >&2
+            exit 1
+          }
+
+          if [[ "${issuer_legacy}" -eq 1 ]]; then
+            sed -i 's|GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}/auth/v1|GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}|'               "${scratch_configs[${issuer_config_index}]}"
+          fi
 
           privileged() {
             "$@"
@@ -255,7 +287,9 @@ jobs:
 
           if [[ "${site_before}" == "${target_site}" \
              && "${allow_before}" == "${target_redirect}" \
-             && "${api_before}" == "${target_api}" ]]; then
+             && "${api_before}" == "${target_api}" \
+             && "${issuer_before}" == "${target_api}" \
+             && "${issuer_legacy}" -eq 0 ]]; then
             echo "Auth URL configuration is already canonical."
             echo "AUTH_URL_REPAIR_ALREADY_OK=1"
             exit 0
@@ -272,6 +306,10 @@ jobs:
             set +e
             cp -p "${backup}" "${scratch_env}"
             docker_write_host_file "${scratch_env}" "${env_file}"
+            if [[ "${issuer_legacy}" -eq 1 && "${issuer_config_index}" -ge 0 ]]; then
+              cp -p "${scratch_config_backups[${issuer_config_index}]}" "${scratch_configs[${issuer_config_index}]}"
+              docker_write_host_file "${scratch_configs[${issuer_config_index}]}" "${config_files[${issuer_config_index}]}"
+            fi
             if compose_auth_up >/dev/null 2>&1; then
               sleep 3
               restored="$(get_service_id auth 2>/dev/null)"
@@ -309,6 +347,9 @@ jobs:
           set_env_line ADDITIONAL_REDIRECT_URLS "${target_redirect}"
           set_env_line API_EXTERNAL_URL "${target_api}"
           docker_write_host_file "${scratch_env}" "${env_file}"
+          if [[ "${issuer_legacy}" -eq 1 ]]; then
+            docker_write_host_file "${scratch_configs[${issuer_config_index}]}" "${config_files[${issuer_config_index}]}"
+          fi
 
           compose_auth_up
 
