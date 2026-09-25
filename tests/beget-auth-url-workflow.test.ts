@@ -7,6 +7,11 @@ const workflow = fs.readFileSync(
   "utf8",
 );
 
+const remoteScript = fs.readFileSync(
+  path.join(process.cwd(), "scripts", "repair-beget-auth-urls-remote.sh"),
+  "utf8",
+);
+
 describe("Repair Beget Auth URLs workflow", () => {
   it("is a protected one-shot production repair on exact reviewed main", () => {
     expect(workflow).toContain("environment: production");
@@ -23,58 +28,72 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(workflow).toContain(
       "TARGET_API_EXTERNAL_URL: https://api.mercy.peerivo.net/auth/v1",
     );
-    expect(workflow).toContain("set_env_line SITE_URL");
-    expect(workflow).toContain("set_env_line ADDITIONAL_REDIRECT_URLS");
-    expect(workflow).toContain("set_env_line API_EXTERNAL_URL");
+    expect(remoteScript).toContain("set_env_line SITE_URL");
+    expect(remoteScript).toContain("set_env_line ADDITIONAL_REDIRECT_URLS");
+    expect(remoteScript).toContain("set_env_line API_EXTERNAL_URL");
+  });
+
+  it("keeps the production workflow manual-only and delegates remote logic to a syntax-checked script", () => {
+    const triggerBlock = workflow.slice(
+      workflow.indexOf("on:"),
+      workflow.indexOf("\n\npermissions:"),
+    );
+
+    expect(triggerBlock).toContain("workflow_dispatch:");
+    expect(triggerBlock).not.toContain("push:");
+    expect(triggerBlock).not.toContain("pull_request:");
+    expect(workflow).toContain("< scripts/repair-beget-auth-urls-remote.sh");
+    expect(workflow).not.toContain("<<'REMOTE'");
+    expect(remoteScript).toMatch(/^set -Eeuo pipefail\n/);
   });
 
   it("recreates only Auth, preserves the image and all non-URL Auth environment, and has rollback", () => {
-    expect(workflow).toContain("up -d --no-deps --force-recreate auth");
-    expect(workflow).toContain("Auth environment changed outside the approved URL variables.");
-    expect(workflow).toContain("Auth image changed unexpectedly.");
-    expect(workflow).toContain("Auth URL repair rolled back and verified.");
-    expect(workflow).toContain("for service in db rest realtime storage kong");
-    expect(workflow).not.toMatch(/\bpsql\b/i);
-    expect(workflow).not.toMatch(/alter\s+database/i);
-    expect(workflow).not.toContain("GOTRUE_JWT_SECRET");
-    expect(workflow).not.toContain("PGRST_JWT_SECRET");
+    expect(remoteScript).toContain("up -d --no-deps --force-recreate auth");
+    expect(remoteScript).toContain("Auth environment changed outside the approved URL variables.");
+    expect(remoteScript).toContain("Auth image changed unexpectedly.");
+    expect(remoteScript).toContain("Auth URL repair rolled back and verified.");
+    expect(remoteScript).toContain("for service in db rest realtime storage kong");
+    expect(remoteScript).not.toMatch(/\bpsql\b/i);
+    expect(remoteScript).not.toMatch(/alter\s+database/i);
+    expect(remoteScript).not.toContain("GOTRUE_JWT_SECRET");
+    expect(remoteScript).not.toContain("PGRST_JWT_SECRET");
   });
 
   it("handles root-owned Compose files without sudo or permission widening", () => {
-    expect(workflow).toContain("docker_read_host_file");
-    expect(workflow).toContain("docker_write_host_file");
-    expect(workflow).toContain("docker run --rm --user 0:0");
-    expect(workflow).toContain("docker run --rm -i --user 0:0");
-    expect(workflow).toContain("--project-directory");
-    expect(workflow).not.toContain("sudo -n");
-    expect(workflow).not.toMatch(/chmod\\s+(?:[0-7]*[2367]|[^\\n]*[+][^\\n]*w)[^\\n]*\\$\\{env_file\\}/);
+    expect(remoteScript).toContain("docker_read_host_file");
+    expect(remoteScript).toContain("docker_write_host_file");
+    expect(remoteScript).toContain("docker run --rm --user 0:0");
+    expect(remoteScript).toContain("docker run --rm -i --user 0:0");
+    expect(remoteScript).toContain("--project-directory");
+    expect(remoteScript).not.toContain("sudo -n");
+    expect(remoteScript).not.toMatch(/chmod\\s+(?:[0-7]*[2367]|[^\\n]*[+][^\\n]*w)[^\\n]*\\$\\{env_file\\}/);
   });
 
   it("uses a final Auth-only override and proves its rendered environment before host mutation", () => {
-    expect(workflow).toContain('scratch_override="${scratch}/auth-url-override.yml"');
-    expect(workflow).toContain("GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}");
-    expect(workflow).toContain("set_env_line GOTRUE_JWT_ISSUER");
-    expect(workflow).toContain("validate_rendered_auth");
-    expect(workflow).toContain("run --rm --no-deps -T --entrypoint /bin/sh auth");
-    expect(workflow).toContain('"${rendered_auth[0]}" == "${target_api}"');
-    expect(workflow).toContain('"${rendered_auth[3]}" == "${target_api}"');
-    expect(workflow).toContain("Rendered Auth Compose configuration is not canonical");
-    expect(workflow).toContain("compose_auth_up 1");
-    expect(workflow).toContain("compose_auth_up 0");
-    expect(workflow).not.toContain("issuer_config_touched");
-    expect(workflow).not.toContain("scratch_config_backups");
+    expect(remoteScript).toContain('scratch_override="${scratch}/auth-url-override.yml"');
+    expect(remoteScript).toContain("GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}");
+    expect(remoteScript).toContain("set_env_line GOTRUE_JWT_ISSUER");
+    expect(remoteScript).toContain("validate_rendered_auth");
+    expect(remoteScript).toContain("run --rm --no-deps -T --entrypoint /bin/sh auth");
+    expect(remoteScript).toContain('"${rendered_auth[0]}" == "${target_api}"');
+    expect(remoteScript).toContain('"${rendered_auth[3]}" == "${target_api}"');
+    expect(remoteScript).toContain("Rendered Auth Compose configuration is not canonical");
+    expect(remoteScript).toContain("compose_auth_up 1");
+    expect(remoteScript).toContain("compose_auth_up 0");
+    expect(remoteScript).not.toContain("issuer_config_touched");
+    expect(remoteScript).not.toContain("scratch_config_backups");
 
-    const preflight = workflow.indexOf("validate_rendered_auth\n");
-    const hostWrite = workflow.indexOf('docker_write_host_file "${scratch_env}" "${env_file}"', preflight);
+    const preflight = remoteScript.indexOf("validate_rendered_auth\n");
+    const hostWrite = remoteScript.indexOf('docker_write_host_file "${scratch_env}" "${env_file}"', preflight);
     expect(preflight).toBeGreaterThan(-1);
     expect(hostWrite).toBeGreaterThan(preflight);
   });
 
   it("recovers from stale temporary Compose labels by rediscovering the canonical working-directory files", () => {
-    expect(workflow).toContain('case "${env_file}" in');
-    expect(workflow).toContain('*) env_file="${working_dir}/.env"');
-    expect(workflow).toContain("docker-compose.yml docker-compose.yaml compose.yml compose.yaml");
-    expect(workflow).toContain("Cannot rediscover a canonical Compose base file under the working directory.");
+    expect(remoteScript).toContain('case "${env_file}" in');
+    expect(remoteScript).toContain('*) env_file="${working_dir}/.env"');
+    expect(remoteScript).toContain("docker-compose.yml docker-compose.yaml compose.yml compose.yaml");
+    expect(remoteScript).toContain("Cannot rediscover a canonical Compose base file under the working directory.");
   });
 
   it("pins checkout and verifies public Auth health and the canonical callback", () => {
