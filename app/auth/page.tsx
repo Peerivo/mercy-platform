@@ -1,3 +1,4 @@
+import { authLoginNotice } from "@/lib/auth-login-notice";
 import { sendLoginLink } from "./actions";
 
 export const metadata = {
@@ -17,6 +18,7 @@ export default async function Auth({
 }) {
   const q = await searchParams;
   const next = safeNext(q.next);
+  const notice = authLoginNotice(q.error);
 
   return (
     <section className="page-shell section auth-simple">
@@ -30,11 +32,7 @@ export default async function Auth({
           </p>
         </div>
 
-        {q.error && (
-          <p role="alert">
-            Не удалось отправить письмо. Проверьте email и попробуйте ещё раз.
-          </p>
-        )}
+        {notice && <p role={notice.role}>{notice.message}</p>}
 
         {q.sent ? (
           <div className="auth-sent" role="status">
