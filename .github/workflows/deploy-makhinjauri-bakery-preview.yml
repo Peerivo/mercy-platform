@@ -1,0 +1,146 @@
+name: Deploy Makhinjauri bakery preview
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy-makhinjauri-bakery-preview.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: makhinjauri-bakery-reg-ru-preview
+  cancel-in-progress: false
+
+env:
+  BAKERY_SHA: 53e9f1b52619d966e5215ea6d5b2135297d7d6f0
+  REMOTE_DIR: /opt/peerivo/makhinjauri-bakery-preview
+  CONTAINER_NAME: makhinjauri-bakery-preview
+  PORT: "3200"
+
+jobs:
+  deploy:
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+
+    steps:
+      - name: Validate protected REG.RU access
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_KNOWN_HOSTS REG_RU_SSH_KEY; do
+            test -n "${!name:-}" || {
+              echo "::error::Missing protected REG.RU configuration: ${name}"
+              exit 1
+            }
+          done
+
+      - name: Download exact bakery release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bakery-site
+          curl --fail --location --silent --show-error             "https://github.com/olegka85/makhinjauri-bakery/archive/${BAKERY_SHA}.tar.gz"             -o /tmp/bakery-source.tar.gz
+          tar -xzf /tmp/bakery-source.tar.gz --strip-components=1 -C /tmp/bakery-site
+          test -f /tmp/bakery-site/index.html
+          test -f /tmp/bakery-site/assets/hero-bakery.webp
+          test -f /tmp/bakery-site/assets/cafe-interior.webp
+          test -f /tmp/bakery-site/assets/menu-sprite.webp
+          tar -czf /tmp/bakery-site.tar.gz -C /tmp/bakery-site .
+          test -s /tmp/bakery-site.tar.gz
+
+      - name: Configure pinned SSH trust
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${REG_RU_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${REG_RU_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes             "${REG_RU_USER}@${REG_RU_HOST}" true
+
+      - name: Upload bakery release
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh "${remote}" "mkdir -p '${REMOTE_DIR}' && chmod 755 '${REMOTE_DIR}'"
+          scp -q /tmp/bakery-site.tar.gz "${remote}:${REMOTE_DIR}/bakery-site.tar.gz"
+
+      - name: Deploy isolated preview container
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh "${remote}" "REMOTE_DIR='${REMOTE_DIR}' CONTAINER_NAME='${CONTAINER_NAME}' PORT='${PORT}' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          mkdir -p "${REMOTE_DIR}"
+          rm -rf "${REMOTE_DIR}/site.next"
+          mkdir -p "${REMOTE_DIR}/site.next"
+          tar -xzf "${REMOTE_DIR}/bakery-site.tar.gz" -C "${REMOTE_DIR}/site.next"
+          test -f "${REMOTE_DIR}/site.next/index.html"
+
+          if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker rm -f "${CONTAINER_NAME}" >/dev/null
+          fi
+
+          if ss -ltnH | awk '{print $4}' | grep -Eq "(:|\\])${PORT}$"; then
+            echo "Port ${PORT} is already occupied by another service." >&2
+            exit 1
+          fi
+
+          if ! docker image inspect nginx:1.27-alpine >/dev/null 2>&1; then
+            docker pull nginx:1.27-alpine >/dev/null
+          fi
+
+          rm -rf "${REMOTE_DIR}/site.previous"
+          if [ -d "${REMOTE_DIR}/site" ]; then
+            mv "${REMOTE_DIR}/site" "${REMOTE_DIR}/site.previous"
+          fi
+          mv "${REMOTE_DIR}/site.next" "${REMOTE_DIR}/site"
+
+          docker run -d             --name "${CONTAINER_NAME}"             --restart unless-stopped             --read-only             --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m             --tmpfs /var/run:rw,noexec,nosuid,size=4m             -p "0.0.0.0:${PORT}:80"             -v "${REMOTE_DIR}/site:/usr/share/nginx/html:ro"             nginx:1.27-alpine >/dev/null
+
+          healthy=false
+          for _ in $(seq 1 20); do
+            if curl --fail --silent --show-error --max-time 3               "http://127.0.0.1:${PORT}/" | grep -F 'MAKHINJAURI' >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "${healthy}" != "true" ]; then
+            docker logs --tail=100 "${CONTAINER_NAME}" >&2 || true
+            exit 1
+          fi
+
+          rm -f "${REMOTE_DIR}/bakery-site.tar.gz"
+          echo "BAKERY_PREVIEW_LOCAL_OK port=${PORT}"
+          REMOTE
+
+      - name: Verify public IP and port
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(curl --fail --silent --show-error --max-time 15             "http://${REG_RU_HOST}:${PORT}/")"
+          printf '%s' "${body}" | grep -F 'MAKHINJAURI' >/dev/null
+          echo "BAKERY_PREVIEW_PUBLIC_OK http://${REG_RU_HOST}:${PORT}/"
+
+      - name: Cleanup runner secrets
+        if: always()
+        shell: bash
+        run: |
+          rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts             /tmp/bakery-source.tar.gz /tmp/bakery-site.tar.gz
+          rm -rf /tmp/bakery-site
