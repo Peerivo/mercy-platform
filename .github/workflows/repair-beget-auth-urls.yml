@@ -172,29 +172,41 @@ jobs:
             exit 1
           }
 
-          use_sudo=0
-          [[ -r "${env_file}" ]] || use_sudo=1
-          for file in "${config_files[@]}"; do
-            [[ -r "${file}" ]] || use_sudo=1
+          # The deployment account intentionally has Docker access but no passwordless
+          # sudo. Root-owned Compose files are therefore materialized through the
+          # already-running Auth image instead of widening host filesystem permissions.
+          helper_image="$(docker inspect -f '{{.Config.Image}}' "${auth_before}")"
+          scratch="$(mktemp -d /tmp/mercy-auth-url-repair.XXXXXXXX)"
+          chmod 700 "${scratch}"
+          scratch_env="${scratch}/env"
+          scratch_configs=()
+
+          docker_read_host_file() {
+            local source="$1"
+            local destination="$2"
+            docker run --rm --entrypoint /bin/sh \
+              -v "${source}:/mercy-source:ro" "${helper_image}" \
+              -c 'cat /mercy-source' > "${destination}"
+            chmod 600 "${destination}"
+          }
+
+          docker_write_host_file() {
+            local source="$1"
+            local destination="$2"
+            docker run --rm -i --entrypoint /bin/sh \
+              -v "${destination}:/mercy-target" "${helper_image}" \
+              -c 'cat > /mercy-target' < "${source}"
+          }
+
+          docker_read_host_file "${env_file}" "${scratch_env}"
+          for index in "${!config_files[@]}"; do
+            copy="${scratch}/compose-${index}.yml"
+            docker_read_host_file "${config_files[${index}]}" "${copy}"
+            scratch_configs+=("${copy}")
           done
 
-          if [[ "${use_sudo}" == "1" ]]; then
-            command -v sudo >/dev/null 2>&1 && sudo -n true || {
-              echo "Compose configuration is unreadable and passwordless sudo is unavailable." >&2
-              exit 1
-            }
-            sudo -n test -r "${env_file}"
-            for file in "${config_files[@]}"; do
-              sudo -n test -r "${file}"
-            done
-          fi
-
           privileged() {
-            if [[ "${use_sudo}" == "1" ]]; then
-              sudo -n "$@"
-            else
-              "$@"
-            fi
+            "$@"
           }
 
           compose_auth_up() {
@@ -202,17 +214,13 @@ jobs:
               docker compose
               --project-name "${project}"
               --project-directory "${working_dir}"
-              --env-file "${env_file}"
+              --env-file "${scratch_env}"
             )
-            for file in "${config_files[@]}"; do
+            for file in "${scratch_configs[@]}"; do
               args+=(-f "${file}")
             done
             args+=(up -d --no-deps --force-recreate auth)
-            if [[ "${use_sudo}" == "1" ]]; then
-              sudo -n "${args[@]}"
-            else
-              "${args[@]}"
-            fi
+            "${args[@]}"
           }
 
           auth_env_hash() {
@@ -257,16 +265,17 @@ jobs:
             exit 0
           fi
 
-          backup="${env_file}.mercy-auth-url-backup-${run_id}"
-          privileged cp -p "${env_file}" "${backup}"
-          privileged chmod 600 "${backup}"
-          backup_hash="$(privileged sha256sum "${backup}" | awk '{print $1}')"
+          backup="${scratch}/env.backup"
+          cp -p "${scratch_env}" "${backup}"
+          chmod 600 "${backup}"
+          backup_hash="$(sha256sum "${backup}" | awk '{print $1}')"
           echo "Auth configuration backup created: sha256=${backup_hash}"
 
           rollback_ok=0
           rollback() {
             set +e
-            privileged cp -p "${backup}" "${env_file}"
+            cp -p "${backup}" "${scratch_env}"
+            docker_write_host_file "${scratch_env}" "${env_file}"
             if compose_auth_up >/dev/null 2>&1; then
               sleep 3
               restored="$(get_service_id auth 2>/dev/null)"
@@ -281,7 +290,7 @@ jobs:
               fi
             fi
             if [[ "${rollback_ok}" == "1" ]]; then
-              privileged rm -f "${backup}"
+              rm -f "${backup}"
             else
               echo "Rollback could not be fully verified; protected backup retained at ${backup}." >&2
             fi
@@ -303,6 +312,7 @@ jobs:
           set_env_line SITE_URL "${target_site}"
           set_env_line ADDITIONAL_REDIRECT_URLS "${target_redirect}"
           set_env_line API_EXTERNAL_URL "${target_api}"
+          docker_write_host_file "${scratch_env}" "${env_file}"
 
           compose_auth_up
 
@@ -360,7 +370,8 @@ jobs:
             }
           done
 
-          privileged rm -f "${backup}"
+          rm -f "${backup}"
+          rm -rf "${scratch}"
           trap - EXIT HUP INT TERM
           echo "AUTH_URL_REPAIR_OK=1"
           REMOTE
