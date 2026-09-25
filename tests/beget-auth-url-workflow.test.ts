@@ -56,7 +56,8 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(workflow).toContain("set_env_line GOTRUE_JWT_ISSUER");
     expect(workflow).toContain("validate_rendered_auth");
     expect(workflow).toContain("run --rm --no-deps -T --entrypoint /bin/sh auth");
-    expect(workflow).toContain('printf "%s\\n" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"');
+    expect(workflow).toContain('"${rendered_auth[0]}" == "${target_api}"');
+    expect(workflow).toContain('"${rendered_auth[3]}" == "${target_api}"');
     expect(workflow).toContain("Rendered Auth Compose configuration is not canonical");
     expect(workflow).toContain("compose_auth_up 1");
     expect(workflow).toContain("compose_auth_up 0");
