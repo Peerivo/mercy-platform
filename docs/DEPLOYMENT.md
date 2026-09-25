@@ -16,7 +16,7 @@ Build/app public: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_
 ChatGPT environment may run `npm ci && npm run check`; local Supabase requires Docker. Production credentials are never needed for build.
 
 ## MVP v1 release verification
-Обязательные build args: Supabase URL/publishable key, canonical `NEXT_PUBLIC_SITE_URL` и `GIT_SHA`; compose fail-fast проверяет первые три. Production Site URL должен быть HTTPS и точно присутствовать в Supabase Auth redirect allow-list вместе с `/auth/callback`. После immutable deploy запрос `GET /health` обязан вернуть `status=ok`, `environment=production`, ожидаемый SHA в `version` и `Cache-Control: no-store`; endpoint не проверяет БД и не выводит конфигурацию.
+Обязательные build args: Supabase URL/publishable key, canonical `NEXT_PUBLIC_SITE_URL` и `GIT_SHA`; repository не содержит application Compose manifest, а production/CI собирают immutable image напрямую из `Dockerfile`. Production Site URL должен быть HTTPS и точно присутствовать в Supabase Auth redirect allow-list вместе с `/auth/callback`. После immutable deploy запрос `GET /health` обязан вернуть `status=ok`, `environment=production`, ожидаемый SHA в `version` и `Cache-Control: no-store`; endpoint не проверяет БД и не выводит конфигурацию.
 
 Перед migration workflow зафиксируйте backup и сопоставьте `supabase_migrations.schema_migrations` с `supabase/migrations`. После migration проверьте `messages` в Realtime publication и RLS, затем выполните documented one-time `bootstrap_first_admin` через trusted SQL (не API). Smoke A и B выполняются отдельными USER/helper/COORDINATOR/ADMIN аккаунтами; отдельно подтвердите отрицательные проверки доступа. Не используйте seed в remote среде.
 
