@@ -1,0 +1,407 @@
+name: Repair Beget Auth URLs
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact reviewed current main SHA"
+        required: true
+        type: string
+      confirm:
+        description: "Type REPAIR_AUTH_URLS"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercy-beget-auth-url-repair
+  cancel-in-progress: false
+
+env:
+  TARGET_SITE_URL: https://mercy.peerivo.net
+  TARGET_REDIRECT_URL: https://mercy.peerivo.net/auth/callback
+  TARGET_API_EXTERNAL_URL: https://api.mercy.peerivo.net/auth/v1
+  TARGET_SUPABASE_URL: https://api.mercy.peerivo.net
+
+jobs:
+  repair:
+    if: ${{ inputs.confirm == 'REPAIR_AUTH_URLS' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      TARGET_PUBLIC_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Require exact reviewed current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.expected_sha }}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::expected_sha must be a 40-character lowercase commit SHA"
+            exit 1
+          }
+          test "${{ inputs.expected_sha }}" = "${GITHUB_SHA}" || {
+            echo "::error::Dispatch SHA does not match the reviewed SHA"
+            exit 1
+          }
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "${GITHUB_SHA}" || {
+            echo "::error::Dispatch revision is no longer current main"
+            exit 1
+          }
+
+      - name: Validate protected production configuration
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            BEGET_SUPABASE_HOST \
+            BEGET_SUPABASE_USER \
+            BEGET_SUPABASE_SSH_KEY \
+            BEGET_SUPABASE_KNOWN_HOSTS \
+            TARGET_PUBLIC_KEY
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing production configuration: ${name}"
+              missing=1
+            fi
+          done
+          test "${missing}" -eq 0
+
+      - name: Configure pinned SSH host key
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Repair only Auth URL configuration with rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          ssh "${remote}" bash -s -- \
+            "${GITHUB_RUN_ID}" \
+            "${TARGET_SITE_URL}" \
+            "${TARGET_REDIRECT_URL}" \
+            "${TARGET_API_EXTERNAL_URL}" <<'REMOTE'
+          set -Eeuo pipefail
+
+          run_id="${1:?run id required}"
+          target_site="${2:?site URL required}"
+          target_redirect="${3:?redirect URL required}"
+          target_api="${4:?API external URL required}"
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+          [[ -n "${project}" ]] || {
+            echo "Cannot resolve Supabase Compose project." >&2
+            exit 1
+          }
+
+          get_service_id() {
+            local service="$1"
+            local ids=()
+            mapfile -t ids < <(
+              docker ps -aq \
+                --filter "label=com.docker.compose.project=${project}" \
+                --filter "label=com.docker.compose.service=${service}"
+            )
+            [[ "${#ids[@]}" == "1" ]] || {
+              echo "Expected exactly one container for Compose service: ${service}" >&2
+              return 1
+            }
+            printf '%s' "${ids[0]}"
+          }
+
+          get_env_value() {
+            local cid="$1"
+            local key="$2"
+            docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${cid}" \
+              | sed -n "s/^${key}=//p" \
+              | head -n 1
+          }
+
+          auth_before="$(get_service_id auth)"
+          working_dir="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "${auth_before}")"
+          config_files_raw="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${auth_before}")"
+          env_file_raw="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.environment_file" }}' "${auth_before}")"
+          [[ "${env_file_raw}" != "<no value>" ]] || env_file_raw=""
+
+          [[ "${working_dir}" == /* && -n "${config_files_raw}" && "${config_files_raw}" != "<no value>" ]] || {
+            echo "Compose project metadata is incomplete; refusing to mutate Auth." >&2
+            exit 1
+          }
+
+          if [[ -n "${env_file_raw}" ]]; then
+            env_file="${env_file_raw}"
+            [[ "${env_file}" == /* ]] || env_file="${working_dir}/${env_file}"
+          else
+            env_file="${working_dir}/.env"
+          fi
+
+          IFS=',' read -r -a raw_config_files <<< "${config_files_raw}"
+          config_files=()
+          for raw in "${raw_config_files[@]}"; do
+            file="${raw#"${raw%%[![:space:]]*}"}"
+            file="${file%"${file##*[![:space:]]}"}"
+            [[ -n "${file}" ]] || continue
+            [[ "${file}" == /* ]] || file="${working_dir}/${file}"
+            config_files+=("${file}")
+          done
+          [[ "${#config_files[@]}" -gt 0 ]] || {
+            echo "No Compose config files resolved." >&2
+            exit 1
+          }
+
+          use_sudo=0
+          [[ -r "${env_file}" ]] || use_sudo=1
+          for file in "${config_files[@]}"; do
+            [[ -r "${file}" ]] || use_sudo=1
+          done
+
+          if [[ "${use_sudo}" == "1" ]]; then
+            command -v sudo >/dev/null 2>&1 && sudo -n true || {
+              echo "Compose configuration is unreadable and passwordless sudo is unavailable." >&2
+              exit 1
+            }
+            sudo -n test -r "${env_file}"
+            for file in "${config_files[@]}"; do
+              sudo -n test -r "${file}"
+            done
+          fi
+
+          privileged() {
+            if [[ "${use_sudo}" == "1" ]]; then
+              sudo -n "$@"
+            else
+              "$@"
+            fi
+          }
+
+          compose_auth_up() {
+            local args=(
+              docker compose
+              --project-name "${project}"
+              --project-directory "${working_dir}"
+              --env-file "${env_file}"
+            )
+            for file in "${config_files[@]}"; do
+              args+=(-f "${file}")
+            done
+            args+=(up -d --no-deps --force-recreate auth)
+            if [[ "${use_sudo}" == "1" ]]; then
+              sudo -n "${args[@]}"
+            else
+              "${args[@]}"
+            fi
+          }
+
+          auth_env_hash() {
+            docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" \
+              | grep -Ev '^(GOTRUE_SITE_URL|GOTRUE_URI_ALLOW_LIST|API_EXTERNAL_URL|GOTRUE_JWT_ISSUER)=' \
+              | LC_ALL=C sort \
+              | sha256sum \
+              | awk '{print $1}'
+          }
+
+          set_env_line() {
+            local key="$1"
+            local value="$2"
+            if privileged grep -q "^${key}=" "${env_file}"; then
+              privileged sed -i "s|^${key}=.*|${key}=${value}|" "${env_file}"
+            else
+              if [[ "${use_sudo}" == "1" ]]; then
+                printf '%s=%s\n' "${key}" "${value}" | sudo -n tee -a "${env_file}" >/dev/null
+              else
+                printf '%s=%s\n' "${key}" "${value}" >> "${env_file}"
+              fi
+            fi
+          }
+
+          image_before="$(docker inspect -f '{{.Config.Image}}' "${auth_before}")"
+          hash_before="$(auth_env_hash "${auth_before}")"
+          site_before="$(get_env_value "${auth_before}" GOTRUE_SITE_URL)"
+          allow_before="$(get_env_value "${auth_before}" GOTRUE_URI_ALLOW_LIST)"
+          api_before="$(get_env_value "${auth_before}" API_EXTERNAL_URL)"
+          issuer_before="$(get_env_value "${auth_before}" GOTRUE_JWT_ISSUER)"
+
+          declare -A other_before
+          for service in db rest realtime storage kong; do
+            other_before["${service}"]="$(get_service_id "${service}")"
+          done
+
+          if [[ "${site_before}" == "${target_site}" \
+             && "${allow_before}" == "${target_redirect}" \
+             && "${api_before}" == "${target_api}" ]]; then
+            echo "Auth URL configuration is already canonical."
+            echo "AUTH_URL_REPAIR_ALREADY_OK=1"
+            exit 0
+          fi
+
+          backup="${env_file}.mercy-auth-url-backup-${run_id}"
+          privileged cp -p "${env_file}" "${backup}"
+          privileged chmod 600 "${backup}"
+          backup_hash="$(privileged sha256sum "${backup}" | awk '{print $1}')"
+          echo "Auth configuration backup created: sha256=${backup_hash}"
+
+          rollback_ok=0
+          rollback() {
+            set +e
+            privileged cp -p "${backup}" "${env_file}"
+            if compose_auth_up >/dev/null 2>&1; then
+              sleep 3
+              restored="$(get_service_id auth 2>/dev/null)"
+              if [[ -n "${restored}" \
+                 && "$(auth_env_hash "${restored}")" == "${hash_before}" \
+                 && "$(get_env_value "${restored}" GOTRUE_SITE_URL)" == "${site_before}" \
+                 && "$(get_env_value "${restored}" GOTRUE_URI_ALLOW_LIST)" == "${allow_before}" \
+                 && "$(get_env_value "${restored}" API_EXTERNAL_URL)" == "${api_before}" \
+                 && "$(get_env_value "${restored}" GOTRUE_JWT_ISSUER)" == "${issuer_before}" ]]; then
+                rollback_ok=1
+                echo "Auth URL repair rolled back and verified."
+              fi
+            fi
+            if [[ "${rollback_ok}" == "1" ]]; then
+              privileged rm -f "${backup}"
+            else
+              echo "Rollback could not be fully verified; protected backup retained at ${backup}." >&2
+            fi
+          }
+
+          on_exit() {
+            code=$?
+            trap - EXIT HUP INT TERM
+            if [[ "${code}" -ne 0 ]]; then
+              rollback
+            fi
+            exit "${code}"
+          }
+          trap on_exit EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          set_env_line SITE_URL "${target_site}"
+          set_env_line ADDITIONAL_REDIRECT_URLS "${target_redirect}"
+          set_env_line API_EXTERNAL_URL "${target_api}"
+
+          compose_auth_up
+
+          auth_after=""
+          for _ in $(seq 1 30); do
+            auth_after="$(get_service_id auth 2>/dev/null || true)"
+            [[ -n "${auth_after}" ]] || {
+              sleep 2
+              continue
+            }
+            state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${auth_after}")"
+            if [[ "${state}" == "healthy" || "${state}" == "running" ]]; then
+              break
+            fi
+            if [[ "${state}" == "unhealthy" || "${state}" == "exited" || "${state}" == "dead" ]]; then
+              echo "Auth service failed after recreate." >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          [[ -n "${auth_after}" && "${auth_after}" != "${auth_before}" ]] || {
+            echo "Auth container was not recreated." >&2
+            exit 1
+          }
+          [[ "$(docker inspect -f '{{.Config.Image}}' "${auth_after}")" == "${image_before}" ]] || {
+            echo "Auth image changed unexpectedly." >&2
+            exit 1
+          }
+          [[ "$(auth_env_hash "${auth_after}")" == "${hash_before}" ]] || {
+            echo "Auth environment changed outside the approved URL variables." >&2
+            exit 1
+          }
+          [[ "$(get_env_value "${auth_after}" GOTRUE_SITE_URL)" == "${target_site}" ]] || {
+            echo "GOTRUE_SITE_URL verification failed." >&2
+            exit 1
+          }
+          [[ "$(get_env_value "${auth_after}" GOTRUE_URI_ALLOW_LIST)" == "${target_redirect}" ]] || {
+            echo "GOTRUE_URI_ALLOW_LIST verification failed." >&2
+            exit 1
+          }
+          [[ "$(get_env_value "${auth_after}" API_EXTERNAL_URL)" == "${target_api}" ]] || {
+            echo "API_EXTERNAL_URL verification failed." >&2
+            exit 1
+          }
+          [[ "$(get_env_value "${auth_after}" GOTRUE_JWT_ISSUER)" == "${target_api}" ]] || {
+            echo "GOTRUE_JWT_ISSUER verification failed." >&2
+            exit 1
+          }
+
+          for service in db rest realtime storage kong; do
+            [[ "$(get_service_id "${service}")" == "${other_before[$service]}" ]] || {
+              echo "Non-Auth service changed unexpectedly: ${service}" >&2
+              exit 1
+            }
+          done
+
+          privileged rm -f "${backup}"
+          trap - EXIT HUP INT TERM
+          echo "AUTH_URL_REPAIR_OK=1"
+          REMOTE
+
+      - name: Verify public Auth health and callback surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 15 \
+            -H "apikey: ${TARGET_PUBLIC_KEY}" \
+            "${TARGET_SUPABASE_URL}/auth/v1/health" >/dev/null
+
+          settings="$(
+            curl --fail --silent --show-error --max-time 15 \
+              -H "apikey: ${TARGET_PUBLIC_KEY}" \
+              "${TARGET_SUPABASE_URL}/auth/v1/settings"
+          )"
+          printf '%s' "${settings}" | jq -e 'type == "object"' >/dev/null
+
+          headers="$(
+            curl --silent --show-error --max-time 15 \
+              --dump-header - --output /dev/null \
+              "${TARGET_SITE_URL}/auth/callback"
+          )"
+          printf '%s\n' "${headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
+          location="$(
+            printf '%s\n' "${headers}" \
+              | tr -d '\r' \
+              | awk 'tolower($1)=="location:" {print $2; exit}'
+          )"
+          case "${location}" in
+            "${TARGET_SITE_URL}/auth?error=callback"*) ;;
+            *)
+              echo "::error::Public Auth callback did not stay on canonical Mercy origin"
+              exit 1
+              ;;
+          esac
+
+          echo "AUTH_MAGIC_LINK_REDIRECT_CONFIGURATION_VERIFIED=1"
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
