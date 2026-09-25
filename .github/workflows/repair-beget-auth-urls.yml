@@ -245,14 +245,14 @@ jobs:
           done
 
           cat > "${scratch_override}" <<'OVERRIDE'
-services:
-  auth:
-    environment:
-      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
-      GOTRUE_SITE_URL: ${SITE_URL}
-      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
-      GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}
-OVERRIDE
+          services:
+            auth:
+              environment:
+                API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+                GOTRUE_SITE_URL: ${SITE_URL}
+                GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+                GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}
+          OVERRIDE
           chmod 600 "${scratch_override}"
 
           compose_auth_up() {
