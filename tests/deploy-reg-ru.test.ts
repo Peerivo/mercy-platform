@@ -70,6 +70,20 @@ describe("REG.RU production deployment safety contract", () => {
     expect(workflow).toContain("cutover_probe=1");
   });
 
+  it("verifies canonical Auth callback before promotion while rollback is armed", () => {
+    const callbackProbe = workflow.indexOf("http://127.0.0.1:3100/auth/callback");
+    const expectedLocation = workflow.indexOf(
+      "https://mercy.peerivo.net/auth?error=callback",
+      callbackProbe,
+    );
+    const promotion = workflow.indexOf('phase="promoting"', callbackProbe);
+
+    expect(callbackProbe).toBeGreaterThan(-1);
+    expect(expectedLocation).toBeGreaterThan(callbackProbe);
+    expect(promotion).toBeGreaterThan(expectedLocation);
+    expect(workflow).toContain("callback_location");
+  });
+
   it("never invokes database migration tooling", () => {
     expect(workflow).not.toMatch(/supabase\s+db\s+(push|reset)|psql|pg_restore|pg_dump/i);
   });
