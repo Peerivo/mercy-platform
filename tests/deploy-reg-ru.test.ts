@@ -63,6 +63,20 @@ describe("REG.RU production deployment safety contract", () => {
     expect(workflow).not.toMatch(/cloudflare|route53|change-resource-record|dns.*update/i);
   });
 
+  it("gates REG.RU promotion on the canonical Auth callback redirect", () => {
+    expect(workflow).toContain("Candidate Auth callback escaped canonical Mercy origin.");
+    expect(workflow).toContain("'http://127.0.0.1:3100/auth/callback'");
+    expect(workflow).toContain("'https://mercy.peerivo.net/auth?error=callback'");
+    expect(workflow).toContain("Canonical production Auth callback redirect is wrong");
+
+    const candidateProbe = workflow.indexOf(
+      "'http://127.0.0.1:3100/auth/callback'",
+    );
+    const promote = workflow.indexOf('phase="promoting"');
+    expect(candidateProbe).toBeGreaterThan(-1);
+    expect(promote).toBeGreaterThan(candidateProbe);
+  });
+
   it("keeps the Russian hostname a permanent canonical redirect", () => {
     expect(nextConfig).toContain("xn----htbcggcjkhwxk7j6bn.xn--p1ai");
     expect(nextConfig).toContain("https://mercy.peerivo.net/:path*");
