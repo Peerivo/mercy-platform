@@ -3,6 +3,8 @@ set -euo pipefail
 
 site="${1:?canonical site URL required}"
 site="${site%/}"
+probe="${2:-${site}}"
+probe="${probe%/}"
 curl_bin="${CURL_BIN:-curl}"
 
 case "${site}" in
@@ -52,7 +54,7 @@ is_callback_hop() {
   [[ "${path}" == "/auth/callback" || "${path}" == "/auth/callback/" ]]
 }
 
-current="${site}/auth/callback"
+current="${probe}/auth/callback"
 for _ in 1 2 3 4; do
   mapfile -t response < <(
     "${curl_bin}" --silent --show-error --max-time 15 \
