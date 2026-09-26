@@ -74,6 +74,26 @@ describe("Auth callback canonical redirects", () => {
     );
   });
 
+  it.each([
+    "https%3A%2F%2Fevil.example",
+    "%2F%2Fevil.example",
+    "%2F%5Cevil.example",
+    "%2F%5C%2Fevil.example",
+  ])("rejects external next target %s after URL normalization", async (next) => {
+    process.env.NEXT_PUBLIC_SITE_URL = "https://mercy.peerivo.net";
+    mocks.exchangeCodeForSession.mockResolvedValue({ error: null });
+
+    const response = await GET(
+      new Request(
+        `https://0.0.0.0:3000/auth/callback?code=test-code&next=${next}`,
+      ),
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://mercy.peerivo.net/cabinet",
+    );
+  });
+
   it("uses the canonical site when code exchange fails", async () => {
     process.env.NEXT_PUBLIC_SITE_URL = "https://mercy.peerivo.net";
     mocks.exchangeCodeForSession.mockResolvedValue({
