@@ -1,0 +1,33 @@
+{
+  "apiVersion": "peerivo.io/contract/v1",
+  "kind": "GlobalContractAcknowledgement",
+  "project": "Peerivo/mercy-platform",
+  "changeEventId": "contract.updated.peerivo-global.1.6.0",
+  "oldContract": {
+    "version": "1.5.0",
+    "digest": "sha256:666ff08bf8ea89c3342bb54e37a3dc5eb5d4cc3bab84b72cf73d2ed2b1568635",
+    "gitSha": "1166b9b646fb601d3d410aac5a39dadae590f2d1"
+  },
+  "newContract": {
+    "version": "1.6.0",
+    "digest": "sha256:616a10a554895632697ccee3f4d4596f543a18e9fbc98c8fe622e0ae53160c61",
+    "gitSha": "b9bcc8b8139a56918d536dae7138bd77f929455a"
+  },
+  "acknowledgement": {
+    "approverIdentity": "olegka85",
+    "acknowledgedAt": "2026-09-26T12:04:00Z",
+    "source": "explicit approval in the active ChatGPT work conversation",
+    "scope": "Peerivo/mercy-platform adoption of Global Contract 1.6.0"
+  },
+  "migration": {
+    "requiredByEvent": true,
+    "record": "For newly created secrets Mercy adopts GitHub Encrypted Secrets as canonical storage; for new non-secret configuration it adopts GitHub Actions Variables or versioned repository configuration. Existing external secret-manager entries remain legacy until a separately approved migration.",
+    "runtimeMutationInThisChange": false,
+    "secretRotationInThisChange": false,
+    "productionConfigMutationInThisChange": false
+  },
+  "compatibilityEvidenceRefs": [
+    "Peerivo/global#129",
+    "Peerivo/global/events/contract.updated.1.6.0.json"
+  ]
+}
