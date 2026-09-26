@@ -43,7 +43,7 @@ jobs:
       BEGET_JWT_ROTATION_ATTESTATION: ${{ vars.BEGET_JWT_ROTATION_ATTESTATION }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Enforce Beget JWT incident gate
         shell: bash
