@@ -1,0 +1,90 @@
+{
+  "apiVersion": "peerivo.io/integration-consumer/v1",
+  "kind": "IntegrationContractBinding",
+  "metadata": {
+    "id": "mercy.happy-food-rescue",
+    "version": "1.0.0",
+    "status": "planned"
+  },
+  "project": "Peerivo/mercy-platform",
+  "canonicalContract": {
+    "repository": "Peerivo/happy",
+    "path": "contracts/food-rescue-mercy.v1.json",
+    "id": "peerivo.happy.food-rescue.mercy",
+    "version": "1.0.0",
+    "implementationPin": "734df94d8dc53ed46e97eec8abca0b95838340e9",
+    "pinRequiredBeforeRuntimeEnablement": true
+  },
+  "implementation": {
+    "enabled": false,
+    "runtimeAdapterExists": false,
+    "databaseChangesExist": false,
+    "apiOrWebhookExists": false,
+    "productionPermissionExists": false
+  },
+  "acceptedInboundEvents": [
+    "happy.food_rescue.donation_offer.upserted",
+    "happy.food_rescue.donation_offer.cancelled",
+    "happy.food_rescue.rescue_mission.requested",
+    "happy.food_rescue.safety_recall.issued"
+  ],
+  "emittedOutboundEvents": [
+    "mercy.food.demand_signal.published",
+    "mercy.food.donation_reservation.upserted",
+    "mercy.food.donation_reservation.released",
+    "mercy.food.rescue_mission.disposition",
+    "mercy.food.donation_outcome.attested"
+  ],
+  "localOwnership": [
+    "beneficiary identity and case data",
+    "eligibility",
+    "NGO and redistribution partner coordination",
+    "volunteer and courier assignment",
+    "field outreach authorization",
+    "last-mile delivery evidence"
+  ],
+  "privacyBoundary": {
+    "neverExportToHappy": [
+      "beneficiary name",
+      "beneficiary contact details",
+      "home address",
+      "case identifier",
+      "case notes",
+      "sensitive eligibility reason",
+      "volunteer private contact details"
+    ],
+    "demandSignalRule": "Only aggregated or otherwise privacy-preserving food-demand information may leave Mercy.",
+    "outcomeEvidenceRule": "Happy receives quantities/status and an opaque evidence reference, never recipient evidence content."
+  },
+  "missionPolicy": {
+    "ordinaryCourierMaySelectPersonByPerceivedNeed": false,
+    "fieldOutreachRequiresSeparateMercyAuthorization": true,
+    "regionalPolicyRequired": true,
+    "fallbacks": [
+      "existing eligible request",
+      "verified recipient",
+      "verified NGO or redistribution point",
+      "authorized volunteer/field outreach",
+      "report EXHAUSTED"
+    ]
+  },
+  "moneyBoundary": {
+    "merchantRescuePaymentsOwnedByMercy": false,
+    "happyCommissionOnDonation": false,
+    "transportFunding": "opaque reference only; no payment execution is added to Mercy by this contract"
+  },
+  "organizationBoundary": {
+    "duplicateOrganizationRegistrationRequired": false,
+    "plannedCapability": "MERCY_DONOR",
+    "capabilityImplemented": false,
+    "publicPromotionRequiresSeparateConsent": true
+  },
+  "hardInvariants": [
+    "Mercy cannot reserve more quantity than Happy exposes as donatable.",
+    "A reservation must expire no later than the Happy safety cutoff.",
+    "A Happy safety recall blocks further handoff.",
+    "Cross-system messages are not authorization grants.",
+    "The same physical food quantity cannot be both sold and donated.",
+    "Mercy remains optional to the first Happy Food Rescue runtime release."
+  ]
+}
