@@ -25,6 +25,17 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(workflow).toContain("Dispatch revision is no longer current main");
   });
 
+
+  it("keeps production serialized while replacing stale test-branch runs", () => {
+    expect(workflow).toContain(
+      "github.event_name == 'workflow_dispatch' && 'mercy-beget-auth-url-repair'",
+    );
+    expect(workflow).toContain("mercy-beget-auth-url-test-{0}");
+    expect(workflow).toContain(
+      "cancel-in-progress: ${{ github.event_name == 'push' }}",
+    );
+  });
+
   it("sets only the canonical public Auth URL values", () => {
     expect(workflow).toContain("TARGET_SITE_URL: https://mercy.peerivo.net");
     expect(workflow).toContain(
