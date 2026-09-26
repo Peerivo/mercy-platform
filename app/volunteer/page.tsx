@@ -1,3 +1,4 @@
+import { RussianCityInput } from "@/components/russian-city-input";
 import { createOffer } from "./actions";
 
 export const metadata = {
@@ -28,7 +29,11 @@ export default async function Volunteer({
         <p className="form-alert" role="alert">
           {q.error === "validation"
             ? "Проверьте поля и подтвердите согласие."
-            : "Не удалось сохранить предложение. Повторите позже."}
+            : q.error === "locality"
+              ? "Не удалось подтвердить населённый пункт по ГАР/ФИАС. Проверьте название."
+              : q.error === "locality-service"
+                ? "Сервис проверки населённого пункта временно недоступен. Выберите населённый пункт из подсказок или повторите позже."
+                : "Не удалось сохранить предложение. Повторите позже."}
         </p>
       )}
 
@@ -57,15 +62,18 @@ export default async function Volunteer({
           <div className="grid cols2 compact-form-grid">
             <label>
               Страна
-              <input name="country" required maxLength={80} />
+              <input name="country" required maxLength={80} defaultValue="Россия" />
             </label>
             <label>
-              Город
-              <input
+              Населённый пункт
+              <RussianCityInput
                 name="city"
                 maxLength={120}
-                placeholder="Можно оставить пустым при помощи онлайн"
+                placeholder="Например, Псебай или Москва"
               />
+              <small className="muted">
+                Можно ввести свой населённый пункт; при отправке проверим его по ГАР/ФИАС.
+              </small>
             </label>
           </div>
 

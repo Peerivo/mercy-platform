@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createRequest } from "./actions";
 import { getRequestJurisdiction } from "@/lib/request-consent";
+import { RussianCityInput } from "@/components/russian-city-input";
 
 export function HelpForm() {
   const [country, setCountry] = useState("Россия");
@@ -43,8 +44,16 @@ export function HelpForm() {
           </label>
 
           <label>
-            Город
-            <input name="city" required maxLength={120} />
+            Населённый пункт
+            <RussianCityInput
+              name="city"
+              required
+              maxLength={120}
+              placeholder="Например, Псебай или Москва"
+            />
+            <small className="muted">
+              Если населённого пункта нет в подсказках, введите его вручную — при отправке проверим название по ГАР/ФИАС.
+            </small>
           </label>
         </div>
 

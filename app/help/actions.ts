@@ -1,9 +1,15 @@
 "use server";
 
 import { redirect } from "next/navigation";
+
+import { getRequestConsentVersion } from "@/lib/request-consent";
+import { verifyRussianLocality } from "@/lib/russian-locality-provider";
 import { serverSupabase } from "@/lib/supabase/server";
 import { requestSchema } from "@/lib/validation";
-import { getRequestConsentVersion } from "@/lib/request-consent";
+
+function isRussia(country: string) {
+  return country.trim().toLocaleLowerCase("ru-RU") === "россия";
+}
 
 export async function createRequest(fd: FormData) {
   const s = await serverSupabase();
@@ -29,12 +35,21 @@ export async function createRequest(fd: FormData) {
 
   if (!parsed.success) redirect("/help?error=validation");
 
+  if (isRussia(parsed.data.country)) {
+    const locality = await verifyRussianLocality(parsed.data.city);
+    if (!locality.verified) {
+      redirect(
+        locality.providerAvailable
+          ? "/help?error=locality"
+          : "/help?error=locality-service",
+      );
+    }
+  }
+
   const request = { ...parsed.data };
   delete (request as Partial<typeof request>).consent;
 
-  const consentVersion = getRequestConsentVersion(
-    parsed.data.country,
-  );
+  const consentVersion = getRequestConsentVersion(parsed.data.country);
 
   const { data, error } = await s.rpc("create_help_request", {
     payload: request,
