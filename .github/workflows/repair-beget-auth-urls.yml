@@ -55,7 +55,7 @@ jobs:
         run: npm ci
 
       - name: Run Auth repair unit tests
-        run: npx vitest run tests/beget-auth-url-workflow.test.ts tests/auth-callback-route.test.ts
+        run: ./node_modules/.bin/vitest run tests/beget-auth-url-workflow.test.ts tests/auth-callback-route.test.ts
 
       - name: Build application with canonical site URL
         run: npm run build
