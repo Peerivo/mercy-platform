@@ -12,6 +12,11 @@ const remoteScript = fs.readFileSync(
   "utf8",
 );
 
+const callbackVerifier = fs.readFileSync(
+  path.join(process.cwd(), "scripts", "verify-auth-callback-surface.sh"),
+  "utf8",
+);
+
 describe("Repair Beget Auth URLs workflow", () => {
   it("is a protected one-shot production repair on exact reviewed main", () => {
     expect(workflow).toContain("environment: production");
@@ -122,10 +127,13 @@ describe("Repair Beget Auth URLs workflow", () => {
     );
     expect(workflow).toContain("/auth/v1/health");
     expect(workflow).toContain("/auth/v1/settings");
-    expect(workflow).toContain("${TARGET_SITE_URL}/auth/callback");
     expect(workflow).toContain(
-      '"${TARGET_SITE_URL}/auth?error=callback"*|"/auth?error=callback"*',
+      'bash scripts/verify-auth-callback-surface.sh "${TARGET_SITE_URL}"',
     );
-    expect(workflow).toContain("AUTH_MAGIC_LINK_REDIRECT_CONFIGURATION_VERIFIED=1");
+    expect(callbackVerifier).toContain('current="${site}/auth/callback"');
+    expect(callbackVerifier).toContain(
+      "AUTH_MAGIC_LINK_REDIRECT_CONFIGURATION_VERIFIED=1",
+    );
+    expect(workflow).not.toContain('case "${location}" in');
   });
 });

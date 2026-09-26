@@ -121,26 +121,7 @@ jobs:
           )"
           printf '%s' "${settings}" | jq -e 'type == "object"' >/dev/null
 
-          headers="$(
-            curl --silent --show-error --max-time 15 \
-              --dump-header - --output /dev/null \
-              "${TARGET_SITE_URL}/auth/callback"
-          )"
-          printf '%s\n' "${headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
-          location="$(
-            printf '%s\n' "${headers}" \
-              | tr -d '\r' \
-              | awk 'tolower($1)=="location:" {print $2; exit}'
-          )"
-          case "${location}" in
-            "${TARGET_SITE_URL}/auth?error=callback"*|"/auth?error=callback"*) ;;
-            *)
-              echo "::error::Public Auth callback did not stay on canonical Mercy origin"
-              exit 1
-              ;;
-          esac
-
-          echo "AUTH_MAGIC_LINK_REDIRECT_CONFIGURATION_VERIFIED=1"
+          bash scripts/verify-auth-callback-surface.sh "${TARGET_SITE_URL}"
 
       - name: Remove runner SSH material
         if: always()

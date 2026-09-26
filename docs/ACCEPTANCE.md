@@ -1,6 +1,7 @@
 # Acceptance
 
 ## Automated status
+- Application container dependency coverage must remain provable: the repository must not contain `compose.yaml`, `compose.yml`, `docker-compose.yaml`, or `docker-compose.yml`; CI/Vercel/REG.RU build from the digest-pinned `Dockerfile`, while Beget's self-hosted Supabase Compose is remote infrastructure discovered through Docker labels rather than a repository application manifest.
 - `Repair Beget Auth URLs` must remain `workflow_dispatch`-only. Its remote host shell body lives in `scripts/repair-beget-auth-urls-remote.sh`, and CI must pass `bash -n` for that script so repair-logic edits are syntax-checked without turning the protected workflow into a push-triggered validation surface.
 - `.peerivo/global-contract.json` must exist and bind `Peerivo/mercy-platform` to the current canonical Global Contract authority with the exact required version, digest and Git SHA; agents must resolve the authority from the binding before effectful work and fail closed for missing/stale authority-changing bindings.
 - Unit validation: help request, volunteer offer, moderation and staff workspace schemas are covered. Specialist/provider validation is intentionally absent because that contour is not part of Mercy.
@@ -65,7 +66,7 @@ Run `35899437604` failed safely after apply because the target fingerprint loop 
 
 
 ## Production Auth URL repair hardening
-When the remote repair body is streamed to `bash -s`, every Docker Compose command that does not intentionally consume data from stdin must explicitly detach stdin (for example with `</dev/null`) before any host mutation; a disposable preflight container must not be able to consume the remaining script and falsely end the step successfully. Callback verification may accept either the absolute canonical redirect or its same-origin relative form `/auth?error=callback`, but must reject cross-origin redirects.
+When the remote repair body is streamed to `bash -s`, every Docker Compose command that does not intentionally consume data from stdin must explicitly detach stdin (for example with `</dev/null`) before any host mutation; a disposable preflight container must not be able to consume the remaining script and falsely end the step successfully. Callback verification must follow at most four 307/308 redirects, must refuse to follow any cross-origin hop, may traverse only the canonical callback path during normalization, and succeeds only when the same-origin target is `/auth` or `/auth/` with query parameter `error=callback`; loops, lookalike origins, wrong paths and non-redirect responses fail closed.
 
 A production Auth URL repair must fail before host mutation unless the exact staged Compose model renders all four canonical values: `API_EXTERNAL_URL=https://api.mercy.peerivo.net/auth/v1`, `GOTRUE_SITE_URL=https://mercy.peerivo.net`, `GOTRUE_URI_ALLOW_LIST=https://mercy.peerivo.net/auth/callback`, and `GOTRUE_JWT_ISSUER=https://api.mercy.peerivo.net/auth/v1`. The workflow must tolerate stale temporary Compose labels left by earlier fail-closed recreates by rediscovering the standard root-owned Compose files under the canonical working directory; it must not widen host permissions or require passwordless sudo.
 
