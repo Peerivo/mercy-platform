@@ -6,14 +6,25 @@ function canonicalRedirect(path: string) {
   return NextResponse.redirect(new URL(path, siteUrl()));
 }
 
+function safeNextPath(requested: string | null) {
+  if (!requested?.startsWith("/") || requested.startsWith("//")) {
+    return "/cabinet";
+  }
+
+  const canonical = new URL(siteUrl());
+  const resolved = new URL(requested, canonical);
+
+  if (resolved.origin !== canonical.origin) {
+    return "/cabinet";
+  }
+
+  return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+}
+
 export async function GET(req: Request) {
   const requestUrl = new URL(req.url);
   const code = requestUrl.searchParams.get("code");
-  const requested = requestUrl.searchParams.get("next");
-  const next =
-    requested?.startsWith("/") && !requested.startsWith("//")
-      ? requested
-      : "/cabinet";
+  const next = safeNextPath(requestUrl.searchParams.get("next"));
 
   if (!code) {
     return canonicalRedirect("/auth?error=callback");
