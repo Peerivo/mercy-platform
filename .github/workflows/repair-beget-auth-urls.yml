@@ -11,13 +11,16 @@ on:
         description: "Type REPAIR_AUTH_URLS"
         required: true
         type: string
+  push:
+    branches:
+      - "test/auth-repair-workflow-*"
 
 permissions:
   contents: read
 
 concurrency:
-  group: mercy-beget-auth-url-repair
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'workflow_dispatch' && 'mercy-beget-auth-url-repair' || format('mercy-beget-auth-url-test-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 env:
   TARGET_SITE_URL: https://mercy.peerivo.net
@@ -26,8 +29,67 @@ env:
   TARGET_SUPABASE_URL: https://api.mercy.peerivo.net
 
 jobs:
+  branch-test:
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/test/auth-repair-workflow-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_PUBLIC_SITE_URL: https://mercy.peerivo.net
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: local-build-placeholder-key-123456789
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Validate repair shell syntax
+        shell: bash
+        run: bash -n scripts/repair-beget-auth-urls-remote.sh scripts/verify-auth-callback-surface.sh
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Auth repair unit tests
+        run: npx vitest run tests/beget-auth-url-workflow.test.ts tests/auth-callback-route.test.ts
+
+      - name: Build application with canonical site URL
+        run: npm run build
+
+      - name: Verify callback surface against local production build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run start -- -H 127.0.0.1 -p 3000 > /tmp/mercy-auth-repair-test.log 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "${server_pid}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:3000/auth >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "${ready}" = true || {
+            cat /tmp/mercy-auth-repair-test.log
+            exit 1
+          }
+
+          bash scripts/verify-auth-callback-surface.sh \
+            "https://mercy.peerivo.net" \
+            "http://127.0.0.1:3000"
+
   repair:
-    if: ${{ inputs.confirm == 'REPAIR_AUTH_URLS' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm == 'REPAIR_AUTH_URLS' && github.ref == 'refs/heads/main' }}
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 15
