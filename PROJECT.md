@@ -71,3 +71,7 @@ The repair workflow now avoids rewriting unknown Compose source files. It falls 
 The protected `Repair Beget Auth URLs` workflow can be exercised safely on branches matching `test/auth-repair-workflow-*` without entering the `production` Environment and without reading Beget production secrets. The branch-test path syntax-checks the repair scripts, runs focused Auth tests, builds the production Next.js bundle with canonical `NEXT_PUBLIC_SITE_URL=https://mercy.peerivo.net`, starts it locally on `127.0.0.1:3000`, and verifies the same callback-surface checker against that internal probe origin. The production repair job remains `workflow_dispatch`-only, exact-`main`, and gated by `REPAIR_AUTH_URLS`.
 
 Auth callback redirects are built from canonical `siteUrl()` rather than `Request.url`, so reverse-proxy runtime origins such as `0.0.0.0:3000` cannot leak into public redirects.
+
+
+## REG.RU Auth callback promotion gate — 2026-09-26
+Before promoting a new Mercy application image on REG.RU, the protected PREPARE workflow now probes the candidate at `127.0.0.1:3100/auth/callback` and requires a 307/308 redirect to `https://mercy.peerivo.net/auth?error=callback`. A mismatch fails while rollback is armed, before the candidate is promoted. VERIFY repeats the same canonical callback assertion against the public site after deployment.

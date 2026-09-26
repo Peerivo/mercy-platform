@@ -75,3 +75,7 @@ The repair must use a final Auth-only temporary Compose override rather than edi
 
 ## Auth repair test-branch acceptance
 Before giving production-run instructions, the exact branch head must have a successful `Repair Beget Auth URLs` branch-test run and green project CI. The branch-test must not use the `production` Environment, production secrets, SSH credentials, or Beget mutation paths. It must build the production app with canonical `NEXT_PUBLIC_SITE_URL`, serve it on a local internal origin, and require `scripts/verify-auth-callback-surface.sh` to observe a canonical public redirect. The production repair job remains restricted to manual dispatch from exact current `main`.
+
+
+## REG.RU callback promotion acceptance
+PREPARE must not promote a REG.RU candidate unless the local candidate callback `/auth/callback` returns 307/308 with exact Location `https://mercy.peerivo.net/auth?error=callback`. This check must run before `phase="promoting"` while rollback remains armed. VERIFY must repeat the callback assertion against the canonical public site.
