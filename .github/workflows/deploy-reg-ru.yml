@@ -270,6 +270,14 @@ jobs:
 
           curl --fail --silent --show-error --max-time 10             http://127.0.0.1:3100/health/data >/dev/null
 
+          callback_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             'http://127.0.0.1:3100/auth/callback')"
+          printf '%s\n' "${callback_headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
+          callback_location="$(printf '%s\n' "${callback_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
+          test "${callback_location}" = 'https://mercy.peerivo.net/auth?error=callback' || {
+            echo "Candidate Auth callback escaped canonical Mercy origin." >&2
+            false
+          }
+
           redirect_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             -H "Host: ${RUSSIAN_HOST}"             'http://127.0.0.1:3100/requests?cutover_probe=1')"
           printf '%s\n' "${redirect_headers}" | head -n 1 | grep -E ' 308 ' >/dev/null
           redirect_location="$(printf '%s\n' "${redirect_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
@@ -372,6 +380,14 @@ jobs:
 
           data="$(curl --fail --silent --show-error --max-time 20 "${SITE_URL}/health/data")"
           printf '%s' "${data}" | jq -e '.status == "ok"' >/dev/null
+
+          callback_headers="$(curl --silent --show-error --max-time 20 --dump-header - --output /dev/null "${SITE_URL}/auth/callback")"
+          printf '%s\n' "${callback_headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
+          callback_location="$(printf '%s\n' "${callback_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
+          test "${callback_location}" = "${SITE_URL}/auth?error=callback" || {
+            echo "::error::Canonical production Auth callback redirect is wrong"
+            exit 1
+          }
 
       - name: Verify Russian hostname permanently redirects to canonical site
         shell: bash
