@@ -19,8 +19,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: mercy-beget-auth-url-repair
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'workflow_dispatch' && 'mercy-beget-auth-url-repair' || format('mercy-beget-auth-url-test-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 env:
   TARGET_SITE_URL: https://mercy.peerivo.net
