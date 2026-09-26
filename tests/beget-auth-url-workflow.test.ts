@@ -38,18 +38,40 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(remoteScript).toContain("set_env_line API_EXTERNAL_URL");
   });
 
-  it("keeps the production workflow manual-only and delegates remote logic to a syntax-checked script", () => {
+  it("keeps production repair manual-only while allowing a no-production test branch run", () => {
     const triggerBlock = workflow.slice(
       workflow.indexOf("on:"),
       workflow.indexOf("\n\npermissions:"),
     );
 
     expect(triggerBlock).toContain("workflow_dispatch:");
-    expect(triggerBlock).not.toContain("push:");
+    expect(triggerBlock).toContain("push:");
+    expect(triggerBlock).toContain('"test/auth-repair-workflow-*"');
     expect(triggerBlock).not.toContain("pull_request:");
+    expect(workflow).toContain(
+      "github.event_name == 'workflow_dispatch' && inputs.confirm == 'REPAIR_AUTH_URLS' && github.ref == 'refs/heads/main'",
+    );
+    expect(workflow).toContain(
+      "github.event_name == 'push' && startsWith(github.ref, 'refs/heads/test/auth-repair-workflow-')",
+    );
     expect(workflow).toContain("< scripts/repair-beget-auth-urls-remote.sh");
     expect(workflow).not.toContain("<<'REMOTE'");
     expect(remoteScript).toMatch(/^set -Eeuo pipefail\n/);
+  });
+
+  it("runs the test-branch workflow without production secrets or environment access", () => {
+    const testJob = workflow.slice(
+      workflow.indexOf("  branch-test:"),
+      workflow.indexOf("\n  repair:"),
+    );
+    expect(testJob).toContain("Build application with canonical site URL");
+    expect(testJob).toContain(
+      'bash scripts/verify-auth-callback-surface.sh \\\n            "https://mercy.peerivo.net" \\\n            "http://127.0.0.1:3000"',
+    );
+    expect(testJob).not.toContain("environment: production");
+    expect(testJob).not.toContain("BEGET_SUPABASE_SSH_KEY");
+    expect(testJob).not.toContain("BEGET_SUPABASE_KNOWN_HOSTS");
+    expect(testJob).not.toContain("secrets.");
   });
 
   it("detaches Compose commands from streamed bash stdin before host mutation", () => {
@@ -130,7 +152,8 @@ describe("Repair Beget Auth URLs workflow", () => {
     expect(workflow).toContain(
       'bash scripts/verify-auth-callback-surface.sh "${TARGET_SITE_URL}"',
     );
-    expect(callbackVerifier).toContain('current="${site}/auth/callback"');
+    expect(callbackVerifier).toContain('probe="${2:-${site}}"');
+    expect(callbackVerifier).toContain('current="${probe}/auth/callback"');
     expect(callbackVerifier).toContain(
       "AUTH_MAGIC_LINK_REDIRECT_CONFIGURATION_VERIFIED=1",
     );
