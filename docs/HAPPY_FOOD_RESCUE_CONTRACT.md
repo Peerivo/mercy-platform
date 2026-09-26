@@ -10,6 +10,7 @@ Canonical semantic contract is owned by `Peerivo/happy`:
 - path: `contracts/food-rescue-mercy.v1.json`
 - contract: `peerivo.happy.food-rescue.mercy`
 - version: `1.0.0`
+- immutable contract pin: `734df94d8dc53ed46e97eec8abca0b95838340e9`
 
 The local planned consumer binding is `.peerivo/integrations/happy-food-rescue.v1.json`.
 
