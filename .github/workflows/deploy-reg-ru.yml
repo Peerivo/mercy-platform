@@ -275,6 +275,11 @@ jobs:
           redirect_location="$(printf '%s\n' "${redirect_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
           test "${redirect_location}" = 'https://mercy.peerivo.net/requests?cutover_probe=1'
 
+          callback_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             'http://127.0.0.1:3100/auth/callback')"
+          printf '%s\n' "${callback_headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
+          callback_location="$(printf '%s\n' "${callback_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
+          test "${callback_location}" = 'https://mercy.peerivo.net/auth?error=callback'
+
           if [ -n "${old_image}" ]; then
             cp -f "${PROD_ENV}" "${PREVIOUS_ENV}"
             chmod 600 "${PREVIOUS_ENV}"
