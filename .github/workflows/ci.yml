@@ -13,6 +13,29 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate production Auth repair shell syntax
         run: bash -n scripts/repair-beget-auth-urls-remote.sh scripts/verify-auth-callback-surface.sh
+      - name: Read-only production callback redirect diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          site="https://mercy.peerivo.net"
+          current="${site}/auth/callback"
+          for attempt in 1 2 3 4; do
+            mapfile -t response < <(
+              curl --silent --show-error --max-time 15 \
+                --output /dev/null \
+                --write-out '%{http_code}\n%{redirect_url}\n' \
+                "${current}"
+            )
+            code="${response[0]:-}"
+            redirect_url="${response[1]:-}"
+            printf 'CALLBACK_DIAG_%s_CODE=%s\n' "${attempt}" "${code}"
+            printf 'CALLBACK_DIAG_%s_REDIRECT=%s\n' "${attempt}" "${redirect_url}"
+            [[ -n "${redirect_url}" ]] || break
+            case "${redirect_url}" in
+              "${site}/"*) current="${redirect_url}" ;;
+              *) break ;;
+            esac
+          done
       - uses: actions/setup-node@v7
         with:
           node-version: 22
