@@ -12,7 +12,7 @@
     "path": "contracts/food-rescue-mercy.v1.json",
     "id": "peerivo.happy.food-rescue.mercy",
     "version": "1.0.0",
-    "implementationPin": null,
+    "implementationPin": "734df94d8dc53ed46e97eec8abca0b95838340e9",
     "pinRequiredBeforeRuntimeEnablement": true
   },
   "implementation": {
