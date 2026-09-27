@@ -1,7 +1,12 @@
 name: CI
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: mercy-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -29,6 +34,7 @@ jobs:
       - run: docker build --build-arg NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=local-build-placeholder-key-123456789 --build-arg NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000 .
 
   supabase-integration:
+    needs: app
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
