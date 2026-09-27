@@ -79,3 +79,9 @@ Before giving production-run instructions, the exact branch head must have a suc
 
 ## REG.RU callback promotion acceptance
 PREPARE must not promote a REG.RU candidate unless the local candidate callback `/auth/callback` returns 307/308 with exact Location `https://mercy.peerivo.net/auth?error=callback`. This check must run before `phase="promoting"` while rollback remains armed. VERIFY must repeat the callback assertion against the canonical public site.
+
+
+## Global Contract 1.7/1.8 migration acceptance
+The repository binding must pin exact Global Contract 1.8.0 version, digest `sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed`, and contract git SHA `223d57cd47ef176272cd9ebfd12ee7c52f887756`. Adoption evidence must retain the intermediate 1.7.0 safety migration and the 1.8.0 public-web migration; neither may claim runtime mutation in the adoption-only change.
+
+For 1.7, every security-critical decision gate changed in future work must have blocking fail-closed regression coverage for malformed/ambiguous input, invalid explicit policy and coercion paths before merge. For 1.8, Mercy remains `unknown_not_verified` until a separate reviewed implementation provides a valid runtime `/site-observability.json`, one GTM-only browser entrypoint, GA4 and Yandex Metrica tags managed inside GTM unless an approved exception applies, jurisdiction-aware denied-by-default analytics/advertising consent, no browser analytics secrets, DNS TXT ownership desired state, and evidence that analytics failure cannot break page availability. A production release must not be called 1.8-compliant until that evidence is present.
