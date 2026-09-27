@@ -1,0 +1,38 @@
+{
+  "apiVersion": "peerivo.io/contract/v1",
+  "kind": "GlobalContractAcknowledgement",
+  "project": "Peerivo/mercy-platform",
+  "changeEventId": "contract.updated.peerivo-global.1.8.0",
+  "oldContract": {
+    "version": "1.7.0",
+    "digest": "sha256:de7261eeb7cb00f2e5cb420428450f81cd9580ed514528958e74a12df432138d",
+    "gitSha": "5e683c1f32f59fbee2527b584892c75a3b0969d7"
+  },
+  "newContract": {
+    "version": "1.8.0",
+    "digest": "sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed",
+    "gitSha": "223d57cd47ef176272cd9ebfd12ee7c52f887756"
+  },
+  "acknowledgement": {
+    "approverIdentity": "olegka85",
+    "acknowledgedAt": "2026-09-27T07:13:00Z",
+    "source": "explicit confirmation in the active ChatGPT Mercy conversation",
+    "scope": "Peerivo/mercy-platform adoption of Global Contract 1.8.0"
+  },
+  "migration": {
+    "requiredByEvent": true,
+    "record": "Mercy is a public production web application and therefore enters WEB-OBS-001..010 scope. The repository currently has no versioned /site-observability.json, GTM-only browser entrypoint, GA4/Yandex Metrica verification evidence, consent evidence, or DNS TXT verification desired-state files. Adoption records that state as unknown_not_verified/non-compliant rather than fabricating compliance. A separate reviewed implementation must add the runtime manifest/loader, GTM-managed providers, privacy defaults, verification desired state and evidence before any future production release is considered 1.8-compliant.",
+    "runtimeMutationInThisChange": false,
+    "dnsMutationInThisChange": false,
+    "analyticsProviderMutationInThisChange": false,
+    "productionReleaseBlockedUntilMigrationVerified": true
+  },
+  "compatibilityEvidenceRefs": [
+    "Peerivo/global#139",
+    "Peerivo/global/events/contract.updated.1.8.0.json",
+    "Peerivo/global/schemas/site-observability.schema.json",
+    "Peerivo/global/schemas/domain-verifications.schema.json",
+    "Peerivo/global/schemas/web-observability-evidence.schema.json",
+    "Peerivo/global/web/peerivo-observability-loader.v1.js"
+  ]
+}
