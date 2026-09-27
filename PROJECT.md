@@ -75,3 +75,11 @@ Auth callback redirects are built from canonical `siteUrl()` rather than `Reques
 
 ## REG.RU Auth callback promotion gate — 2026-09-26
 Before promoting a new Mercy application image on REG.RU, the protected PREPARE workflow now probes the candidate at `127.0.0.1:3100/auth/callback` and requires a 307/308 redirect to `https://mercy.peerivo.net/auth?error=callback`. A mismatch fails while rollback is armed, before the candidate is promoted. VERIFY repeats the same canonical callback assertion against the public site after deployment.
+
+
+## GLOBAL CONTRACT 1.8.0 ADOPTION — 2026-09-27
+Mercy adopts the cumulative Peerivo Global Contract path 1.6.0 → 1.7.0 → 1.8.0 under the user's explicit acknowledgement in the active Mercy conversation. The binding is pinned to Global 1.8.0 digest `sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed` at contract commit `223d57cd47ef176272cd9ebfd12ee7c52f887756`.
+
+The 1.7 migration is security-only policy adoption: security-critical allow/authorization/activation/high-impact gates must reject malformed or ambiguous allow-relevant input, must not authorize via implicit coercion or permissive fallback from explicit invalid policy, and P0/P1 fail-open defects become permanent blocking regressions in project CI.
+
+Mercy is classified as a public production web application for 1.8 observability. Current repository evidence does not yet prove 1.8 compliance: there is no versioned `/site-observability.json`, GTM-only browser entrypoint, GA4/Yandex Metrica verification evidence, consent evidence, or DNS TXT desired-state/evidence set. The compliance state is therefore `unknown_not_verified`; this adoption PR performs no runtime analytics, DNS or production mutation. A separate reviewed migration must implement and verify WEB-OBS-001..010 before a future production release is treated as 1.8-compliant.
