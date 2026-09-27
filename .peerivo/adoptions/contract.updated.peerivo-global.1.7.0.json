@@ -1,0 +1,34 @@
+{
+  "apiVersion": "peerivo.io/contract/v1",
+  "kind": "GlobalContractAcknowledgement",
+  "project": "Peerivo/mercy-platform",
+  "changeEventId": "contract.updated.peerivo-global.1.7.0",
+  "oldContract": {
+    "version": "1.6.0",
+    "digest": "sha256:616a10a554895632697ccee3f4d4596f543a18e9fbc98c8fe622e0ae53160c61",
+    "gitSha": "b9bcc8b8139a56918d536dae7138bd77f929455a"
+  },
+  "newContract": {
+    "version": "1.7.0",
+    "digest": "sha256:de7261eeb7cb00f2e5cb420428450f81cd9580ed514528958e74a12df432138d",
+    "gitSha": "5e683c1f32f59fbee2527b584892c75a3b0969d7"
+  },
+  "acknowledgement": {
+    "approverIdentity": "olegka85",
+    "acknowledgedAt": "2026-09-27T07:13:00Z",
+    "source": "explicit confirmation in the active ChatGPT Mercy conversation to adopt canonical Global Contract 1.8.0, including its cumulative 1.7.0 safety rules",
+    "scope": "Peerivo/mercy-platform adoption path 1.6.0 -> 1.7.0 -> 1.8.0"
+  },
+  "migration": {
+    "requiredByEvent": true,
+    "record": "Mercy adopts the fail-closed security-critical gate contract: malformed or ambiguous allow-relevant inputs deny; explicit invalid policy never falls back permissively; implicit type coercion never authorizes; P0/P1 fail-open defects become permanent regressions; security-critical gate changes require blocking adversarial CI. Existing Auth/callback/repair/deploy regressions remain part of project CI; any newly identified security-critical gate must be added to the fail-closed suite before merge.",
+    "runtimeMutationInThisChange": false,
+    "productionConfigMutationInThisChange": false,
+    "securityThresholdWeakeningInThisChange": false
+  },
+  "compatibilityEvidenceRefs": [
+    "Peerivo/global/events/contract.updated.1.7.0.json",
+    "Peerivo/global/security/fail-closed-vectors.v1.json",
+    "Peerivo/global/tests/fail-closed-test-contract.test.mjs"
+  ]
+}
