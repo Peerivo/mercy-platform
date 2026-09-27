@@ -7,9 +7,9 @@
   "globalRef": {
     "repository": "Peerivo/global",
     "id": "peerivo-global",
-    "version": "1.6.0",
-    "digest": "sha256:616a10a554895632697ccee3f4d4596f543a18e9fbc98c8fe622e0ae53160c61",
-    "gitSha": "b9bcc8b8139a56918d536dae7138bd77f929455a"
+    "version": "1.8.0",
+    "digest": "sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed",
+    "gitSha": "223d57cd47ef176272cd9ebfd12ee7c52f887756"
   },
   "updatePolicy": {
     "observeAllUpdates": true,
