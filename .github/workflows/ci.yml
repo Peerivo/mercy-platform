@@ -5,7 +5,7 @@ on:
   pull_request:
 
 concurrency:
-  group: mercy-ci-${{ github.event.pull_request.number || github.ref }}
+  group: mercy-ci-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
