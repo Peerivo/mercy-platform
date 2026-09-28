@@ -15,8 +15,10 @@ export async function changeMercyRole(formData: FormData) {
 
   const email = String(formData.get("email") ?? "").trim();
   const returnTo = email ? `/staff/roles?email=${encodeURIComponent(email)}` : "/staff/roles";
+  const withStatus = (status: string) =>
+    `${returnTo}${returnTo.includes("?") ? "&" : "?"}${status}`;
 
-  if (!parsed.success) redirect(`${returnTo}&error=validation`);
+  if (!parsed.success) redirect(withStatus("error=validation"));
 
   const s = await serverSupabase();
   const {
@@ -35,6 +37,6 @@ export async function changeMercyRole(formData: FormData) {
         : null,
   });
 
-  if (error) redirect(`${returnTo}&error=role`);
-  redirect(`${returnTo}&saved=1`);
+  if (error) redirect(withStatus("error=role"));
+  redirect(withStatus("saved=1"));
 }
