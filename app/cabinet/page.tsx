@@ -48,11 +48,7 @@ export default async function Cabinet({
         .order("created_at", { ascending: false })
         .limit(50),
       s.rpc("current_staff_role"),
-      s
-        .from("profiles")
-        .select("deletion_requested_at")
-        .eq("id", user.id)
-        .maybeSingle(),
+      s.from("profiles").select("deletion_requested_at").maybeSingle(),
     ]);
 
   const deletionRequestedAt = profile?.deletion_requested_at ?? null;
