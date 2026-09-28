@@ -113,6 +113,31 @@ describe.sequential("disposable Supabase security boundary", () => {
       { user_id: ids.a1, role: "ADMIN", granted_by: ids.a1 },
     ]);
     if (roleError) throw roleError;
+
+    // Staff fixtures that may receive/re-receive privileged roles must satisfy
+    // the same ESIA identity gate as production role management.
+    for (const name of ["c1", "c2", "a1"]) {
+      const consent = await admin
+        .from("consents")
+        .insert({
+          user_id: ids[name],
+          kind: "IDENTITY_INTEGRATION",
+          text_version: "staff-integration-v1",
+        })
+        .select("id")
+        .single();
+      if (consent.error || !consent.data) throw consent.error ?? new Error("staff identity consent missing");
+
+      const identity = await admin.from("identity_links").insert({
+        local_user_id: ids[name],
+        provider: "ESIA",
+        external_subject: `staff-integration-${name}`,
+        verified_at: new Date().toISOString(),
+        consent_id: consent.data.id,
+      });
+      if (identity.error) throw identity.error;
+    }
+
     await Promise.all(["u1", "u2", "u3", "c1", "c2", "a1"].map(signIn));
   }, 30_000);
 
