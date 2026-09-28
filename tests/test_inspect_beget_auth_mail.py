@@ -11,8 +11,26 @@ SPEC = importlib.util.spec_from_file_location("inspector", Path(__file__).parent
 inspector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(inspector)
 
+WORKFLOW = (Path(__file__).parents[1] / ".github/workflows/inspect-beget-auth-mail.yml").read_text()
+
 
 class InspectionTests(unittest.TestCase):
+    def test_runtime_sender_target_is_exact(self):
+        self.assertEqual(
+            inspector.EXPECTED["GOTRUE_SMTP_SENDER_NAME"],
+            "Peerivo. Язык Милосердия",
+        )
+
+    def test_sender_verification_workflow_is_read_only_and_bounded(self):
+        self.assertIn("[verify-auth-smtp-sender]", WORKFLOW)
+        self.assertIn("statuses: write", WORKFLOW)
+        self.assertIn("inputs.expected_sha || github.sha", WORKFLOW)
+        self.assertIn("for _ in $(seq 1 90)", WORKFLOW)
+        self.assertIn("Mercy/Auth SMTP sender runtime", WORKFLOW)
+        self.assertIn("configuration_mutated == false", WORKFLOW)
+        self.assertIn("email_sent == false", WORKFLOW)
+        self.assertNotIn("--search-database\n", WORKFLOW.split("[verify-auth-smtp-sender]")[0])
+
     def test_runtime_config_reports_mismatch_without_exposing_values(self):
         env = dict(inspector.EXPECTED, GOTRUE_SMTP_PASS="dummy-secret", GOTRUE_SMTP_PORT="465")
         env["GOTRUE_MAILER_TEMPLATES_MAGIC_LINK"] = "https://" + inspector.LEGACY_HOST + "/private?token=dummy-token"
