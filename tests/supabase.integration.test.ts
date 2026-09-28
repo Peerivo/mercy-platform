@@ -182,8 +182,9 @@ describe.sequential("disposable Supabase security boundary", () => {
       .from("profiles")
       .select("id,deletion_requested_at")
       .eq("id", ids.u1);
-    expect(otherProfile.error).toBeNull();
-    expect(otherProfile.data).toEqual([]);
+    expect(otherProfile.error).not.toBeNull();
+    expect(otherProfile.error?.code).toBe("42501");
+    expect(otherProfile.data).toBeNull();
 
     const cancelled = await clients.u1.rpc("cancel_account_deletion");
     expect(cancelled.error).toBeNull();
