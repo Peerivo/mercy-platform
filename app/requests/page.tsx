@@ -184,7 +184,7 @@ export default async function RequestsPage({
               name="city"
               maxLength={120}
               defaultValue={filters.city}
-              placeholder="Например, Батуми"
+              placeholder="Например, Москва"
             />
           </label>
         </div>
