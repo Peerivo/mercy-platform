@@ -102,7 +102,7 @@ The correction resolves the installed `Image` ID, preserves `--pull never`, and 
 ## Mercy roles / volunteer service — 2026-09-28
 
 - Added the USER → ESIA-derived VISITOR identity model and audited VOLUNTEER/CURATOR/PATRON/ADMIN grants.
-- Curators manage verified volunteers and patrons; only admins manage curator/admin grants. Patron types cover physical persons, sole proprietors, legal entities and government bodies.
+- Curators manage ESIA-verified volunteers and registered patrons; only admins manage curator/admin grants. Patron types cover physical persons, sole proprietors, legal entities and government bodies.
 - Added curator volunteer directory, city/status/category/home-clearance filtering, volunteer cards, contact persons, request assignment and volunteer-service statistics.
 - Added beneficiary-consent/home-visit safety gates, paired home visits and an incident workflow that suspends volunteer access until explicit reactivation.
 - Assigned volunteer case access is narrower than curator access: no case lifecycle changes and no visibility into other responders' private contacts.
