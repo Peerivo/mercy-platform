@@ -208,16 +208,22 @@ describe("SMTP image ID regression", () => {
 
 
 describe("Beget Auth SMTP sender repair workflow", () => {
-  it("is manual, production-scoped, one-shot and exact-main gated", () => {
+  it("is one-shot, production-scoped and exact-main gated with a bounded auto-start", () => {
     expect(senderWorkflow).toContain("workflow_dispatch:");
-    expect(senderWorkflow).not.toContain("\n  push:");
+    expect(senderWorkflow).toContain("\n  push:");
+    expect(senderWorkflow).toContain("branches:");
+    expect(senderWorkflow).toContain("- main");
+    expect(senderWorkflow).toContain("[run-auth-smtp-sender-repair]");
     expect(senderWorkflow).toContain("environment: production");
     expect(senderWorkflow).toContain("github.ref == 'refs/heads/main'");
     expect(senderWorkflow).toContain("github.run_number == 1");
     expect(senderWorkflow).toContain("github.run_attempt == 1");
     expect(senderWorkflow).toContain("REPAIR_AUTH_SMTP_SENDER");
+    expect(senderWorkflow).toContain("inputs.expected_sha || github.sha");
+    expect(senderWorkflow).toContain("for _ in $(seq 1 90)");
+    expect(senderWorkflow).toContain("Timed out waiting for successful exact-main CI.");
     expect(senderWorkflow).toContain(
-      "APPROVED_BASE_SHA: b824081d06cbb02587649ce9377ed794d54f21db",
+      "APPROVED_BASE_SHA: ef73ad89668e876d94d7993db8798663a878ed3d",
     );
     expect(senderWorkflow).toContain("scripts/repair-beget-auth-smtp-remote.sh");
     expect(senderWorkflow).toContain("probe-resend-smtp.mjs");
