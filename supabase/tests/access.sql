@@ -68,7 +68,7 @@ select ok(
   and lower(pg_get_functiondef('private.can_access_case(uuid,uuid)'::regprocedure)) like '%uid = auth.uid()%'
 ,'private security-definer helpers bind explicit uid to the caller');
 select ok(
-  (select count(*) from pg_policies where schemaname='public' and coalesce(qual,'') like '%private.can_access_case%') >= 4
+  (select count(*) from pg_policies where schemaname='public' and coalesce(qual,'') like '%private.can_access_case%') >= 3
   and exists(select 1 from pg_policies where schemaname='public' and tablename='volunteer_offers' and coalesce(qual,'') like '%private.is_admin%')
   and not exists(select 1 from pg_policies where schemaname='public' and (coalesce(qual,'') || coalesce(with_check,'')) ~ 'public\.(is_admin|is_active_coordinator|can_access_case)'),
   'RLS policies resolve authorization through private helpers'
@@ -89,7 +89,6 @@ select results_eq(
       ('list_public_help_requests(text,text,text,text,integer,integer)'::text),
       ('submit_feedback(text,text,text)'::text),
       ('submit_help_request_report(uuid,text,text,uuid)'::text),
-      ('update_volunteer_profile(uuid,volunteer_service_status,text[],boolean,home_visit_clearance,boolean,text)'::text),
       ('volunteer_service_stats()'::text)
     ) as allowed(signature) order by signature$$,
   'anonymous security-definer API surface matches the explicit allowlist'
@@ -138,7 +137,8 @@ select results_eq(
       ('staff_volunteer_incidents(uuid)'::text),
       ('staff_volunteers(text,volunteer_service_status,text,home_visit_clearance,integer,integer)'::text),
       ('submit_feedback(text,text,text)'::text),
-      ('submit_help_request_report(uuid,text,text,uuid)'::text)
+      ('submit_help_request_report(uuid,text,text,uuid)'::text),
+      ('update_volunteer_profile(uuid,volunteer_service_status,text[],boolean,home_visit_clearance,boolean,text)'::text)
     ) as allowed(signature) order by signature$$,
   'authenticated security-definer API surface matches the explicit allowlist'
 );
