@@ -133,12 +133,12 @@ export default async function Cabinet() {
         <div className="cabinet-section-heading cabinet-support-heading">
           <div>
             <span className="request-section-kicker">Поддержка проекта</span>
-            <h2 id="cabinet-support-title">Поддержать "Язык милосердия"</h2>
+            <h2 id="cabinet-support-title">Поддержать &quot;Язык милосердия&quot;</h2>
           </div>
         </div>
 
         <p>
-          Если вы хотите обсудить поддержку развития "Язык милосердия", напишите нам. Мы
+          Если вы хотите обсудить поддержку развития &quot;Язык милосердия&quot;, напишите нам. Мы
           ответим по email и расскажем, какие варианты сейчас доступны.
         </p>
         <p className="muted cabinet-support-note">
