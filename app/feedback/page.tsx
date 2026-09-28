@@ -20,7 +20,7 @@ export default async function FeedbackPage({
     <section className="page-shell section feedback-page">
       <div className="page-heading">
         <div>
-          <h1>{isSupport ? "Поддержать Mercy" : "Обратная связь"}</h1>
+          <h1>{isSupport ? "Поддержать \"Язык милосердия\"" : "Обратная связь"}</h1>
           <p className="page-lead">
             {isSupport
               ? "Если вы хотите обсудить поддержку развития проекта, оставьте сообщение и email для ответа. Мы свяжемся с вами по email и расскажем о доступных вариантах."
