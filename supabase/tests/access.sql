@@ -88,7 +88,7 @@ select results_eq(
       ('get_public_help_request(uuid)'::text),
       ('list_public_help_requests(text,text,text,text,integer,integer)'::text),
       ('submit_feedback(text,text,text)'::text),
-      ('submit_help_request_report(uuid,text,text,uuid)'::text),
+      ('submit_help_request_report(uuid,text,text,uuid)'::text)
     ) as allowed(signature) order by signature$$,
   'anonymous security-definer API surface matches the explicit allowlist'
 );
