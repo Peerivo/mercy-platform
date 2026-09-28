@@ -64,7 +64,7 @@ export default async function StaffRoles({
       <h1>Роли и доступ</h1>
       <p className="muted">
         Поиск работает только по точному email зарегистрированного пользователя.
-        Новая служебная роль выдаётся только после подтверждения личности через ЕСИА.
+        Для волонтёра, куратора и нового администратора требуется ЕСИА. Меценату достаточно зарегистрированного аккаунта; тип и роль подтверждает куратор.
       </p>
 
       <form className="card grid" method="get">
@@ -111,8 +111,9 @@ export default async function StaffRoles({
           )}
 
           {!found.is_esia_verified && (
-            <p role="alert">
-              Пока ЕСИА не подтверждена, служебную роль назначить нельзя.
+            <p className="muted">
+              ЕСИА не подтверждена: можно назначить роль мецената, но не волонтёра,
+              куратора или администратора.
             </p>
           )}
 
@@ -154,7 +155,7 @@ export default async function StaffRoles({
                   <button
                     className="btn secondary"
                     type="submit"
-                    disabled={!enabled && !found.is_esia_verified}
+                    disabled={!enabled && role !== "PATRON" && !found.is_esia_verified}
                   >
                     {enabled ? "Снять роль" : "Назначить роль"}
                   </button>
