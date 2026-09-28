@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOut } from "@/app/auth/actions";
+import { cancelAccountDeletion, requestAccountDeletion } from "./actions";
 import { getPublicRequestStatus } from "@/lib/request-status";
 import { serverSupabase } from "@/lib/supabase/server";
 
@@ -15,7 +16,12 @@ type Offer = {
   created_at: string;
 };
 
-export default async function Cabinet() {
+export default async function Cabinet({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
   const s = await serverSupabase();
   const {
     data: { user },
@@ -23,8 +29,12 @@ export default async function Cabinet() {
 
   if (!user) redirect("/auth");
 
-  const [{ data: requests }, { data: offers }, { data: staffRole }] =
-    await Promise.all([
+  const [
+    { data: requests },
+    { data: offers },
+    { data: staffRole },
+    { data: profile },
+  ] = await Promise.all([
       s
         .from("help_requests")
         .select("id,case_number,category,city,urgency,status,created_at")
@@ -38,7 +48,15 @@ export default async function Cabinet() {
         .order("created_at", { ascending: false })
         .limit(50),
       s.rpc("current_staff_role"),
+      s
+        .from("profiles")
+        .select("deletion_requested_at")
+        .eq("id", user.id)
+        .maybeSingle(),
     ]);
+
+  const deletionRequestedAt = profile?.deletion_requested_at ?? null;
+  const deletionError = params.deletion === "error";
 
   return (
     <section className="page-shell section cabinet-page">
@@ -168,9 +186,32 @@ export default async function Cabinet() {
             проверит объём и сроки хранения; резервные копии не очищаются
             мгновенно.
           </p>
-          <button className="btn secondary" disabled>
-            Запрос удаления — в подготовке
-          </button>
+          {deletionError && (
+            <p role="alert">
+              Не удалось изменить запрос на удаление. Обновите страницу и
+              повторите попытку.
+            </p>
+          )}
+          {deletionRequestedAt ? (
+            <>
+              <p className="muted">
+                Запрос отправлен{" "}
+                <time dateTime={deletionRequestedAt}>
+                  {new Date(deletionRequestedAt).toLocaleString("ru-RU")}
+                </time>
+                . До обработки администратором аккаунт продолжает работать.
+              </p>
+              <form action={cancelAccountDeletion}>
+                <button className="btn secondary">Отменить запрос</button>
+              </form>
+            </>
+          ) : (
+            <form action={requestAccountDeletion}>
+              <button className="btn secondary">
+                Запросить удаление аккаунта
+              </button>
+            </form>
+          )}
         </div>
       </section>
     </section>
