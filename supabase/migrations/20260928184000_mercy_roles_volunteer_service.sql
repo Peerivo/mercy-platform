@@ -292,7 +292,7 @@ language sql
 stable
 security definer
 set search_path=''
-as $
+as $$
   select case
     when private.is_admin() then 'ADMIN'::public.staff_role
     when private.has_active_esia(auth.uid())
@@ -300,7 +300,7 @@ as $
       then 'COORDINATOR'::public.staff_role
     else null
   end;
-$;
+$$;
 
 create or replace function public.staff_coordinators(coordinator_limit int default 100)
 returns table(id uuid, display_name text)
@@ -308,7 +308,7 @@ language sql
 stable
 security definer
 set search_path=''
-as $
+as $$
   select
     r.user_id,
     coalesce(nullif(trim(p.alias), ''), 'Куратор ' || left(r.user_id::text, 8))
@@ -326,7 +326,7 @@ as $
   group by r.user_id,p.alias
   order by coalesce(nullif(trim(p.alias),''),r.user_id::text)
   limit least(greatest(coordinator_limit,1),100);
-$;
+$$;
 
 create or replace function public.coordinator_cases(
   case_limit int default 20,
@@ -345,7 +345,7 @@ language sql
 stable
 security definer
 set search_path=''
-as $
+as $$
   select h.id,h.case_number,h.category::text,h.city::text,h.urgency::text,h.status,h.created_at
   from public.help_requests h
   join public.case_assignments a
@@ -355,7 +355,7 @@ as $
   order by h.updated_at desc,h.id
   limit least(greatest(case_limit,1),100)
   offset greatest(case_offset,0);
-$;
+$$;
 
 create or replace function public.assign_case(
   case_id uuid,
@@ -366,7 +366,7 @@ returns void
 language plpgsql
 security definer
 set search_path=''
-as $
+as $$
 declare
   clean_reason text := trim(coalesce(reason_text,''));
 begin
@@ -403,7 +403,7 @@ begin
   insert into public.audit_events(actor_id,action,object_type,object_id,reason)
   values(auth.uid(),'CASE_ASSIGNED','help_request',case_id,left(clean_reason,500));
 end;
-$;
+$$;
 
 revoke all on function public.current_staff_role() from public,anon;
 revoke all on function public.staff_coordinators(int) from public,anon;
