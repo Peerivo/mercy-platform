@@ -29,7 +29,7 @@ test("public forms and nearby stay compact and readable on mobile", async ({ pag
 test("project support starts as an email inquiry and does not collect payment", async ({ page }) => {
   await page.goto("/feedback?topic=support&from=%2Fcabinet");
 
-  await expect(page.getByRole("heading", { name: "Поддержать Mercy" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: 'Поддержать "Язык милосердия"' })).toBeVisible();
   await expect(page.getByText(/На этой странице платежи не принимаются/)).toBeVisible();
   await expect(page.locator('input[name="replyEmail"]')).toHaveAttribute("required", "");
   await expect(page.getByRole("button", { name: "Отправить запрос о поддержке" })).toBeVisible();
