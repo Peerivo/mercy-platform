@@ -9,6 +9,10 @@ const workflow = fs.readFileSync(
   path.join(root, ".github/workflows/repair-beget-auth-smtp.yml"),
   "utf8",
 );
+const senderWorkflow = fs.readFileSync(
+  path.join(root, ".github/workflows/repair-beget-auth-smtp-sender.yml"),
+  "utf8",
+);
 const script = fs.readFileSync(
   path.join(root, "scripts/repair-beget-auth-smtp-remote.sh"),
   "utf8",
@@ -52,6 +56,7 @@ describe("Beget Auth SMTP repair workflow", () => {
     expect(script).toContain("GOTRUE_SMTP_USER: ${SMTP_USER}");
     expect(script).toContain("GOTRUE_SMTP_PASS: ${SMTP_PASS}");
     expect(script).toContain("GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}");
+    expect(script).toContain("GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}");
     expect(script).toContain("compose_target_args");
     expect(script).toContain("validate_rendered_auth");
   });
@@ -63,6 +68,7 @@ describe("Beget Auth SMTP repair workflow", () => {
       'set_env_line SMTP_USER "${target_user}"',
       'set_env_line SMTP_PASS "${smtp_pass}"',
       'set_env_line SMTP_ADMIN_EMAIL "${target_admin}"',
+      'set_env_line SMTP_SENDER_NAME "${target_sender}"',
     ]) {
       expect(script).toContain(line);
     }
@@ -111,6 +117,7 @@ describe("Beget Auth SMTP repair workflow", () => {
     expect(script).toContain('target_port="465"');
     expect(script).toContain('target_user="resend"');
     expect(script).toContain('target_admin="no-reply@mercy.peerivo.net"');
+    expect(script).toContain('target_sender="Mercy"');
   });
 });
 
@@ -196,5 +203,23 @@ describe("SMTP image ID regression", () => {
     expect(preflight).toBeGreaterThan(0);
     expect(hostWrite).toBeGreaterThan(preflight);
     expect(postflight).toBeGreaterThan(hostWrite);
+  });
+});
+
+
+describe("Beget Auth SMTP sender repair workflow", () => {
+  it("is manual, production-scoped, one-shot and exact-main gated", () => {
+    expect(senderWorkflow).toContain("workflow_dispatch:");
+    expect(senderWorkflow).not.toContain("\n  push:");
+    expect(senderWorkflow).toContain("environment: production");
+    expect(senderWorkflow).toContain("github.ref == 'refs/heads/main'");
+    expect(senderWorkflow).toContain("github.run_number == 1");
+    expect(senderWorkflow).toContain("github.run_attempt == 1");
+    expect(senderWorkflow).toContain("REPAIR_AUTH_SMTP_SENDER");
+    expect(senderWorkflow).toContain(
+      "APPROVED_BASE_SHA: b824081d06cbb02587649ce9377ed794d54f21db",
+    );
+    expect(senderWorkflow).toContain("scripts/repair-beget-auth-smtp-remote.sh");
+    expect(senderWorkflow).toContain("probe-resend-smtp.mjs");
   });
 });

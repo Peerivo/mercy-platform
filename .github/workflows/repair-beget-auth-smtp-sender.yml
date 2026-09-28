@@ -1,0 +1,146 @@
+name: Repair Beget Auth SMTP Sender
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact reviewed current main SHA"
+        required: true
+        type: string
+      confirm:
+        description: "Type REPAIR_AUTH_SMTP_SENDER"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mercy-beget-auth-sender-repair
+  cancel-in-progress: false
+
+env:
+  APPROVED_BASE_SHA: b824081d06cbb02587649ce9377ed794d54f21db
+  TARGET_SUPABASE_URL: https://api.mercy.peerivo.net
+  TARGET_SITE_URL: https://mercy.peerivo.net
+  TARGET_REDIRECT_URL: https://mercy.peerivo.net/auth/callback
+  TARGET_API_EXTERNAL_URL: https://api.mercy.peerivo.net/auth/v1
+
+jobs:
+  repair:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'REPAIR_AUTH_SMTP_SENDER' && github.run_number == 1 && github.run_attempt == 1 }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      TARGET_PUBLIC_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Require exact authorized sender increment and successful CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "${EXPECTED_SHA}" = "${GITHUB_SHA}"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "${GITHUB_SHA}"
+          git merge-base --is-ancestor "${APPROVED_BASE_SHA}" "${GITHUB_SHA}"
+
+          allowed="$(
+            printf '%s\n' \
+              '.github/workflows/repair-beget-auth-smtp-sender.yml' \
+              'scripts/inspect-beget-auth-mail.py' \
+              'scripts/repair-beget-auth-smtp-remote.sh' \
+              'tests/beget-auth-smtp-workflow.test.ts' \
+              | LC_ALL=C sort
+          )"
+          changed="$(git diff --name-only "${APPROVED_BASE_SHA}..${GITHUB_SHA}" | LC_ALL=C sort)"
+          test "${changed}" = "${allowed}" || {
+            echo "::error::Current main contains files outside the approved sender-name repair increment."
+            printf '%s\n' "${changed}"
+            exit 1
+          }
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${EXPECTED_SHA}&event=push&per_page=1" \
+            | jq -e --arg sha "${EXPECTED_SHA}" '
+                .workflow_runs[0] |
+                .head_sha == $sha and
+                .head_branch == "main" and
+                .status == "completed" and
+                .conclusion == "success"
+              ' >/dev/null
+
+      - name: Validate protected production configuration
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in             BEGET_SUPABASE_HOST             BEGET_SUPABASE_USER             BEGET_SUPABASE_SSH_KEY             BEGET_SUPABASE_KNOWN_HOSTS             RESEND_API_KEY             TARGET_PUBLIC_KEY
+          do
+            test -n "${!name:-}" || {
+              echo "::error::Missing production configuration: ${name}"
+              exit 1
+            }
+          done
+          [[ "${BEGET_SUPABASE_HOST}" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "${BEGET_SUPABASE_USER}" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
+
+      - name: Configure pinned SSH host key
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+
+      - name: Repair Beget Auth SMTP and sender name with rollback
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
+          remote_dir="$(ssh "${ssh_opts[@]}" "${remote}" 'umask 077; mktemp -d /tmp/mercy-auth-smtp-run.XXXXXXXX')"
+          [[ "${remote_dir}" =~ ^/tmp/mercy-auth-smtp-run\.[a-zA-Z0-9]{8}$ ]]
+          cleanup() {
+            ssh "${ssh_opts[@]}" "${remote}"               "rm -f '${remote_dir}/repair-beget-auth-smtp-remote.sh' '${remote_dir}/probe-resend-smtp.mjs'; rmdir '${remote_dir}'" || true
+          }
+          trap cleanup EXIT
+
+          scp "${ssh_opts[@]}" -q             scripts/repair-beget-auth-smtp-remote.sh             scripts/probe-resend-smtp.mjs             "${remote}:${remote_dir}/"
+
+          printf '%s' "${RESEND_API_KEY}"             | ssh "${ssh_opts[@]}" "${remote}"                 "bash '${remote_dir}/repair-beget-auth-smtp-remote.sh' '${GITHUB_RUN_ID}' '${remote_dir}/probe-resend-smtp.mjs'"
+
+      - name: Verify public Auth health and settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 15             -H "apikey: ${TARGET_PUBLIC_KEY}"             "${TARGET_SUPABASE_URL}/auth/v1/health" >/dev/null
+          settings="$(
+            curl --fail --silent --show-error --max-time 15               -H "apikey: ${TARGET_PUBLIC_KEY}"               "${TARGET_SUPABASE_URL}/auth/v1/settings"
+          )"
+          printf '%s' "${settings}" | jq -e 'type == "object"' >/dev/null
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
