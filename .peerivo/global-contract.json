@@ -7,14 +7,16 @@
   "globalRef": {
     "repository": "Peerivo/global",
     "id": "peerivo-global",
-    "version": "1.8.0",
-    "digest": "sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed",
-    "gitSha": "223d57cd47ef176272cd9ebfd12ee7c52f887756"
+    "version": "1.9.0",
+    "digest": "sha256:17a74ea76c73643206b9dfa5aeeb412764d0f35e2d0dd71b071227c18d05fe0c",
+    "gitSha": "310dbb1814f60c4117108a19f41da436b4fb44f1"
   },
   "updatePolicy": {
     "observeAllUpdates": true,
-    "compatibleAdditive": "recompute_before_next_effectful_run",
-    "permissionOrSafetyChanging": "explicit_acknowledgement",
-    "breaking": "explicit_approval_migration_and_compatibility_evidence"
+    "canonicalMergeAppliesAutomatically": true,
+    "perConsumerAcknowledgementRequired": false,
+    "compatibleAdditive": "auto_apply_after_canonical_merge",
+    "permissionOrSafetyChanging": "auto_apply_after_canonical_merge",
+    "breaking": "apply_policy_after_global_approval_migrate_before_incompatible_effects"
   }
 }
