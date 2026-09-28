@@ -25,6 +25,6 @@ export function getRequestConsentVersion(
 ) {
   return getRequestJurisdiction(country) ===
     "ge"
-    ? "request-ge-v2"
-    : "request-ru-v2";
+    ? "request-ge-v3"
+    : "request-ru-v3";
 }
