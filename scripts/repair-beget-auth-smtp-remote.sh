@@ -233,6 +233,7 @@ chmod 600 "${backup}"
 backup_hash="$(sha256sum "${backup}" | awk '{print $1}')"
 echo "Auth configuration backup created: sha256=${backup_hash}"
 
+host_mutated=0
 rollback_ok=0
 rollback() {
   set +e
@@ -254,10 +255,10 @@ rollback() {
 on_exit() {
   code=$?
   trap - EXIT HUP INT TERM
-  if [[ "${code}" -ne 0 ]]; then
+  if [[ "${code}" -ne 0 && "${host_mutated}" == "1" ]]; then
     rollback
   fi
-  if [[ "${rollback_ok}" == "1" || "${code}" -eq 0 ]]; then
+  if [[ "${host_mutated}" == "0" || "${rollback_ok}" == "1" || "${code}" -eq 0 ]]; then
     cleanup_scratch
   fi
   exit "${code}"
@@ -276,6 +277,7 @@ set_env_line SMTP_ADMIN_EMAIL "${target_admin}"
 validate_rendered_auth
 
 docker_write_host_file "${scratch_env}" "${env_file}"
+host_mutated=1
 compose_auth_up
 
 auth_after=""
