@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Validate production Auth repair shell syntax
-        run: bash -n scripts/repair-beget-auth-urls-remote.sh scripts/repair-beget-auth-smtp-remote.sh scripts/verify-auth-callback-surface.sh
+        run: bash -n scripts/repair-beget-auth-urls-remote.sh scripts/repair-beget-auth-smtp-remote.sh scripts/repair-beget-auth-session-remote.sh scripts/verify-auth-callback-surface.sh
       - name: Test read-only Auth mail diagnostic safety
         run: |
           python3 -m unittest discover -s tests -p 'test_inspect_beget_auth_mail.py'
