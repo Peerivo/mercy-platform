@@ -1,0 +1,144 @@
+name: Dispatch REG.RU PREPARE Once
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: mercy-reg-ru-prepare-dispatch-once
+  cancel-in-progress: false
+
+env:
+  APPROVED_BASE_SHA: 37b39dd9e74410740ce1afc709e4379f9504d8b7
+  TARGET_WORKFLOW: deploy-reg-ru.yml
+
+jobs:
+  dispatch:
+    if: ${{ github.ref == 'refs/heads/main' && github.run_number == 1 && github.run_attempt == 1 && contains(github.event.head_commit.message, '[run-reg-ru-prepare]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+
+      - name: Require one-shot approved increment and green exact-main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}" || {
+            echo "::error::One-shot dispatcher must be the direct child of the approved base."
+            exit 1
+          }
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "${GITHUB_SHA}" || {
+            echo "::error::Dispatcher SHA is no longer current main."
+            exit 1
+          }
+
+          allowed="$(
+            printf '%s\n' \
+              '.github/workflows/dispatch-reg-ru-prepare-once.yml' \
+              'tests/deploy-reg-ru.test.ts' \
+              | LC_ALL=C sort
+          )"
+          changed="$(git diff --name-only "${APPROVED_BASE_SHA}..${GITHUB_SHA}" | LC_ALL=C sort)"
+          test "${changed}" = "${allowed}" || {
+            echo "::error::One-shot dispatcher increment contains unexpected files."
+            printf '%s\n' "${changed}"
+            exit 1
+          }
+
+          ci_ok=0
+          for _ in $(seq 1 90); do
+            ci="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&event=push&per_page=1"
+            )"
+            status="$(printf '%s' "${ci}" | jq -r '.workflow_runs[0].status // "missing"')"
+            conclusion="$(printf '%s' "${ci}" | jq -r '.workflow_runs[0].conclusion // ""')"
+            head_sha="$(printf '%s' "${ci}" | jq -r '.workflow_runs[0].head_sha // ""')"
+            head_branch="$(printf '%s' "${ci}" | jq -r '.workflow_runs[0].head_branch // ""')"
+
+            if [[ "${head_sha}" == "${GITHUB_SHA}" && "${head_branch}" == "main" && "${status}" == "completed" ]]; then
+              [[ "${conclusion}" == "success" ]] || {
+                echo "::error::Exact-main CI completed without success."
+                exit 1
+              }
+              ci_ok=1
+              break
+            fi
+            sleep 10
+          done
+
+          [[ "${ci_ok}" == "1" ]] || {
+            echo "::error::Timed out waiting for successful exact-main CI."
+            exit 1
+          }
+
+      - name: Dispatch protected REG.RU PREPARE
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq -n --arg sha "${GITHUB_SHA}" '{
+            ref: "main",
+            inputs: {
+              operation: "PREPARE",
+              expected_sha: $sha,
+              confirm: "PREPARE"
+            }
+          }' | gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+            --input -
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            runs="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?head_sha=${GITHUB_SHA}&event=workflow_dispatch&per_page=5"
+            )"
+            run_id="$(printf '%s' "${runs}" | jq -r '.workflow_runs[0].id // ""')"
+            if [[ -n "${run_id}" ]]; then
+              break
+            fi
+            sleep 5
+          done
+
+          [[ -n "${run_id}" ]] || {
+            echo "::error::REG.RU PREPARE dispatch was not observed."
+            exit 1
+          }
+
+          echo "REG_RU_PREPARE_RUN_ID=${run_id}"
+
+          for _ in $(seq 1 180); do
+            run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}")"
+            status="$(printf '%s' "${run}" | jq -r '.status')"
+            conclusion="$(printf '%s' "${run}" | jq -r '.conclusion // ""')"
+
+            if [[ "${status}" == "completed" ]]; then
+              [[ "${conclusion}" == "success" ]] || {
+                echo "::error::REG.RU PREPARE run ${run_id} completed with ${conclusion}."
+                exit 1
+              }
+              echo "REG_RU_PREPARE_SUCCESS run_id=${run_id} sha=${GITHUB_SHA}"
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "::error::Timed out waiting for REG.RU PREPARE completion."
+          exit 1

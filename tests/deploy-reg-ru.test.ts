@@ -6,6 +6,15 @@ const workflow = fs.readFileSync(
   path.join(process.cwd(), ".github", "workflows", "deploy-reg-ru.yml"),
   "utf8",
 );
+const dispatcher = fs.readFileSync(
+  path.join(
+    process.cwd(),
+    ".github",
+    "workflows",
+    "dispatch-reg-ru-prepare-once.yml",
+  ),
+  "utf8",
+);
 const nextConfig = fs.readFileSync(path.join(process.cwd(), "next.config.ts"), "utf8");
 const healthData = fs.readFileSync(
   path.join(process.cwd(), "app", "health", "data", "route.ts"),
@@ -86,5 +95,42 @@ describe("REG.RU production deployment safety contract", () => {
 
   it("never invokes database migration tooling", () => {
     expect(workflow).not.toMatch(/supabase\s+db\s+(push|reset)|psql|pg_restore|pg_dump/i);
+  });
+});
+
+
+describe("REG.RU one-shot PREPARE dispatcher", () => {
+  it("keeps the production deploy workflow manual-only", () => {
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).not.toContain("\n  push:");
+  });
+
+  it("is bounded to one marked current-main push", () => {
+    expect(dispatcher).toContain("\n  push:");
+    expect(dispatcher).toContain("- main");
+    expect(dispatcher).toContain("[run-reg-ru-prepare]");
+    expect(dispatcher).toContain("github.run_number == 1");
+    expect(dispatcher).toContain("github.run_attempt == 1");
+    expect(dispatcher).toContain(
+      "APPROVED_BASE_SHA: 37b39dd9e74410740ce1afc709e4379f9504d8b7",
+    );
+    expect(dispatcher).toContain('test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"');
+    expect(dispatcher).toContain("One-shot dispatcher increment contains unexpected files.");
+  });
+
+  it("waits for green exact-main CI before dispatching PREPARE", () => {
+    expect(dispatcher).toContain("actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&event=push");
+    expect(dispatcher).toContain("Exact-main CI completed without success.");
+    expect(dispatcher).toContain("Timed out waiting for successful exact-main CI.");
+    expect(dispatcher).toContain("actions/workflows/${TARGET_WORKFLOW}/dispatches");
+    expect(dispatcher).toContain('operation: "PREPARE"');
+    expect(dispatcher).toContain('expected_sha: $sha');
+    expect(dispatcher).toContain('confirm: "PREPARE"');
+  });
+
+  it("does not carry production secrets itself", () => {
+    expect(dispatcher).not.toContain("secrets.");
+    expect(dispatcher).not.toContain("REG_RU_SSH_KEY");
+    expect(dispatcher).not.toContain("NEXT_PUBLIC_SUPABASE");
   });
 });
