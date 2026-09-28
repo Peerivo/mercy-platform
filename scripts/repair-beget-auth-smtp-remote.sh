@@ -296,6 +296,18 @@ for service in db rest realtime storage kong; do
   other_before["${service}"]="$(get_service_id "${service}")"
 done
 
+if [[ "${smtp_host_before}" == "${target_host}" \
+  && "${smtp_port_before}" == "${target_port}" \
+  && "${smtp_user_before}" == "${target_user}" \
+  && "${smtp_admin_before}" == "${target_admin}" \
+  && "${smtp_pass_before}" == "${smtp_pass}" ]]; then
+  smtp_probe "${auth_before}" "${other_before[storage]}"
+  echo "AUTH_SMTP_REPAIR_ALREADY_OK=1"
+  unset smtp_pass smtp_pass_before
+  exit 0
+fi
+echo "AUTH_SMTP_REPAIR_PRESTATE_NONCANONICAL=1"
+
 backup="${scratch}/env.backup"
 cp -p "${scratch_env}" "${backup}"
 chmod 600 "${backup}"
