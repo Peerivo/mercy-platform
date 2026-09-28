@@ -208,7 +208,7 @@ stable
 security definer
 set search_path=''
 as $$
-  select coalesce(uid=auth.uid(),false)
+  select coalesce(uid = auth.uid(),false)
     and private.has_mercy_role('ADMIN'::public.mercy_role,uid);
 $$;
 
@@ -223,7 +223,7 @@ security definer
 set search_path=''
 as $$
   select
-    coalesce(uid=auth.uid(),false)
+    coalesce(uid = auth.uid(),false)
     and exists(
       select 1
       from public.case_assignments a
@@ -253,7 +253,7 @@ security definer
 set search_path=''
 as $$
   select
-    coalesce(uid=auth.uid(),false)
+    coalesce(uid = auth.uid(),false)
     and exists(
       select 1
       from public.help_requests h
