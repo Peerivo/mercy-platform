@@ -24,7 +24,7 @@ mapfile -t migration_files < <(
 repo_versions=()
 declare -A seen_versions=()
 for file in "${migration_files[@]}"; do
-  [[ "${file}" =~ ^([0-9]{14})_([a-zA-Z0-9_]+)\.sql$ ]] || {
+  [[ "${file}" =~ ^([0-9]{12}|[0-9]{14})_([a-zA-Z0-9_-]+)\.sql$ ]] || {
     echo "Migration filename is not canonical: ${file}" >&2
     exit 1
   }
@@ -65,8 +65,13 @@ if (("${#pending_files[@]}" == 0)); then
   exit 0
 fi
 
-backup_path="${HOME}/mercy-beget-pre-migration-${GITHUB_RUN_ID}.dump"
-[[ "${backup_path}" =~ ^/[^[:space:]]+/mercy-beget-pre-migration-[0-9]+\.dump$ ]] || {
+remote_home="$(ssh "${ssh_opts[@]}" "${remote}" 'printf %s "$HOME"')"
+[[ "${remote_home}" =~ ^/[a-zA-Z0-9._/-]+$ ]] || {
+  echo "Unexpected remote home path." >&2
+  exit 1
+}
+backup_path="${remote_home}/mercy-beget-pre-migration-${GITHUB_RUN_ID}.dump"
+[[ "${backup_path}" =~ ^/[a-zA-Z0-9._/-]+/mercy-beget-pre-migration-[0-9]+\.dump$ ]] || {
   echo "Unexpected backup path." >&2
   exit 1
 }
@@ -77,7 +82,7 @@ ssh "${ssh_opts[@]}" "${remote}" \
 echo "Protected pre-migration backup created on Beget."
 
 for file in "${pending_files[@]}"; do
-  [[ "${file}" =~ ^([0-9]{14})_([a-zA-Z0-9_]+)\.sql$ ]]
+  [[ "${file}" =~ ^([0-9]{12}|[0-9]{14})_([a-zA-Z0-9_-]+)\.sql$ ]]
   version="${BASH_REMATCH[1]}"
   migration_name="${BASH_REMATCH[2]}"
   echo "Applying migration ${version}_${migration_name}"
