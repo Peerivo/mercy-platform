@@ -89,7 +89,6 @@ select results_eq(
       ('list_public_help_requests(text,text,text,text,integer,integer)'::text),
       ('submit_feedback(text,text,text)'::text),
       ('submit_help_request_report(uuid,text,text,uuid)'::text),
-      ('volunteer_service_stats()'::text)
     ) as allowed(signature) order by signature$$,
   'anonymous security-definer API surface matches the explicit allowlist'
 );
@@ -138,7 +137,8 @@ select results_eq(
       ('staff_volunteers(text,volunteer_service_status,text,home_visit_clearance,integer,integer)'::text),
       ('submit_feedback(text,text,text)'::text),
       ('submit_help_request_report(uuid,text,text,uuid)'::text),
-      ('update_volunteer_profile(uuid,volunteer_service_status,text[],boolean,home_visit_clearance,boolean,text)'::text)
+      ('update_volunteer_profile(uuid,volunteer_service_status,text[],boolean,home_visit_clearance,boolean,text)'::text),
+      ('volunteer_service_stats()'::text)
     ) as allowed(signature) order by signature$$,
   'authenticated security-definer API surface matches the explicit allowlist'
 );
