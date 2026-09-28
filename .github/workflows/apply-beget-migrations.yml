@@ -102,7 +102,7 @@ jobs:
           find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n'             | LC_ALL=C sort > /tmp/repo-migrations.txt
 
           while IFS= read -r file; do
-            [[ "${file}" =~ ^[0-9]{14}_[a-z0-9_]+\.sql$ ]] || {
+            [[ "${file}" =~ ^([0-9]{12}|[0-9]{14})_[a-z0-9_]+\.sql$ ]] || {
               echo "::error::Migration filename is not deterministic: ${file}"
               exit 1
             }
@@ -169,7 +169,7 @@ jobs:
             {
               printf 'BEGIN;\n'
               cat "${path}"
-              printf "\\nINSERT INTO supabase_migrations.schema_migrations(version,statements,name) VALUES ('%s',ARRAY[]::text[],'%s');\\n" "\${version}" "\${name}"
+              printf "\\nINSERT INTO supabase_migrations.schema_migrations(version,statements,name) VALUES ('%s',ARRAY[]::text[],'%s');\\n" "${version}" "${name}"
               printf 'COMMIT;\n'
             } | ssh "${remote}"               "docker exec -i supabase-db psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres >/dev/null"
 
