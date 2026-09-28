@@ -28,7 +28,6 @@ export const metadata: Metadata = {
 const navigation = [
   { href: "/requests", label: "Просьбы" },
   { href: "/nearby", label: "Помощь рядом" },
-  { href: "/help", label: "Нужна помощь" },
   { href: "/volunteer", label: "Хочу помочь" },
   { href: "/donate", label: "Поддержать" },
 ] as const;
