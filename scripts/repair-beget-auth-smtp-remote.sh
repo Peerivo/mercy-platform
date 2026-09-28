@@ -57,6 +57,8 @@ scratch="$(mktemp -d /tmp/mercy-auth-smtp-repair.XXXXXXXX)"
 chmod 700 "${scratch}"
 scratch_env="${scratch}/env"
 scratch_configs=()
+scratch_target_override="${scratch}/auth-smtp-target-override.yml"
+scratch_rollback_override="${scratch}/auth-smtp-rollback-override.yml"
 
 cleanup_scratch() {
   rm -rf "${scratch}"
@@ -137,112 +139,75 @@ for index in "${!config_files[@]}"; do
   scratch_configs+=("${copy}")
 done
 
-compose_args=(
+cat > "${scratch_target_override}" <<'OVERRIDE'
+services:
+  auth:
+    environment:
+      API_EXTERNAL_URL: https://api.mercy.peerivo.net/auth/v1
+      GOTRUE_SITE_URL: https://mercy.peerivo.net
+      GOTRUE_URI_ALLOW_LIST: https://mercy.peerivo.net/auth/callback
+      GOTRUE_JWT_ISSUER: https://api.mercy.peerivo.net/auth/v1
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+OVERRIDE
+chmod 600 "${scratch_target_override}"
+
+cat > "${scratch_rollback_override}" <<'OVERRIDE'
+services:
+  auth:
+    environment:
+      API_EXTERNAL_URL: ${MERCY_ROLLBACK_API_EXTERNAL_URL}
+      GOTRUE_SITE_URL: ${MERCY_ROLLBACK_SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${MERCY_ROLLBACK_URI_ALLOW_LIST}
+      GOTRUE_JWT_ISSUER: ${MERCY_ROLLBACK_JWT_ISSUER}
+      GOTRUE_SMTP_HOST: ${MERCY_ROLLBACK_SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${MERCY_ROLLBACK_SMTP_PORT}
+      GOTRUE_SMTP_USER: ${MERCY_ROLLBACK_SMTP_USER}
+      GOTRUE_SMTP_PASS: ${MERCY_ROLLBACK_SMTP_PASS}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${MERCY_ROLLBACK_SMTP_ADMIN_EMAIL}
+OVERRIDE
+chmod 600 "${scratch_rollback_override}"
+
+compose_base_args=(
   docker compose
   --project-name "${project}"
   --project-directory "${working_dir}"
   --env-file "${scratch_env}"
 )
 for file in "${scratch_configs[@]}"; do
-  compose_args+=(-f "${file}")
+  compose_base_args+=(-f "${file}")
 done
 
-compose_auth_up() {
-  "${compose_args[@]}" up -d --no-deps --force-recreate auth </dev/null
+compose_target_args=("${compose_base_args[@]}" -f "${scratch_target_override}")
+compose_rollback_args=("${compose_base_args[@]}" -f "${scratch_rollback_override}")
+
+compose_auth_up_target() {
+  "${compose_target_args[@]}" up -d --no-deps --force-recreate auth </dev/null
 }
 
-set_env_line() {
-  local key="$1"
-  local value="$2"
-  [[ "${value}" != *$'\n'* ]] || {
-    echo "Refusing multiline environment value for ${key}." >&2
-    return 1
-  }
-  local escaped="${value//\\/\\\\}"
-  escaped="${escaped//&/\\&}"
-  escaped="${escaped//|/\\|}"
-  if grep -q "^${key}=" "${scratch_env}"; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "${scratch_env}"
-  else
-    printf '%s=%s\n' "${key}" "${value}" >> "${scratch_env}"
-  fi
-}
-
-full_env_hash() {
-  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1"     | LC_ALL=C sort     | sha256sum     | awk '{print $1}'
-}
-
-non_smtp_env_hash() {
-  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1"     | grep -Ev '^(GOTRUE_SMTP_HOST|GOTRUE_SMTP_PORT|GOTRUE_SMTP_USER|GOTRUE_SMTP_PASS|GOTRUE_SMTP_ADMIN_EMAIL)='     | LC_ALL=C sort     | sha256sum     | awk '{print $1}'
-}
-
-validate_canonical_urls() {
-  local cid="$1"
-  [[ "$(get_env_value "${cid}" API_EXTERNAL_URL)" == "${target_api}"     && "$(get_env_value "${cid}" GOTRUE_SITE_URL)" == "${target_site}"     && "$(get_env_value "${cid}" GOTRUE_URI_ALLOW_LIST)" == "${target_redirect}"     && "$(get_env_value "${cid}" GOTRUE_JWT_ISSUER)" == "${target_api}" ]]
-}
-
-validate_rendered_auth() {
-  "${compose_args[@]}" config -q </dev/null
-  local rendered
-  rendered="$("${compose_args[@]}" run --rm --no-deps -T --entrypoint /bin/sh auth -c     'printf "%s\n" "$GOTRUE_SMTP_HOST" "$GOTRUE_SMTP_PORT" "$GOTRUE_SMTP_USER" "$GOTRUE_SMTP_ADMIN_EMAIL" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"' </dev/null)"
-  mapfile -t values <<< "${rendered}"
-  unset rendered
-  [[ "${#values[@]}" -eq 8     && "${values[0]}" == "${target_host}"     && "${values[1]}" == "${target_port}"     && "${values[2]}" == "${target_user}"     && "${values[3]}" == "${target_admin}"     && "${values[4]}" == "${target_api}"     && "${values[5]}" == "${target_site}"     && "${values[6]}" == "${target_redirect}"     && "${values[7]}" == "${target_api}" ]] || {
-      echo "Rendered Auth configuration is not canonical; refusing host mutation." >&2
-      return 1
-    }
-
-  printf '%s' "${smtp_pass}" | "${compose_args[@]}" run --rm --no-deps -T --entrypoint /bin/sh auth -c     'expected="$(cat)"; test -n "$expected"; test "$GOTRUE_SMTP_PASS" = "$expected"' >/dev/null
-}
-
-smtp_probe() {
-  local auth_id="$1"
-  local storage_id="$2"
-  local storage_image
-  storage_image="$(docker inspect -f '{{.Config.Image}}' "${storage_id}")"
-  [[ "${storage_image}" =~ ^sha256:[a-f0-9]{64}$ ]] || {
-    echo "Storage image ID is not immutable." >&2
-    return 1
-  }
-  local response
-  response="$(
-    printf '%s' "{"password":"${smtp_pass//\/\\\\}","port":465}"       | docker run --rm -i --pull never --read-only           --cap-drop ALL --security-opt no-new-privileges           --user 65534:65534 --memory 128m --cpus 0.25 --pids-limit 32           --network "container:${auth_id}"           --entrypoint node "${storage_image}"           --input-type=module -e "$(cat "${probe_path}")"
-  )"
-  [[ "${response}" == '{"status":"authenticated"}' ]] || {
-    echo "SMTP authentication probe failed." >&2
-    return 1
-  }
-}
-
-image_before="$(docker inspect -f '{{.Config.Image}}' "${auth_before}")"
-full_hash_before="$(full_env_hash "${auth_before}")"
-non_smtp_hash_before="$(non_smtp_env_hash "${auth_before}")"
-validate_canonical_urls "${auth_before}" || {
-  echo "Canonical Auth URL configuration is not intact before SMTP repair." >&2
-  exit 1
-}
-
-declare -A other_before
-for service in db rest realtime storage kong; do
-  other_before["${service}"]="$(get_service_id "${service}")"
-done
-
-backup="${scratch}/env.backup"
-cp -p "${scratch_env}" "${backup}"
-chmod 600 "${backup}"
-backup_hash="$(sha256sum "${backup}" | awk '{print $1}')"
-echo "Auth configuration backup created: sha256=${backup_hash}"
-
-host_mutated=0
-rollback_ok=0
-rollback() {
+compose_auth_up_rollback() {
   set +e
   cp -p "${backup}" "${scratch_env}"
   docker_write_host_file "${scratch_env}" "${env_file}"
-  if compose_auth_up >/dev/null 2>&1; then
+  export MERCY_ROLLBACK_API_EXTERNAL_URL="${api_before}"
+  export MERCY_ROLLBACK_SITE_URL="${site_before}"
+  export MERCY_ROLLBACK_URI_ALLOW_LIST="${allow_before}"
+  export MERCY_ROLLBACK_JWT_ISSUER="${issuer_before}"
+  export MERCY_ROLLBACK_SMTP_HOST="${smtp_host_before}"
+  export MERCY_ROLLBACK_SMTP_PORT="${smtp_port_before}"
+  export MERCY_ROLLBACK_SMTP_USER="${smtp_user_before}"
+  export MERCY_ROLLBACK_SMTP_PASS="${smtp_pass_before}"
+  export MERCY_ROLLBACK_SMTP_ADMIN_EMAIL="${smtp_admin_before}"
+
+  if compose_auth_up_rollback >/dev/null 2>&1; then
     sleep 3
     restored="$(get_service_id auth 2>/dev/null)"
-    if [[ -n "${restored}"       && "$(docker inspect -f '{{.Config.Image}}' "${restored}")" == "${image_before}"       && "$(full_env_hash "${restored}")" == "${full_hash_before}"       && "$(get_env_value "${restored}" API_EXTERNAL_URL)" == "${target_api}"       && "$(get_env_value "${restored}" GOTRUE_SITE_URL)" == "${target_site}"       && "$(get_env_value "${restored}" GOTRUE_URI_ALLOW_LIST)" == "${target_redirect}"       && "$(get_env_value "${restored}" GOTRUE_JWT_ISSUER)" == "${target_api}" ]]; then
+    if [[ -n "${restored}" \
+      && "$(docker inspect -f '{{.Config.Image}}' "${restored}")" == "${image_before}" \
+      && "$(full_env_hash "${restored}")" == "${full_hash_before}" ]]; then
       rollback_ok=1
       echo "Auth SMTP repair rolled back and verified."
     fi
@@ -278,7 +243,7 @@ validate_rendered_auth
 
 docker_write_host_file "${scratch_env}" "${env_file}"
 host_mutated=1
-compose_auth_up
+compose_auth_up_target
 
 auth_after=""
 for _ in $(seq 1 30); do
