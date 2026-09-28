@@ -108,7 +108,7 @@ SMTP probing must read Docker container `Image`, require a valid `sha256` ID, an
 
 - Email authentication creates only the base USER state. A USER becomes a derived VISITOR only when an active ESIA identity link exists.
 - VOLUNTEER, CURATOR, PATRON and ADMIN are server-authoritative audited grants. User metadata cannot grant them.
-- New privileged grants fail when the target has no active ESIA identity. Curators can manage only VOLUNTEER/PATRON; ADMIN is required for CURATOR/ADMIN.
+- New VOLUNTEER, CURATOR and ordinary ADMIN grants fail when the target has no active ESIA identity. PATRON requires a registered account but not ESIA. Curators can manage only VOLUNTEER/PATRON; ADMIN is required for CURATOR/ADMIN.
 - PATRON requires one of PERSON, SOLE_PROPRIETOR, LEGAL_ENTITY or GOVERNMENT.
 - Staff user lookup is exact-email only; there is no broad account directory endpoint.
 - The volunteer directory supports bounded filtering by city, service status, help category and home-visit clearance.
