@@ -36,6 +36,11 @@ At mobile width and keyboard-only, labels, focus, loading/error/empty states and
 ## Volunteer offer MVP
 A user creates an offer only through the atomic RPC: owner identity comes from JWT, bounded payload/rate limits are checked, and consent is recorded. Direct INSERT is revoked. RLS exposes a row only to its owner and ADMIN; creating an offer never grants staff privileges. ADMIN moderation requires a reason and writes audit data without copying private contact/description into the audit log.
 
+## Account deletion request
+A signed-in user can record and cancel only their own account-deletion intent through authenticated RPCs that derive identity from the JWT; direct writes to `profiles.deletion_requested_at` remain revoked. A profile-status read failure must render an unavailable state and expose neither the request nor cancel mutation until the current status is known.
+
+The pending queue is bounded, ordered by `deletion_requested_at,id`, backed by a partial pending-row index, and callable only by ADMIN after an internal authorization check. Behavioral integration must prove that a normal signed-in user is denied, an ADMIN can see the pending caller, another user's profile remains hidden, and cancellation removes the caller from the queue. The queue records intent only; actual erasure remains a separately reviewed operator action subject to retention requirements.
+
 ## Production launch gate
 Before LIVE: apply migration history to the explicitly identified Supabase project through the protected GitHub Actions workflow, verify backup/restore, Auth Site URL/redirect+SMTP/email confirmation, Realtime publication, trusted ADMIN bootstrap, immutable image SHA and smoke tests. No manual `supabase db push` is part of the production procedure.
 
