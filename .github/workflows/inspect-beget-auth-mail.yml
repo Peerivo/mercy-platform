@@ -1,0 +1,101 @@
+name: Inspect Beget Auth mail
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact reviewed current main SHA
+        required: true
+        type: string
+      search_database:
+        description: Read-only bounded search for the legacy Supabase hostname (counts only)
+        default: false
+        type: boolean
+      confirm:
+        description: Type INSPECT_AUTH_MAIL (no configuration changes or email)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mercy-beget-auth-url-repair
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'INSPECT_AUTH_MAIL' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      SEARCH_DATABASE: ${{ inputs.search_database }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Require exact current main and successful project CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "${EXPECTED_SHA}" = "${GITHUB_SHA}"
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "${EXPECTED_SHA}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${EXPECTED_SHA}&event=push&per_page=1" \
+            | jq -e --arg sha "${EXPECTED_SHA}" '.workflow_runs[0] | .head_sha == $sha and .head_branch == "main" and .status == "completed" and .conclusion == "success"' >/dev/null
+
+      - name: Configure existing pinned SSH access
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || { echo "::error::Missing ${name}"; exit 1; }
+          done
+          [[ "${BEGET_SUPABASE_HOST}" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "${BEGET_SUPABASE_USER}" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+
+      - name: Inspect runtime URLs, SMTP and optional legacy database references
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
+          remote_dir="$(ssh "${ssh_opts[@]}" "${remote}" 'umask 077; mktemp -d /tmp/mercy-auth-mail-inspect.XXXXXXXX')"
+          [[ "${remote_dir}" =~ ^/tmp/mercy-auth-mail-inspect\.[a-zA-Z0-9]{8}$ ]]
+          cleanup() {
+            ssh "${ssh_opts[@]}" "${remote}" "rm -f '${remote_dir}/inspect-beget-auth-mail.py' '${remote_dir}/probe-resend-smtp.mjs'; rmdir '${remote_dir}'" || true
+          }
+          trap cleanup EXIT
+          scp "${ssh_opts[@]}" -q scripts/inspect-beget-auth-mail.py scripts/probe-resend-smtp.mjs "${remote}:${remote_dir}/"
+          search_flag=""
+          case "${SEARCH_DATABASE}" in
+            true) search_flag="--search-database" ;;
+            false) ;;
+            *) echo "::error::Invalid search_database flag"; exit 1 ;;
+          esac
+          # The existing key stays within GitHub runner -> pinned SSH -> approved runtime.
+          # It is never a command argument, artifact, log line or persistent host file.
+          python3 -c 'import json,os; print(json.dumps({"resend_api_key":os.environ.get("RESEND_API_KEY", "")}))' \
+            | ssh "${ssh_opts[@]}" "${remote}" "python3 '${remote_dir}/inspect-beget-auth-mail.py' ${search_flag}"
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
