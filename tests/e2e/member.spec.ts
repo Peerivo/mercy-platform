@@ -199,6 +199,26 @@ test("header uses one auth entry that becomes cabinet after sign-in", async ({ p
   ).toBeVisible();
 });
 
+test("account deletion request can be submitted and cancelled from cabinet", async ({ page }) => {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  await register(page, `delete-request-${suffix}@mercy.invalid`);
+
+  await expect(
+    page.getByRole("button", { name: "Запросить удаление аккаунта" })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Запросить удаление аккаунта" }).click();
+  await expect(page).toHaveURL(/\/cabinet\?deletion=requested$/);
+  await expect(page.getByText(/Запрос отправлен/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Отменить запрос" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Отменить запрос" }).click();
+  await expect(page).toHaveURL(/\/cabinet\?deletion=cancelled$/);
+  await expect(
+    page.getByRole("button", { name: "Запросить удаление аккаунта" })
+  ).toBeVisible();
+});
+
 test("the production guard protects a genuinely BFCache-eligible document", async ({ browser }, testInfo) => {
   const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const lifecycle: LifecycleObservation[] = [];
