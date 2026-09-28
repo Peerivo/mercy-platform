@@ -19,6 +19,8 @@ test("public forms and nearby stay compact and readable on mobile", async ({ pag
     await expect(page.locator(".nearby-search-card")).toBeVisible();
     await expect(page.locator(".nearby-results-block")).toBeVisible();
     await expect(page.locator(".nearby-search-card input")).toHaveCSS("font-size", "16px");
+    await page.getByRole("button", { name: "Показать карту Яндекса" }).click();
+    await expect(page.getByText(/API-ключ/)).toBeVisible();
     expect(await page.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
     expect(
       await page.locator(".nearby-results-block").evaluate(element => element.getBoundingClientRect().right <= window.innerWidth)
