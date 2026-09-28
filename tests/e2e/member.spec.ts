@@ -37,7 +37,7 @@ async function register(page: Page, email: string) {
 async function createRequest(page: Page) {
   await page.goto("/help");
   await page.getByLabel("Страна").fill("XX");
-  await page.getByLabel("Город").fill("Test");
+  await page.getByLabel("Населённый пункт").fill("Test");
   await page.getByLabel("Описание").fill("A fictional browser request long enough for validation");
   await page.getByLabel(/Я согласен/).check();
   await page.getByRole("button", { name: "Опубликовать просьбу" }).click();
@@ -151,7 +151,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     ).toHaveCount(0);
     await p1.goto("/help");
     await p1.getByLabel("Страна").fill("XX");
-    await p1.getByLabel("Город").fill("No session");
+    await p1.getByLabel("Населённый пункт").fill("No session");
     await p1.getByLabel("Описание").fill("This anonymous submission must never be stored");
     await p1.getByLabel(/Я согласен/).check();
     await p1.getByRole("button", { name: "Опубликовать просьбу" }).click();

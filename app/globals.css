@@ -593,6 +593,59 @@ label:has(> input[type="radio"]) {
   margin: 24px 0;
 }
 
+
+.russian-city-autocomplete {
+  position: relative;
+  min-width: 0;
+}
+
+.russian-city-suggestions {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  list-style: none;
+}
+
+.russian-city-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.russian-city-option:hover,
+.russian-city-option.is-active {
+  background: var(--surface-soft);
+}
+
+.russian-city-name {
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 720;
+}
+
+.russian-city-region {
+  flex: 0 1 auto;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 550;
+  text-align: right;
+}
+
 /* General layout helpers */
 .nav {
   display: flex;
