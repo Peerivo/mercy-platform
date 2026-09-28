@@ -251,7 +251,7 @@ smtp_probe() {
   local auth_id="$1"
   local storage_id="$2"
   local storage_image
-  storage_image="$(docker inspect -f '{{.Config.Image}}' "${storage_id}")"
+  storage_image="$(docker inspect -f '{{.Image}}' "${storage_id}")"
   [[ "${storage_image}" =~ ^sha256:[a-f0-9]{64}$ ]] || {
     echo "Storage image ID is not immutable." >&2
     return 1
@@ -307,6 +307,11 @@ if [[ "${smtp_host_before}" == "${target_host}" \
   exit 0
 fi
 echo "AUTH_SMTP_REPAIR_PRESTATE_NONCANONICAL=1"
+
+# Prove the installed probe image, TLS transport and protected key work before
+# changing the host env or recreating Auth. Repeat after repair in the new namespace.
+smtp_probe "${auth_before}" "${other_before[storage]}"
+echo "AUTH_SMTP_REPAIR_PREFLIGHT_OK=1"
 
 backup="${scratch}/env.backup"
 cp -p "${scratch_env}" "${backup}"
