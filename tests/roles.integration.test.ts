@@ -66,7 +66,7 @@ describe.sequential("Mercy roles and volunteer service", () => {
     });
     if (staff.error) throw staff.error;
 
-    for (const name of ["role-curator", "role-volunteer", "role-patron"]) {
+    for (const name of ["role-curator", "role-volunteer"]) {
       const consent = await service
         .from("consents")
         .insert({
@@ -158,6 +158,8 @@ describe.sequential("Mercy roles and volunteer service", () => {
       volunteer_status: "ONBOARDING",
     });
     expect((await clients["role-patron"].rpc("current_mercy_access")).data?.[0]).toMatchObject({
+      identity_role: "USER",
+      is_esia_verified: false,
       is_patron: true,
       patron_kind: "LEGAL_ENTITY",
     });
