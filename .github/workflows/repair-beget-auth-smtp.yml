@@ -21,7 +21,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APPROVED_BASE_SHA: 7ee28845ffa21d0a55a45c6c1e5f63cb5a641f3f
+  ORIGINAL_APPROVED_BASE_SHA: 7ee28845ffa21d0a55a45c6c1e5f63cb5a641f3f
+  FAILED_PREMUTATION_SHA: 26bf4e7460ff78e36451d371984acd9a8f461bf8
+  FAILED_PREMUTATION_RUN_ID: "36386027226"
   TARGET_SUPABASE_URL: https://api.mercy.peerivo.net
   TARGET_SITE_URL: https://mercy.peerivo.net
   TARGET_REDIRECT_URL: https://mercy.peerivo.net/auth/callback
@@ -29,7 +31,7 @@ env:
 
 jobs:
   repair:
-    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'REPAIR_AUTH_SMTP' && github.run_number == 1 && github.run_attempt == 1 }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'REPAIR_AUTH_SMTP' && github.run_number == 2 && github.run_attempt == 1 }}
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -43,7 +45,7 @@ jobs:
       - name: Checkout reviewed main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Require exact authorized repair increment and successful CI
         env:
@@ -53,21 +55,45 @@ jobs:
           set -euo pipefail
           [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
           test "${EXPECTED_SHA}" = "${GITHUB_SHA}"
-          git fetch --no-tags --depth=2 origin +refs/heads/main:refs/remotes/origin/main
+          git fetch --no-tags --depth=3 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git rev-parse refs/remotes/origin/main)" = "${GITHUB_SHA}"
-          test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"
+          test "$(git rev-parse HEAD^)" = "${FAILED_PREMUTATION_SHA}"
+          test "$(git rev-parse HEAD^^)" = "${ORIGINAL_APPROVED_BASE_SHA}"
 
           allowed="$(
-            printf '%s\n'               '.github/workflows/ci.yml'               '.github/workflows/repair-beget-auth-smtp.yml'               'docs/ACCEPTANCE.md'               'PROJECT.md'               'scripts/repair-beget-auth-smtp-remote.sh'               'tests/beget-auth-smtp-workflow.test.ts'               | LC_ALL=C sort
+            printf '%s\n' \
+              '.github/workflows/repair-beget-auth-smtp.yml' \
+              'PROJECT.md' \
+              'docs/ACCEPTANCE.md' \
+              'scripts/repair-beget-auth-smtp-remote.sh' \
+              'tests/beget-auth-smtp-workflow.test.ts' \
+              | LC_ALL=C sort
           )"
-          changed="$(git diff --name-only "${APPROVED_BASE_SHA}..${GITHUB_SHA}" | LC_ALL=C sort)"
+          changed="$(git diff --name-only "${FAILED_PREMUTATION_SHA}..${GITHUB_SHA}" | LC_ALL=C sort)"
           test "${changed}" = "${allowed}" || {
             echo "::error::Current main contains files outside the single approved SMTP repair increment."
             printf '%s\n' "${changed}"
             exit 1
           }
 
-          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${EXPECTED_SHA}&event=push&per_page=1"             | jq -e --arg sha "${EXPECTED_SHA}" '.workflow_runs[0] | .head_sha == $sha and .head_branch == "main" and .status == "completed" and .conclusion == "success"' >/dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${FAILED_PREMUTATION_RUN_ID}" \
+            | jq -e --arg sha "${FAILED_PREMUTATION_SHA}" '
+                .name == "Repair Beget Auth SMTP" and
+                .event == "workflow_dispatch" and
+                .run_number == 1 and
+                .run_attempt == 1 and
+                .head_sha == $sha and
+                .conclusion == "failure"
+              ' >/dev/null
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${EXPECTED_SHA}&event=push&per_page=1" \
+            | jq -e --arg sha "${EXPECTED_SHA}" '
+                .workflow_runs[0] |
+                .head_sha == $sha and
+                .head_branch == "main" and
+                .status == "completed" and
+                .conclusion == "success"
+              ' >/dev/null
 
       - name: Validate protected production configuration
         env:
