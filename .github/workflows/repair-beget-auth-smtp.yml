@@ -23,7 +23,8 @@ concurrency:
 env:
   ORIGINAL_APPROVED_BASE_SHA: 7ee28845ffa21d0a55a45c6c1e5f63cb5a641f3f
   FAILED_PREMUTATION_SHA: 26bf4e7460ff78e36451d371984acd9a8f461bf8
-  FAILED_PREMUTATION_RUN_ID: "36386027226"
+  FAILED_REPAIR_SHA: bdfc33f04e3c828c861d353fe826b9cc86dcc03a
+  FAILED_REPAIR_RUN_ID: "36388250430"
   TARGET_SUPABASE_URL: https://api.mercy.peerivo.net
   TARGET_SITE_URL: https://mercy.peerivo.net
   TARGET_REDIRECT_URL: https://mercy.peerivo.net/auth/callback
@@ -31,7 +32,8 @@ env:
 
 jobs:
   repair:
-    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'REPAIR_AUTH_SMTP' && github.run_number == 2 && github.run_attempt == 1 }}
+    # Run 3 requires fresh scoped production approval; run 2's approval is consumed.
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'REPAIR_AUTH_SMTP' && github.run_number == 3 && github.run_attempt == 1 }}
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -45,7 +47,7 @@ jobs:
       - name: Checkout reviewed main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 3
+          fetch-depth: 4
 
       - name: Require exact authorized repair increment and successful CI
         env:
@@ -55,10 +57,11 @@ jobs:
           set -euo pipefail
           [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
           test "${EXPECTED_SHA}" = "${GITHUB_SHA}"
-          git fetch --no-tags --depth=3 origin +refs/heads/main:refs/remotes/origin/main
+          git fetch --no-tags --depth=4 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git rev-parse refs/remotes/origin/main)" = "${GITHUB_SHA}"
-          test "$(git rev-parse HEAD^)" = "${FAILED_PREMUTATION_SHA}"
-          test "$(git rev-parse HEAD^^)" = "${ORIGINAL_APPROVED_BASE_SHA}"
+          test "$(git rev-parse HEAD^)" = "${FAILED_REPAIR_SHA}"
+          test "$(git rev-parse HEAD^^)" = "${FAILED_PREMUTATION_SHA}"
+          test "$(git rev-parse HEAD^^^)" = "${ORIGINAL_APPROVED_BASE_SHA}"
 
           allowed="$(
             printf '%s\n' \
@@ -69,18 +72,18 @@ jobs:
               'tests/beget-auth-smtp-workflow.test.ts' \
               | LC_ALL=C sort
           )"
-          changed="$(git diff --name-only "${FAILED_PREMUTATION_SHA}..${GITHUB_SHA}" | LC_ALL=C sort)"
+          changed="$(git diff --name-only "${FAILED_REPAIR_SHA}..${GITHUB_SHA}" | LC_ALL=C sort)"
           test "${changed}" = "${allowed}" || {
             echo "::error::Current main contains files outside the single approved SMTP repair increment."
             printf '%s\n' "${changed}"
             exit 1
           }
 
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${FAILED_PREMUTATION_RUN_ID}" \
-            | jq -e --arg sha "${FAILED_PREMUTATION_SHA}" '
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${FAILED_REPAIR_RUN_ID}" \
+            | jq -e --arg sha "${FAILED_REPAIR_SHA}" '
                 .name == "Repair Beget Auth SMTP" and
                 .event == "workflow_dispatch" and
-                .run_number == 1 and
+                .run_number == 2 and
                 .run_attempt == 1 and
                 .head_sha == $sha and
                 .conclusion == "failure"
