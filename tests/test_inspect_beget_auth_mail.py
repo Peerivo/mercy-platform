@@ -30,6 +30,13 @@ class InspectionTests(unittest.TestCase):
         env[inspector.TOKEN_PATHS[0]] = "https://" + inspector.LEGACY_HOST + "/auth/v1/verify"
         self.assertFalse(inspector.config_report(env, "")["token_endpoint_checks"][inspector.TOKEN_PATHS[0]])
 
+    def test_old_pooler_reference_is_found_without_returning_dsn(self):
+        dsn = "postgresql://postgres." + inspector.LEGACY_PROJECT_REF + ":dummy-password@pooler.supabase.com/postgres"
+        result = inspector.config_report({"GOTRUE_DB_DATABASE_URL": dsn}, "")
+        self.assertEqual(result["legacy_host_fields"], ["GOTRUE_DB_DATABASE_URL"])
+        self.assertNotIn(dsn, json.dumps(result))
+        self.assertNotIn("dummy-password", json.dumps(result))
+
     def test_unknown_hook_value_is_not_printed(self):
         self.assertEqual(inspector.config_report({"GOTRUE_HOOK_SEND_EMAIL_ENABLED": "dummy-secret"}, "")["send_email_hook_enabled"], "unknown")
 

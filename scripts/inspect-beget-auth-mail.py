@@ -11,7 +11,8 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 
-LEGACY_HOST = "kjhrtxrqvlhfjiopchhr.supabase.co"
+LEGACY_PROJECT_REF = "kjhrtxrqvlhfjiopchhr"
+LEGACY_HOST = LEGACY_PROJECT_REF + ".supabase.co"
 EXPECTED = {
     "API_EXTERNAL_URL": "https://api.mercy.peerivo.net/auth/v1",
     "GOTRUE_SITE_URL": "https://mercy.peerivo.net",
@@ -97,7 +98,7 @@ def config_report(env, protected_key):
         states[key] = env[key] if env.get(key) in ("true", "false") else "missing_or_unknown"
     # Return field names, never arbitrary values (which may include credentials).
     states["legacy_host_fields"] = sorted(key for key, value in env.items()
-                                           if SAFE_NAME.fullmatch(key) and LEGACY_HOST in value)
+                                           if SAFE_NAME.fullmatch(key) and LEGACY_PROJECT_REF in value)
     states["custom_mail_template_fields"] = sorted(key for key, value in env.items()
                                                   if key.startswith("GOTRUE_MAILER_TEMPLATES_")
                                                   and SAFE_NAME.fullmatch(key) and value)
@@ -163,7 +164,8 @@ def read_sql(db, query):
 
 
 def database_search(db):
-    needle = "'%" + LEGACY_HOST + "%'"
+    # Pooler DSNs carry the old ref in the username instead of the hostname.
+    needle = "'%" + LEGACY_PROJECT_REF + "%'"
     catalog_query = f"""SELECT json_build_object(
       'database_role_settings', (SELECT count(*) FROM pg_db_role_setting, unnest(setconfig) AS value WHERE value LIKE {needle}),
       'session_settings', (SELECT count(*) FROM pg_settings WHERE setting LIKE {needle}),

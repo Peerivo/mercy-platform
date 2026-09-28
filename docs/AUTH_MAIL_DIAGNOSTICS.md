@@ -64,7 +64,8 @@ email link.
 The optional database search reads configuration catalogs and at most 64
 ordinary/partitioned `auth`/`public` tables, at most 10,001 rows per table, in
 read-only transactions with 5-second statement and 1-second lock timeouts.
-It searches only for the former managed project hostname, outputs match counts,
+It searches for the former managed project identifier (including hostnames and
+pooler DSN usernames), outputs match counts,
 and marks bounds/errors incomplete. Matches in historical user metadata,
 instances, sessions or audit records do not establish an active Auth setting.
 Never perform a global string replacement or delete data based on these counts.
