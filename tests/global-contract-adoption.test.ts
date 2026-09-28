@@ -15,15 +15,24 @@ const adoption18 = readJson(
 );
 
 describe("Peerivo Global Contract adoption", () => {
-  it("pins Mercy to the exact canonical 1.8.0 contract", () => {
+  it("pins Mercy to the exact canonical 1.9.0 contract with automatic propagation", () => {
     expect(binding.project.repository).toBe("Peerivo/mercy-platform");
     expect(binding.globalRef).toEqual({
       repository: "Peerivo/global",
       id: "peerivo-global",
-      version: "1.8.0",
+      version: "1.9.0",
       digest:
-        "sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed",
-      gitSha: "223d57cd47ef176272cd9ebfd12ee7c52f887756",
+        "sha256:17a74ea76c73643206b9dfa5aeeb412764d0f35e2d0dd71b071227c18d05fe0c",
+      gitSha: "310dbb1814f60c4117108a19f41da436b4fb44f1",
+    });
+    expect(binding.updatePolicy).toEqual({
+      observeAllUpdates: true,
+      canonicalMergeAppliesAutomatically: true,
+      perConsumerAcknowledgementRequired: false,
+      compatibleAdditive: "auto_apply_after_canonical_merge",
+      permissionOrSafetyChanging: "auto_apply_after_canonical_merge",
+      breaking:
+        "apply_policy_after_global_approval_migrate_before_incompatible_effects",
     });
   });
 
@@ -40,13 +49,17 @@ describe("Peerivo Global Contract adoption", () => {
     );
   });
 
-  it("records 1.8.0 public-web migration as unresolved instead of claiming compliance", () => {
+  it("retains the 1.8.0 public-web migration as unresolved historical evidence", () => {
     expect(adoption18.changeEventId).toBe(
       "contract.updated.peerivo-global.1.8.0",
     );
-    expect(adoption18.newContract.version).toBe(binding.globalRef.version);
-    expect(adoption18.newContract.digest).toBe(binding.globalRef.digest);
-    expect(adoption18.newContract.gitSha).toBe(binding.globalRef.gitSha);
+    expect(adoption18.newContract.version).toBe("1.8.0");
+    expect(adoption18.newContract.digest).toBe(
+      "sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed",
+    );
+    expect(adoption18.newContract.gitSha).toBe(
+      "223d57cd47ef176272cd9ebfd12ee7c52f887756",
+    );
     expect(adoption18.migration.requiredByEvent).toBe(true);
     expect(adoption18.migration.runtimeMutationInThisChange).toBe(false);
     expect(adoption18.migration.dnsMutationInThisChange).toBe(false);
