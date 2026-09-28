@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APPROVED_BASE_SHA: ef73ad89668e876d94d7993db8798663a878ed3d
+  APPROVED_BASE_SHA: 62ded1e8e89bb425279e5a23b7f8333e0346c140
   TARGET_SUPABASE_URL: https://api.mercy.peerivo.net
   TARGET_SITE_URL: https://mercy.peerivo.net
   TARGET_REDIRECT_URL: https://mercy.peerivo.net/auth/callback
@@ -32,7 +32,7 @@ env:
 
 jobs:
   repair:
-    if: ${{ github.ref == 'refs/heads/main' && github.run_number == 1 && github.run_attempt == 1 && ((github.event_name == 'workflow_dispatch' && inputs.confirm == 'REPAIR_AUTH_SMTP_SENDER') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-auth-smtp-sender-repair]'))) }}
+    if: ${{ github.ref == 'refs/heads/main' && github.run_number == 2 && github.run_attempt == 1 && ((github.event_name == 'workflow_dispatch' && inputs.confirm == 'REPAIR_AUTH_SMTP_SENDER') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-auth-smtp-sender-repair]'))) }}
     environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -63,6 +63,8 @@ jobs:
           allowed="$(
             printf '%s\n' \
               '.github/workflows/repair-beget-auth-smtp-sender.yml' \
+              'scripts/inspect-beget-auth-mail.py' \
+              'scripts/repair-beget-auth-smtp-remote.sh' \
               'tests/beget-auth-smtp-workflow.test.ts' \
               | LC_ALL=C sort
           )"
