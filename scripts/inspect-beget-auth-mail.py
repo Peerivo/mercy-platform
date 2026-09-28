@@ -191,7 +191,21 @@ def database_search(db):
             result = {"status": "unverified_query_failed_or_timed_out"}
             incomplete = True
         emit("legacy_url_table:" + schema + "." + table, result)
-    emit("legacy_url_search", {"complete_within_scope": not incomplete, "scope": "auth/public tables and configuration catalogs", "historical_matches_are_not_active_configuration": True})
+    emit("legacy_url_search", {"complete_within_scope": not incomplete,
+                             "scope": "auth/public tables; database role settings; session settings; auth/public function bodies and column defaults",
+                             "excluded_catalog_definitions": ["views", "materialized_views", "rls_policies", "trigger_expressions"],
+                             "historical_matches_are_not_active_configuration": True})
+
+
+def stable_services(before, after):
+    for name, info in before.items():
+        current = after.get(name, {})
+        if any(current.get(key) != info.get(key) for key in ("Id", "Config", "RestartCount")):
+            return False
+        if any(current.get("State", {}).get(key) != info.get("State", {}).get(key)
+               for key in ("StartedAt", "FinishedAt", "Running", "Restarting")):
+            return False
+    return True
 
 
 def main():
@@ -226,7 +240,7 @@ def main():
     if args.search_database:
         database_search(before["db"])
     after = services(project)
-    if any(after[name]["Id"] != info["Id"] or after[name]["Config"] != info["Config"] for name, info in before.items()):
+    if not stable_services(before, after):
         raise InspectionError("production_container_state_changed_during_inspection")
     emit("inspection", {"completed": True, "configuration_mutated": False, "email_sent": False, "login_verified": False})
 

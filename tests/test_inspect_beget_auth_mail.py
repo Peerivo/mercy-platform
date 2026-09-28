@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import importlib.util
 import io
 import json
@@ -72,7 +73,20 @@ class InspectionTests(unittest.TestCase):
             inspector.database_search({"Id": "test"})
         reports = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertFalse(reports[-1]["result"]["complete_within_scope"])
+        self.assertIn("rls_policies", reports[-1]["result"]["excluded_catalog_definitions"])
         self.assertNotIn("secret-internal-diagnostic", output.getvalue())
+
+    def test_restart_during_inspection_invalidates_evidence(self):
+        before = {"auth": {"Id": "same-id", "Config": {"Env": []}, "RestartCount": 0,
+                           "State": {"StartedAt": "first-start", "Running": True}}}
+        self.assertTrue(inspector.stable_services(before, copy.deepcopy(before)))
+        for field, value in (("StartedAt", "second-start"), ("Running", False)):
+            after = copy.deepcopy(before)
+            after["auth"]["State"][field] = value
+            self.assertFalse(inspector.stable_services(before, after))
+        after = copy.deepcopy(before)
+        after["auth"]["RestartCount"] = 1
+        self.assertFalse(inspector.stable_services(before, after))
 
     def test_probe_uses_auth_network_namespace_and_no_secret_argument(self):
         with patch.object(inspector, "run", return_value='{"status":"authenticated","extra":"sensitive"}') as run:

@@ -56,3 +56,18 @@ test('malformed configuration cannot connect', async () => {
     assert.equal(f.connections.length, 0);
   }
 });
+
+test('implicit TLS distinguishes certificate failures from connection failures', async () => {
+  for (const [code, expected] of [['CERT_HAS_EXPIRED', 'tls_failed'],
+    ['ERR_TLS_CERT_ALTNAME_INVALID', 'tls_failed'], ['ERR_SSL_WRONG_VERSION_NUMBER', 'tls_failed'],
+    ['ECONNREFUSED', 'network_failed'], ['ENOTFOUND', 'network_failed']]) {
+    const socket = new EventEmitter();
+    socket.destroy = () => {};
+    socket.write = () => assert.fail('No command may be sent after a connection error');
+    const drivers = { tls: { connect: () => {
+      process.nextTick(() => socket.emit('error', Object.assign(new Error('private-error'), { code })));
+      return socket;
+    } } };
+    assert.deepEqual(await probe({ password: 'dummy-key', port: 465 }, drivers), { status: expected });
+  }
+});

@@ -12,6 +12,11 @@ contained `https://api.mercy.peerivo.net`, without the former managed project
 hostname. The latest Resend sign-in email was from 2026-09-24 and its redirect
 target was a separate historical Vercel preview. That historical email is not
 evidence of the current production application's API destination.
+The GitHub `Production` Environment was also inspected: its variable
+`NEXT_PUBLIC_SUPABASE_URL` is `https://api.mercy.peerivo.net`, matching the live
+bundle. The REG.RU workflow prioritizes that variable over a secret fallback
+and requires the canonical URL before building. No change to this variable is
+indicated by the evidence.
 
 Resend reported the sending domain verified, sending enabled, unused daily
 quota, no suppressions and disabled click tracking. These observations do not
@@ -61,7 +66,8 @@ settings. It flags custom templates and email hooks for separate inspection;
 configuration checks must not be presented as proof of an actually generated
 email link.
 
-The optional database search reads configuration catalogs and at most 64
+The optional database search reads database role/session settings,
+`auth`/`public` function bodies and column defaults, and at most 64
 ordinary/partitioned `auth`/`public` tables, at most 10,001 rows per table, in
 read-only transactions with 5-second statement and 1-second lock timeouts.
 It searches for the former managed project identifier (including hostnames and
@@ -69,6 +75,10 @@ pooler DSN usernames), outputs match counts,
 and marks bounds/errors incomplete. Matches in historical user metadata,
 instances, sessions or audit records do not establish an active Auth setting.
 Never perform a global string replacement or delete data based on these counts.
+Views, materialized views, RLS policies and trigger expressions are explicitly
+outside the catalog search scope; absence in the searched scope is not proof
+that no other database definition contains the reference. A changed service
+start time, running state or restart count invalidates the collected evidence.
 
 ## Repair boundary
 
@@ -79,6 +89,11 @@ image solely because mail fails. Do not change DB data/schema, DNS, JWT secrets,
 rulesets or unrelated settings. Production-released Mercy still requires the
 current exact-HEAD merge approval under Global 1.9; the suspended Reviewer is
 not a required review gate.
+Canonical Global 1.9 `spec` update-resolution rules explicitly make canonical
+merge apply to registered consumers and treat stale bindings as synchronization
+debt, not an adoption gate (`staleBindingCannotRetainOlderGlobalPolicy`). The
+local 1.8 binding does not override that canonical resolution. Reviewer runtime
+is resolved separately from `Peerivo/global/contracts/reviewer-runtime.v1.json`.
 
 Sources: [Supabase self-hosted Auth configuration](https://supabase.com/docs/guides/self-hosting/auth/config),
 [Resend SMTP](https://resend.com/docs/send-with-smtp).

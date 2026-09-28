@@ -40,7 +40,11 @@ export async function probe({ password, port }, drivers = { tls, net }) {
   function attach(stream) {
     socket = stream;
     socket.on('data', onData);
-    socket.on('error', () => abort('network_failed'));
+    socket.on('error', (error) => {
+      const code = String(error.code || '');
+      const tlsFailure = /^(ERR_TLS_|ERR_SSL_|CERT_|DEPTH_ZERO_|SELF_SIGNED_|UNABLE_TO_(?:GET_ISSUER|VERIFY_LEAF))/.test(code);
+      abort(tlsFailure ? 'tls_failed' : 'network_failed');
+    });
     socket.on('end', () => { if (pending) abort('protocol_error'); });
   }
   function reply(command) {
