@@ -410,7 +410,9 @@ begin
     raise exception 'admin required';
   end if;
 
-  if enabled and not private.has_active_esia(target_user) then
+  if enabled
+     and target_role in ('VOLUNTEER','CURATOR','ADMIN')
+     and not private.has_active_esia(target_user) then
     raise exception 'esia verification required';
   end if;
 
