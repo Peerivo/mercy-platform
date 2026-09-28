@@ -33,7 +33,7 @@ export default async function Cabinet({
     { data: requests },
     { data: offers },
     { data: staffRole },
-    { data: profile },
+    { data: profile, error: profileError },
   ] = await Promise.all([
       s
         .from("help_requests")
@@ -52,6 +52,7 @@ export default async function Cabinet({
     ]);
 
   const deletionRequestedAt = profile?.deletion_requested_at ?? null;
+  const deletionStatusUnavailable = Boolean(profileError);
   const deletionError = params.deletion === "error";
 
   return (
@@ -188,7 +189,12 @@ export default async function Cabinet({
               повторите попытку.
             </p>
           )}
-          {deletionRequestedAt ? (
+          {deletionStatusUnavailable ? (
+            <p role="alert">
+              Не удалось получить текущий статус запроса на удаление. Действия
+              временно недоступны, чтобы не показать неверное состояние.
+            </p>
+          ) : deletionRequestedAt ? (
             <>
               <p className="muted">
                 Запрос отправлен{" "}
