@@ -103,3 +103,21 @@ The only permitted retry is workflow run number 2, attempt 1, after a correction
 Run #2 (`36388250430`) consumed its dispatch approval, failed on `Storage image ID is not immutable.`, and reported verified Auth rollback. A new run is not authorized by that consumed approval. After fresh exact-HEAD merge approval and a fresh scoped production approval, the proposed run #3/attempt #1 must verify failed run #2 at `bdfc33f04e3c828c861d353fe826b9cc86dcc03a`, exact ancestry/file scope and successful exact-main push CI. Attempts other than that single dispatch remain rejected.
 
 SMTP probing must read Docker container `Image`, require a valid `sha256` ID, and retain `--pull never`. A tag in `Config.Image` must not invalidate an otherwise valid installed image. Probe image resolution, TLS and protected-key authentication must succeed before host env writes or Auth recreation, then succeed again from the repaired Auth network namespace. Regression tests must execute the real shell probe against distinct tag/ID metadata, reproduce the prior failure, reject malformed IDs before container creation, and verify credentials never enter command arguments. Existing backup, exact rollback, non-SMTP preservation, Auth-only mutation and no-email constraints remain unchanged.
+
+## Mercy roles and volunteer service acceptance
+
+- Email authentication creates only the base USER state. A USER becomes a derived VISITOR only when an active ESIA identity link exists.
+- VOLUNTEER, CURATOR, PATRON and ADMIN are server-authoritative audited grants. User metadata cannot grant them.
+- New privileged grants fail when the target has no active ESIA identity. Curators can manage only VOLUNTEER/PATRON; ADMIN is required for CURATOR/ADMIN.
+- PATRON requires one of PERSON, SOLE_PROPRIETOR, LEGAL_ENTITY or GOVERNMENT.
+- Staff user lookup is exact-email only; there is no broad account directory endpoint.
+- The volunteer directory supports bounded filtering by city, service status, help category and home-visit clearance.
+- An active volunteer can receive access only to an explicitly assigned request. The volunteer cannot change the request status and cannot read other responders' private contact data.
+- A home visit cannot be assigned until beneficiary consent/home-visit safety is recorded and the volunteer has home-visit clearance. HOME_PAIRED requires a second ESIA-verified participant.
+- Opening a volunteer incident suspends private volunteer access immediately. Closing the incident does not reactivate the volunteer automatically.
+- Contact persons require explicit recorded consent before they are linked to a volunteer.
+- Role, profile, contact, safety, assignment and incident mutations are RPC-only, audited where material, and covered by fail-closed pgTAP/integration tests.
+- `oleg-kabatchenko@yandex.ru` is bootstrapped as ADMIN only by the protected production migration workflow after verifying that the exact account already exists. The bootstrap helper is not callable through anon/authenticated/service-role API keys.
+- Production schema changes are applied from repository migrations through the protected Beget GitHub Actions workflow after exact-main green CI and scoped production approval. Manual production SQL is not part of the procedure.
+- This change consumes an existing active `identity_links(provider=ESIA)` record. Provisioning the external ESIA identity provider remains a separate integration and must not be represented as live until registered credentials and callback verification exist.
+

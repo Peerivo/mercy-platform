@@ -98,3 +98,14 @@ First production repair run `36386027226` failed before host mutation: the stage
 Fresh dispatch `36388250430` ran approved main `bdfc33f04e3c828c861d353fe826b9cc86dcc03a`. It reached Auth SMTP repair, then rejected the Storage image before probing because it read Docker `Config.Image` (the image reference/tag), not `Image` (the installed immutable ID). The run failed and emitted `Auth SMTP repair rolled back and verified.` No successful SMTP repair or email delivery is claimed.
 
 The correction resolves the installed `Image` ID, preserves `--pull never`, and tests TLS/SMTP authentication before host mutation as well as after Auth recreation. A shell regression fixture reproduces the old tag-vs-ID failure. The proposed next dispatch is bounded to run #3, attempt #1, exact main, the exact five-file correction and verified failed run #2. It requires fresh exact-HEAD merge approval and fresh scoped production approval; the approval consumed by run #2 is not reused. No third production dispatch has run.
+
+## Mercy roles / volunteer service — 2026-09-28
+
+- Added the USER → ESIA-derived VISITOR identity model and audited VOLUNTEER/CURATOR/PATRON/ADMIN grants.
+- Curators manage verified volunteers and patrons; only admins manage curator/admin grants. Patron types cover physical persons, sole proprietors, legal entities and government bodies.
+- Added curator volunteer directory, city/status/category/home-clearance filtering, volunteer cards, contact persons, request assignment and volunteer-service statistics.
+- Added beneficiary-consent/home-visit safety gates, paired home visits and an incident workflow that suspends volunteer access until explicit reactivation.
+- Assigned volunteer case access is narrower than curator access: no case lifecycle changes and no visibility into other responders' private contacts.
+- Added protected Beget repository-migration workflow with backup/history verification and trusted bootstrap for the registered `oleg-kabatchenko@yandex.ru` administrator.
+- External ESIA provider provisioning is not claimed as complete; this increment consumes verified ESIA identity links once the connector supplies them.
+

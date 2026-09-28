@@ -1,17 +1,189 @@
-import Link from "next/link";import {redirect} from "next/navigation";import {serverSupabase} from "@/lib/supabase/server";import {moderateOffer} from "./actions";
-type Offer={id:string;category:string;country:string;city:string;online:boolean;description:string;contact_method:string;review_status:string;created_at:string};
-export default async function VolunteerModeration({searchParams}:{searchParams:Promise<Record<string,string|undefined>>}){const q=await searchParams,s=await serverSupabase(),{data:{user}}=await s.auth.getUser();if(!user)redirect("/auth");const {data:staffRole}=await s.rpc("current_staff_role");if(staffRole!=="ADMIN")redirect("/cabinet");const {data,error}=await s.from("volunteer_offers").select("id,category,country,city,online,description,contact_method,review_status,created_at").eq("review_status","PENDING").order("created_at").limit(50);if(error)redirect("/staff/cases");return <section className="container section">
-<nav className="nav">
-  <Link href="/staff/cases">
-    Обращения
-  </Link>
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { serverSupabase } from "@/lib/supabase/server";
+import { volunteerDirectorySearchSchema } from "@/lib/validation";
+import {
+  HOME_CLEARANCE_LABELS,
+  VOLUNTEER_CATEGORY_LABELS,
+  VOLUNTEER_STATUS_LABELS,
+} from "@/lib/mercy-roles";
 
-  <Link href="/staff/reports">
-    Жалобы
-  </Link>
+type Access = { is_curator: boolean; is_admin: boolean };
 
-  <strong>
-    Предложения помощи
-  </strong>
-</nav>
-<h1>Модерация предложений помощи</h1><p className="muted">Контакты приватны. Решение записывается в аудит; модерация не назначает пользователю staff-роль.</p>{q.error&&<p role="alert">Решение не сохранено.</p>}{q.reviewed&&<p>Решение сохранено.</p>}{data?.length?(data as Offer[]).map(o=><article className="card" key={o.id}><h2>{o.category}</h2><p>{o.online?"Онлайн":`${o.country}, ${o.city}`}</p><p>{o.description}</p><p><strong>Способ связи:</strong> {o.contact_method}</p><form action={moderateOffer} className="grid"><input type="hidden" name="id" value={o.id}/><label>Решение<select name="status" required defaultValue="VERIFIED"><option value="VERIFIED">Одобрить</option><option value="REJECTED">Отклонить</option></select></label><label>Основание<textarea name="reason" minLength={3} maxLength={500} required/></label><button className="btn">Сохранить решение</button></form></article>):<p className="card">Предложений на проверке нет.</p>}</section>}
+type VolunteerRow = {
+  user_id: string;
+  display_name: string;
+  email: string;
+  city: string | null;
+  service_status: keyof typeof VOLUNTEER_STATUS_LABELS;
+  service_categories: Array<keyof typeof VOLUNTEER_CATEGORY_LABELS>;
+  available_online: boolean;
+  home_visit_clearance: keyof typeof HOME_CLEARANCE_LABELS;
+  supervision_required: boolean;
+  active_assignments: number;
+};
+
+type Stats = {
+  total_volunteers: number;
+  active_volunteers: number;
+  onboarding_volunteers: number;
+  paused_volunteers: number;
+  suspended_volunteers: number;
+  cities: number;
+  active_assignments: number;
+  completed_assignments_30d: number;
+  open_incidents: number;
+};
+
+export default async function VolunteerService({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const raw = await searchParams;
+  const parsed = volunteerDirectorySearchSchema.safeParse({
+    city: typeof raw.city === "string" ? raw.city : "",
+    status: typeof raw.status === "string" ? raw.status : "",
+    category: typeof raw.category === "string" ? raw.category : "",
+    home: typeof raw.home === "string" ? raw.home : "",
+    page: typeof raw.page === "string" ? raw.page : "1",
+  });
+  const filters = parsed.success
+    ? parsed.data
+    : { city: "", status: "", category: "", home: "", page: 1 };
+
+  const s = await serverSupabase();
+  const {
+    data: { user },
+  } = await s.auth.getUser();
+  if (!user) redirect("/auth");
+
+  const accessResult = await s.rpc("current_mercy_access");
+  const access = (accessResult.data?.[0] ?? null) as Access | null;
+  if (!access || (!access.is_curator && !access.is_admin)) redirect("/cabinet");
+
+  const limit = 30;
+  const offset = (filters.page - 1) * limit;
+  const [volunteersResult, statsResult] = await Promise.all([
+    s.rpc("staff_volunteers", {
+      city_filter: filters.city || null,
+      status_filter: filters.status || null,
+      category_filter: filters.category || null,
+      home_filter: filters.home || null,
+      result_limit: limit + 1,
+      result_offset: offset,
+    }),
+    s.rpc("volunteer_service_stats"),
+  ]);
+
+  if (volunteersResult.error || statsResult.error) redirect("/cabinet");
+
+  const rows = (volunteersResult.data ?? []) as VolunteerRow[];
+  const hasNext = rows.length > limit;
+  const visibleRows = rows.slice(0, limit);
+  const stats = (statsResult.data?.[0] ?? null) as Stats | null;
+
+  function pageHref(page: number) {
+    const params = new URLSearchParams();
+    if (filters.city) params.set("city", filters.city);
+    if (filters.status) params.set("status", filters.status);
+    if (filters.category) params.set("category", filters.category);
+    if (filters.home) params.set("home", filters.home);
+    params.set("page", String(page));
+    return `/staff/volunteers?${params.toString()}`;
+  }
+
+  return (
+    <section className="page-shell section">
+      <nav className="nav" aria-label="Рабочее место">
+        <Link href="/cabinet">Кабинет</Link>
+        <Link href="/staff/cases">Обращения</Link>
+        <strong>Волонтёры</strong>
+        <Link href="/staff/roles">Роли</Link>
+        {access.is_admin && <Link href="/staff/volunteer-offers">Предложения помощи</Link>}
+      </nav>
+
+      <h1>Волонтёрская служба</h1>
+      <p className="muted">
+        Здесь только идентифицированные через ЕСИА волонтёры с назначенной ролью.
+        Домашние визиты дополнительно требуют отдельного допуска и подтверждения согласия подопечного.
+      </p>
+
+      {stats && (
+        <div className="grid">
+          <div className="card"><strong>{stats.total_volunteers}</strong><p>Всего волонтёров</p></div>
+          <div className="card"><strong>{stats.active_volunteers}</strong><p>Активны</p></div>
+          <div className="card"><strong>{stats.onboarding_volunteers}</strong><p>На подготовке</p></div>
+          <div className="card"><strong>{stats.suspended_volunteers}</strong><p>Приостановлены</p></div>
+          <div className="card"><strong>{stats.cities}</strong><p>Городов</p></div>
+          <div className="card"><strong>{stats.active_assignments}</strong><p>Активных назначений</p></div>
+          <div className="card"><strong>{stats.completed_assignments_30d}</strong><p>Выполнено за 30 дней</p></div>
+          <div className="card"><strong>{stats.open_incidents}</strong><p>Открытых инцидентов</p></div>
+        </div>
+      )}
+
+      <form className="card grid" method="get">
+        <label>
+          Город
+          <input name="city" maxLength={120} defaultValue={filters.city} placeholder="Москва" />
+        </label>
+        <label>
+          Статус
+          <select name="status" defaultValue={filters.status}>
+            <option value="">Все</option>
+            {Object.entries(VOLUNTEER_STATUS_LABELS).map(([value, label]) => (
+              <option value={value} key={value}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Направление помощи
+          <select name="category" defaultValue={filters.category}>
+            <option value="">Все</option>
+            {Object.entries(VOLUNTEER_CATEGORY_LABELS).map(([value, label]) => (
+              <option value={value} key={value}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Домашние визиты
+          <select name="home" defaultValue={filters.home}>
+            <option value="">Все</option>
+            {Object.entries(HOME_CLEARANCE_LABELS).map(([value, label]) => (
+              <option value={value} key={value}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <button className="btn" type="submit">Применить фильтры</button>
+      </form>
+
+      <div className="grid">
+        {visibleRows.length ? visibleRows.map((row) => (
+          <article className="card" key={row.user_id}>
+            <h2>{row.display_name}</h2>
+            <p>{row.city || "Город не указан"} · {VOLUNTEER_STATUS_LABELS[row.service_status]}</p>
+            <p>{row.email}</p>
+            <p>
+              {row.service_categories.length
+                ? row.service_categories.map((category) => VOLUNTEER_CATEGORY_LABELS[category]).join(", ")
+                : "Направления помощи ещё не настроены"}
+            </p>
+            <p>{HOME_CLEARANCE_LABELS[row.home_visit_clearance]}</p>
+            <p>Активных назначений: {row.active_assignments}</p>
+            {row.available_online && <p>Доступен для дистанционной помощи</p>}
+            {row.supervision_required && <p className="muted">Нужно сопровождение куратора</p>}
+            <Link className="btn secondary" href={`/staff/volunteers/${row.user_id}`}>
+              Открыть карточку
+            </Link>
+          </article>
+        )) : <div className="card">По выбранным фильтрам волонтёров нет.</div>}
+      </div>
+
+      <nav className="pagination" aria-label="Страницы">
+        {filters.page > 1 && <Link className="btn secondary" href={pageHref(filters.page - 1)}>Назад</Link>}
+        <span>Страница {filters.page}</span>
+        {hasNext && <Link className="btn secondary" href={pageHref(filters.page + 1)}>Далее</Link>}
+      </nav>
+    </section>
+  );
+}

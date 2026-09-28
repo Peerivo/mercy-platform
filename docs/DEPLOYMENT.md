@@ -29,3 +29,12 @@ Use the protected workflow `Deploy REG.RU production` in two phases documented i
 2. After a separately approved DNS cutover, `VERIFY` confirms the exact public revision, data readiness, Russian-host 308 path/query preservation and Beget Auth reachability.
 
 The REG.RU workflow never runs a database migration. The old managed Supabase remains write-frozen during the rollback window, and Vercel remains the application rollback host until the REG.RU cutover is accepted.
+
+## Ongoing Beget database migrations
+
+After the Russian cutover, new Mercy production schema migrations use `.github/workflows/apply-beget-migrations.yml`.
+
+The workflow is manual and production-environment scoped. It requires the exact current `main` SHA and a successful push CI run for that SHA, verifies that production migration history is an exact prefix of `supabase/migrations`, creates a protected host-side PostgreSQL backup, applies only the pending repository migrations transactionally, records their versions in `supabase_migrations.schema_migrations`, and verifies the final history.
+
+The same reviewed workflow performs the requested one-time ADMIN bootstrap for the already registered account `oleg-kabatchenko@yandex.ru` through a private database-only helper. It fails closed when that auth account does not exist. Do not replace this path with manual `psql`, `supabase db push` or a chat/operator shell mutation in production.
+
