@@ -15,7 +15,7 @@ Mercy separates authentication, identity verification and authorization.
 
 - **USER / Пользователь** is implicit for any signed-in `auth.users` account. Email login alone never grants staff or volunteer privileges.
 - **VISITOR / Посетитель** is a derived identity state: an account has an active `identity_links` row with provider `ESIA`. It is not a mutable user-selected role.
-- **VOLUNTEER / Волонтёр**, **CURATOR / Куратор**, **PATRON / Меценат** and **ADMIN** are audited grants in `mercy_role_grants`. New privileged grants require an active ESIA identity link.
+- **VOLUNTEER / Волонтёр**, **CURATOR / Куратор**, **PATRON / Меценат** and **ADMIN** are audited grants in `mercy_role_grants`. New VOLUNTEER, CURATOR and ordinary ADMIN grants require an active ESIA identity link. PATRON requires a registered account and curator/admin grant but does not require ESIA.
 - A curator may grant/revoke only VOLUNTEER and PATRON. Only an ADMIN may grant/revoke CURATOR or ADMIN.
 - PATRON has a required type: PERSON, SOLE_PROPRIETOR, LEGAL_ENTITY or GOVERNMENT.
 - Legacy `staff_roles.COORDINATOR` remains a compatibility projection of CURATOR and `staff_roles.ADMIN` remains a compatibility projection of ADMIN while the existing staff workspace is migrated.
