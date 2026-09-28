@@ -31,6 +31,9 @@ describe("protected Beget migration workflow", () => {
   it("fails closed on migration-history drift and applies repository migrations in order", () => {
     expect(workflow).toContain("Production migration history is not an exact repository prefix");
     expect(workflow).toContain("LC_ALL=C sort");
+    expect(workflow).toContain("^([0-9]{12}|[0-9]{14})_[a-z0-9_]+\\.sql$");
+    expect(workflow).toContain('"${version}" "${name}"');
+    expect(workflow).not.toContain('"\\${version}" "\\${name}"');
     expect(workflow).toContain("ON_ERROR_STOP=1");
     expect(workflow).toContain("BEGIN;");
     expect(workflow).toContain("supabase_migrations.schema_migrations");
