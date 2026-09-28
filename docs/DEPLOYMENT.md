@@ -4,13 +4,13 @@
 Codex готовит SQL → Git/CI воспроизводит clean DB → уполномоченный оператор вручную запускает workflow_dispatch с точным project ref/environment secrets. Container никогда не мигрирует DB. Remote push/reset и production deploy в этой задаче не выполнялись.
 
 ## Переменные
-Build/app public: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (legacy `...ANON_KEY` fallback), `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_MAP_TILE_URL`, `NEXT_PUBLIC_MAP_ATTRIBUTION`. CI cloud-only: `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, input `project_ref`. Не печатать значения. Publishable variables must exist before Next/Docker build.
+Build/app public: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (legacy `...ANON_KEY` fallback), `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_MAP_TILE_URL`, `NEXT_PUBLIC_MAP_ATTRIBUTION`, optional `NEXT_PUBLIC_YANDEX_MAPS_API_KEY`. CI cloud-only: `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, input `project_ref`. Не печатать значения. Publishable variables must exist before Next/Docker build.
 
 ## Порядок
 1. Для integration CI используйте disposable Supabase на GitHub runner по `docs/TESTING.md`; облачный staging для этого job не нужен. Перед операционной приёмкой отдельно создайте staging Supabase и backup policy, настройте Site URL/callback и email confirmation/SMTP.
 2. `supabase link --project-ref ...`; inspect diff; `supabase db push` only in protected workflow/environment.
 3. Realtime publication is migration-controlled. Execute `select public.bootstrap_first_admin('<verified auth UUID>');` once via trusted SQL connection; function has no API EXECUTE.
-4. Build image with public build args, deploy, verify `/health`, Auth and acceptance suite. Configure CSP/egress and tile attribution/provider quota.
+4. Build image with public build args, deploy, verify `/health`, Auth and acceptance suite. For the optional Yandex Maps JS API 3.0 layer, configure `NEXT_PUBLIC_YANDEX_MAPS_API_KEY` as a public browser key restricted by HTTP Referer to the Mercy domains. The external Yandex script is loaded only after the user requests the map; the site sends it only already-published non-confidential service coordinates, never the visitor geolocation. Keep the list usable when the key/provider is unavailable. Configure CSP/egress and provider quota accordingly.
 5. Back up before migrations. Roll application back by immutable image. Database migrations are forward-only: prepare a reviewed compensating migration; restore only via approved disaster recovery.
 
 ChatGPT environment may run `npm ci && npm run check`; local Supabase requires Docker. Production credentials are never needed for build.

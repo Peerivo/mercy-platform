@@ -18,7 +18,7 @@ export default async function NearbyPage({
   let q = s
     .from("published_service_locations")
     .select(
-      "id,organization_name,name,city,address_public,languages,formats,cost_type,contact_public,opening_hours"
+      "id,organization_name,name,city,address_public,languages,formats,cost_type,contact_public,opening_hours,longitude,latitude"
     )
     .limit(50);
 

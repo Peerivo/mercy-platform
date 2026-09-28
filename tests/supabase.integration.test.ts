@@ -134,8 +134,18 @@ describe.sequential("disposable Supabase security boundary", () => {
     ]);
     expect(locations.error).toBeNull();
     const anon = createClient(url, anonKey, { auth: { persistSession: false } });
-    const list = await anon.from("published_service_locations").select("name,address_public");
-    expect(list.error).toBeNull(); expect(list.data?.map(x => x.name).sort()).toEqual(["Тестовая ближняя точка", "Тестовая дальняя точка"].sort());
+    const list = await anon
+      .from("published_service_locations")
+      .select("name,address_public,longitude,latitude");
+    expect(list.error).toBeNull();
+    expect(list.data?.map(x => x.name).sort()).toEqual(
+      ["Тестовая ближняя точка", "Тестовая дальняя точка"].sort()
+    );
+    for (const row of list.data ?? []) {
+      expect(typeof row.longitude).toBe("number");
+      expect(typeof row.latitude).toBe("number");
+    }
+    expect(JSON.stringify(list.data)).not.toContain("Тестовое убежище");
     const geo = await anon.rpc("nearby_service_locations", { user_lat: 60, user_lon: 30, radius_m: 20_000, result_limit: 1, result_offset: 0 });
     expect(geo.error).toBeNull(); expect(geo.data).toHaveLength(1); expect(geo.data![0].name).toBe("Тестовая ближняя точка"); expect(geo.data![0].distance_meters).toBeLessThan(1);
     for (const [fn, args] of [
