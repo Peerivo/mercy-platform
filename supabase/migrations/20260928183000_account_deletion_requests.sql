@@ -1,5 +1,9 @@
 -- Account deletion request intake. This records intent only; erasure remains a
 -- separate operator action after retention/legal review.
+create index if not exists profiles_pending_account_deletion_idx
+  on public.profiles(deletion_requested_at, id)
+  where deletion_requested_at is not null;
+
 create or replace function public.request_account_deletion()
 returns timestamptz
 language plpgsql
