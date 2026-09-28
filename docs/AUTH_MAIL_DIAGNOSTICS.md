@@ -86,9 +86,9 @@ This increment adds inspection only. Diagnose the concrete discrepancy before
 preparing a targeted configuration repair with backup, rollback and unchanged
 non-Auth services. Do not repeat the old URL repair or deploy an application
 image solely because mail fails. Do not change DB data/schema, DNS, JWT secrets,
-rulesets or unrelated settings. Production-released Mercy still requires the
-current exact-HEAD merge approval under Global 1.9; the suspended Reviewer is
-not a required review gate.
+rulesets or unrelated settings. Production-released Mercy must follow the repository's currently bound Global
+Contract and branch-protection requirements. This diagnostic does not waive or
+reinterpret any required review or approval gate.
 Canonical Global 1.9 `spec` update-resolution rules explicitly make canonical
 merge apply to registered consumers and treat stale bindings as synchronization
 debt, not an adoption gate (`staleBindingCannotRetainOlderGlobalPolicy`). The
