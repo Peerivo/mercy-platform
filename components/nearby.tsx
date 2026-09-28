@@ -309,6 +309,10 @@ export function Nearby({ initial }: { initial: Place[] }) {
     };
   }, [mapRequested, places, yandexApiKey]);
 
+  const mapNumbers = new Map(
+    publicMapPoints(places).map(({ place }, index) => [place.id, index + 1])
+  );
+
   return (
     <div className="nearby-results-block">
       <div className="request-section-heading nearby-results-heading">
@@ -353,15 +357,17 @@ export function Nearby({ initial }: { initial: Place[] }) {
 
       <div className="grid cols2 nearby-list">
         {places.length ? (
-          places.map((place, index) => (
+          places.map((place) => (
             <article
               className="card nearby-card"
               id={`nearby-place-${place.id}`}
               key={place.id}
             >
               <h2>
-                {place.longitude != null && place.latitude != null && (
-                  <span className="nearby-card-map-number">{index + 1}. </span>
+                {mapNumbers.has(place.id) && (
+                  <span className="nearby-card-map-number">
+                    {mapNumbers.get(place.id)}.{" "}
+                  </span>
                 )}
                 {place.organization_name}: {place.name}
               </h2>
