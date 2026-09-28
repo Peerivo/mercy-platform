@@ -13,17 +13,22 @@ const script = fs.readFileSync(
 );
 
 describe("Beget Auth SMTP repair workflow", () => {
-  it("is manual, production-scoped, exact-main and one-shot", () => {
+  it("is manual, production-scoped, exact-main and a single bounded retry", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).not.toContain("\n  push:");
     expect(workflow).toContain("environment: production");
     expect(workflow).toContain("github.ref == 'refs/heads/main'");
-    expect(workflow).toContain("github.run_number == 1");
+    expect(workflow).toContain("github.run_number == 2");
     expect(workflow).toContain("github.run_attempt == 1");
     expect(workflow).toContain(
-      "APPROVED_BASE_SHA: 7ee28845ffa21d0a55a45c6c1e5f63cb5a641f3f",
+      "ORIGINAL_APPROVED_BASE_SHA: 7ee28845ffa21d0a55a45c6c1e5f63cb5a641f3f",
     );
-    expect(workflow).toContain("git rev-parse HEAD^");
+    expect(workflow).toContain(
+      "FAILED_PREMUTATION_SHA: 26bf4e7460ff78e36451d371984acd9a8f461bf8",
+    );
+    expect(workflow).toContain('FAILED_PREMUTATION_RUN_ID: "36386027226"');
+    expect(workflow).toContain("git rev-parse HEAD^^");
+    expect(workflow).toContain("actions/runs/${FAILED_PREMUTATION_RUN_ID}");
     expect(workflow).toContain("event=push");
     expect(workflow).toContain("REPAIR_AUTH_SMTP");
   });
@@ -36,7 +41,18 @@ describe("Beget Auth SMTP repair workflow", () => {
     expect(script).not.toMatch(/--password|--smtp-pass/i);
   });
 
-  it("changes only the approved SMTP values and recreates only Auth", () => {
+  it("renders an explicit Auth-only target override before mutation", () => {
+    expect(script).toContain('scratch_target_override="${scratch}/auth-smtp-target-override.yml"');
+    expect(script).toContain("GOTRUE_SMTP_HOST: ${SMTP_HOST}");
+    expect(script).toContain("GOTRUE_SMTP_PORT: ${SMTP_PORT}");
+    expect(script).toContain("GOTRUE_SMTP_USER: ${SMTP_USER}");
+    expect(script).toContain("GOTRUE_SMTP_PASS: ${SMTP_PASS}");
+    expect(script).toContain("GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}");
+    expect(script).toContain("compose_target_args");
+    expect(script).toContain("validate_rendered_auth");
+  });
+
+  it("changes only approved SMTP source values and recreates only Auth", () => {
     for (const line of [
       'set_env_line SMTP_HOST "${target_host}"',
       'set_env_line SMTP_PORT "${target_port}"',
@@ -63,15 +79,26 @@ describe("Beget Auth SMTP repair workflow", () => {
     expect(script).toContain("Non-Auth service changed unexpectedly");
   });
 
-  it("backs up, rolls back after host mutation and verifies SMTP without sending mail", () => {
+  it("binds rollback to the exact pre-run Auth environment", () => {
+    expect(script).toContain('scratch_rollback_override="${scratch}/auth-smtp-rollback-override.yml"');
+    expect(script).toContain("MERCY_ROLLBACK_API_EXTERNAL_URL");
+    expect(script).toContain("MERCY_ROLLBACK_SMTP_PASS");
+    expect(script).toContain("compose_auth_up_rollback");
     expect(script).toContain('backup="${scratch}/env.backup"');
-    expect(script).toContain("Auth configuration backup created");
-    expect(script).toContain("host_mutated=1");
-    expect(script).toContain('if [[ "${code}" -ne 0 && "${host_mutated}" == "1" ]]');
     expect(script).toContain("Auth SMTP repair rolled back and verified.");
+    expect(script).toContain('if [[ "${code}" -ne 0 && "${host_mutated}" == "1" ]]');
+  });
+
+  it("proves pre-state and verifies SMTP without sending mail", () => {
+    expect(script).toContain("AUTH_SMTP_REPAIR_PRESTATE_NONCANONICAL=1");
+    expect(script).toContain("AUTH_SMTP_REPAIR_ALREADY_OK=1");
     expect(script).toContain("smtp_probe");
     expect(script).toContain('--network "container:${auth_id}"');
     expect(script).toContain('{"status":"authenticated"}');
+    expect(script).toContain(
+      'python3 -c \'import json,sys; print(json.dumps({"password":sys.stdin.read(),"port":465}))\'',
+    );
+    expect(script).not.toContain('printf \'%s\' "{"password"');
     expect(script).not.toMatch(/\bMAIL\b|\bRCPT\b|\bDATA\b/);
   });
 
