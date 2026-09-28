@@ -126,7 +126,7 @@ if [[ "${labels_trusted}" != "1" || "${#config_files[@]}" -eq 0 ]]; then
     exit 1
   }
   config_files+=("${working_dir}/${base_rel}")
-  for candidate in docker-compose.override.yml docker-compose.override.yaml compose.override.yml compose.override.yaml; do
+  for candidate in docker-compose.override.yml docker-compose.override.yaml compose.override.yml compose.override.yaml mercy-auth-session.override.yml; do
     if workdir_file_exists "${candidate}"; then
       config_files+=("${working_dir}/${candidate}")
     fi
