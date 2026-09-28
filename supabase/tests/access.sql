@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(58);
+select plan(64);
 select has_table('public','help_requests','schema reproduced');
 select has_column('public','help_requests','published_at','help requests have explicit publication state');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
@@ -23,6 +23,12 @@ select ok(not has_function_privilege('anon','public.assignment_queue(integer,int
 select ok(not has_function_privilege('anon','public.staff_coordinators(integer)','EXECUTE') and has_function_privilege('authenticated','public.staff_coordinators(integer)','EXECUTE'),'coordinator directory is authenticated and checks admin internally');
 select ok(not has_function_privilege('anon','public.coordinator_cases(integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.coordinator_cases(integer,integer)','EXECUTE'),'coordinator case list requires a user JWT');
 select ok(not has_function_privilege('anon','public.current_staff_role()','EXECUTE') and has_function_privilege('authenticated','public.current_staff_role()','EXECUTE'),'current staff role requires a user JWT');
+select has_function('public','request_account_deletion',array[]::text[],'account deletion request RPC exists');
+select has_function('public','cancel_account_deletion',array[]::text[],'account deletion cancel RPC exists');
+select has_function('public','admin_account_deletion_requests',array['integer','integer'],'admin deletion queue RPC exists');
+select ok(not has_column_privilege('authenticated','public.profiles','deletion_requested_at','UPDATE'),'deletion timestamp cannot be forged through direct table update');
+select ok(not has_function_privilege('anon','public.request_account_deletion()','EXECUTE') and has_function_privilege('authenticated','public.request_account_deletion()','EXECUTE') and not has_function_privilege('anon','public.cancel_account_deletion()','EXECUTE') and has_function_privilege('authenticated','public.cancel_account_deletion()','EXECUTE'),'account deletion request mutations require a user JWT');
+select ok(not has_function_privilege('anon','public.admin_account_deletion_requests(integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.admin_account_deletion_requests(integer,integer)','EXECUTE'),'admin deletion queue requires a user JWT and checks admin internally');
 select ok(not has_function_privilege('anon','public.enforce_message()','EXECUTE') and not has_function_privilege('authenticated','public.enforce_message()','EXECUTE'),'message trigger is not API callable');
 select ok(not has_function_privilege('anon','public.enforce_catalog_review()','EXECUTE') and not has_function_privilege('authenticated','public.enforce_catalog_review()','EXECUTE'),'catalog trigger is not API callable');
 select ok(has_function_privilege('anon','public.nearby_service_locations(double precision,double precision,integer,integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.nearby_service_locations(double precision,double precision,integer,integer,integer)','EXECUTE'),'public geo RPC remains callable');
@@ -100,8 +106,10 @@ select results_eq(
       and has_function_privilege('authenticated',p.oid,'EXECUTE')
     order by 1$$,
   $$select signature from (values
+      ('admin_account_deletion_requests(integer,integer)'::text),
       ('admin_help_request_reports(integer,integer)'::text),
       ('assign_case(uuid,uuid,text)'::text),
+      ('cancel_account_deletion()'::text),
       ('assignment_queue(integer,integer)'::text),
       ('change_case_status(uuid,request_status)'::text),
       ('coordinator_cases(integer,integer)'::text),
@@ -111,6 +119,7 @@ select results_eq(
       ('get_public_help_request(uuid)'::text),
       ('list_public_help_requests(text,text,text,text,integer,integer)'::text),
       ('moderate_volunteer_offer(uuid,review_status,text)'::text),
+      ('request_account_deletion()'::text),
       ('respond_to_help_request(uuid,jsonb,text)'::text),
       ('review_help_request_report(uuid,text,text)'::text),
       ('revoke_case_assignment(uuid,text)'::text),
