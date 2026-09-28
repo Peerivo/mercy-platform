@@ -29,7 +29,6 @@ env:
 
 jobs:
   repair:
-    # Run 3 requires fresh scoped production approval; run 2's approval is consumed.
     if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'REPAIR_AUTH_SMTP_SENDER' && github.run_number == 1 && github.run_attempt == 1 }}
     environment: production
     runs-on: ubuntu-latest
@@ -44,7 +43,7 @@ jobs:
       - name: Checkout reviewed main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 4
+          fetch-depth: 0
 
       - name: Require exact authorized sender increment and successful CI
         env:
