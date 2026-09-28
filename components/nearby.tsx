@@ -196,7 +196,11 @@ export function Nearby({ initial }: { initial: Place[] }) {
 
           if (!result.error) {
             coordinates = new Map(
-              (result.data || []).map((row) => [
+              (result.data || []).map((row: {
+                id: string;
+                longitude: number | null;
+                latitude: number | null;
+              }) => [
                 row.id,
                 {
                   longitude: row.longitude,
