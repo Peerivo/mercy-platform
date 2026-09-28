@@ -248,10 +248,7 @@ export function Nearby({ initial }: { initial: Place[] }) {
     const root = mapRoot.current;
     const points = publicMapPoints(places);
 
-    if (!points.length) {
-      setMapStatus("Для текущего списка нет опубликованных координат.");
-      return;
-    }
+    if (!points.length) return;
 
     void loadYandexMaps(yandexApiKey)
       .then((ymaps3) => {
