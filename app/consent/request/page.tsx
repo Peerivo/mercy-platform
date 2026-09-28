@@ -27,7 +27,7 @@ function RussiaConsent() {
   return (
     <>
       <p className="muted">
-        Россия · версия request-ru-v2
+        Россия · версия request-ru-v3
       </p>
 
       <h2>1. Согласие</h2>
@@ -135,7 +135,7 @@ function GeorgiaConsent() {
   return (
     <>
       <p className="muted">
-        Грузия · версия request-ge-v2
+        Грузия · версия request-ge-v3
       </p>
 
       <h2>1. Согласие</h2>
