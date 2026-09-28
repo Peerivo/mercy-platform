@@ -60,7 +60,11 @@ export async function probe({ password, port }, drivers = { tls, net }) {
     deadline = setTimeout(() => abort('timeout'), 20000);
     // Register the response waiter before connecting, avoiding a greeting race.
     const greeting = reply();
-    attach([465, 2465].includes(port) ? drivers.tls.connect(options) : drivers.net.connect({ host: options.host, port }));
+    const implicitTls = [465, 2465].includes(port);
+    attach(
+      implicitTls ? drivers.tls.connect(options) : drivers.net.connect({ host: options.host, port }),
+      implicitTls ? 'tls_failed' : 'network_failed',
+    );
     if (await greeting !== 220) throw new Error('protocol_error');
     if (await reply('EHLO mercy.peerivo.net') !== 250) throw new Error('protocol_error');
     if ([587, 2587].includes(port)) {
@@ -72,7 +76,7 @@ export async function probe({ password, port }, drivers = { tls, net }) {
         secure.once('error', () => reject(new Error('tls_failed')));
         secure.once('close', () => reject(new Error('tls_failed')));
       });
-      attach(secure);
+      attach(secure, 'tls_failed');
       if (await reply('EHLO mercy.peerivo.net') !== 250) throw new Error('protocol_error');
     }
     const auth = await reply('AUTH PLAIN ' + Buffer.from('\0resend\0' + password).toString('base64'));
