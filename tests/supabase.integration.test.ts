@@ -157,6 +157,48 @@ describe.sequential("disposable Supabase security boundary", () => {
     for (const actor of ["u2", "c1", "a1"]) expect((await clients[actor].from("help_requests").select("id,description").eq("id", case1)).data).toEqual([]);
   });
 
+  test("account deletion intent is caller-owned and the pending queue is ADMIN-only", async () => {
+    const requested = await clients.u1.rpc("request_account_deletion");
+    expect(requested.error).toBeNull();
+    expect(typeof requested.data).toBe("string");
+
+    const outsiderQueue = await clients.u2.rpc("admin_account_deletion_requests", {
+      result_limit: 100,
+      result_offset: 0,
+    });
+    expect(outsiderQueue.error?.message).toContain("access denied");
+    expect(outsiderQueue.data).toBeNull();
+
+    const adminQueue = await clients.a1.rpc("admin_account_deletion_requests", {
+      result_limit: 100,
+      result_offset: 0,
+    });
+    expect(adminQueue.error).toBeNull();
+    expect(
+      adminQueue.data?.some((row: { user_id: string }) => row.user_id === ids.u1)
+    ).toBe(true);
+
+    const otherProfile = await clients.u2
+      .from("profiles")
+      .select("id,deletion_requested_at")
+      .eq("id", ids.u1);
+    expect(otherProfile.error).toBeNull();
+    expect(otherProfile.data).toEqual([]);
+
+    const cancelled = await clients.u1.rpc("cancel_account_deletion");
+    expect(cancelled.error).toBeNull();
+    expect(cancelled.data).toBe(true);
+
+    const queueAfterCancel = await clients.a1.rpc("admin_account_deletion_requests", {
+      result_limit: 100,
+      result_offset: 0,
+    });
+    expect(queueAfterCancel.error).toBeNull();
+    expect(
+      queueAfterCancel.data?.some((row: { user_id: string }) => row.user_id === ids.u1)
+    ).toBe(false);
+  });
+
   test("volunteer offer is consented, owner-isolated and moderated without staff elevation", async () => {
     const created=await clients.u1.rpc("create_volunteer_offer",{payload:{category:"FOOD",country:"XX",city:"Test",online:false,description:"A sufficiently long fictional volunteer offer",contact_method:"private chat"},consent_version:"volunteer-offer-v1"});
     expect(created.error).toBeNull();const offerId=created.data as string;
