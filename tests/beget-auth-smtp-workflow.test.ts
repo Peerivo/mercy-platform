@@ -117,7 +117,7 @@ describe("Beget Auth SMTP repair workflow", () => {
     expect(script).toContain('target_port="465"');
     expect(script).toContain('target_user="resend"');
     expect(script).toContain('target_admin="no-reply@mercy.peerivo.net"');
-    expect(script).toContain('target_sender="Mercy"');
+    expect(script).toContain('target_sender="Peerivo. Язык Милосердия"');
   });
 });
 
@@ -216,14 +216,14 @@ describe("Beget Auth SMTP sender repair workflow", () => {
     expect(senderWorkflow).toContain("[run-auth-smtp-sender-repair]");
     expect(senderWorkflow).toContain("environment: production");
     expect(senderWorkflow).toContain("github.ref == 'refs/heads/main'");
-    expect(senderWorkflow).toContain("github.run_number == 1");
+    expect(senderWorkflow).toContain("github.run_number == 2");
     expect(senderWorkflow).toContain("github.run_attempt == 1");
     expect(senderWorkflow).toContain("REPAIR_AUTH_SMTP_SENDER");
     expect(senderWorkflow).toContain("inputs.expected_sha || github.sha");
     expect(senderWorkflow).toContain("for _ in $(seq 1 90)");
     expect(senderWorkflow).toContain("Timed out waiting for successful exact-main CI.");
     expect(senderWorkflow).toContain(
-      "APPROVED_BASE_SHA: ef73ad89668e876d94d7993db8798663a878ed3d",
+      "APPROVED_BASE_SHA: 62ded1e8e89bb425279e5a23b7f8333e0346c140",
     );
     expect(senderWorkflow).toContain("scripts/repair-beget-auth-smtp-remote.sh");
     expect(senderWorkflow).toContain("probe-resend-smtp.mjs");
