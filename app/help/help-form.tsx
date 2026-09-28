@@ -44,7 +44,12 @@ export function HelpForm() {
 
           <label>
             Город
-            <input name="city" required maxLength={120} />
+            <input
+              name="city"
+              required
+              maxLength={120}
+              placeholder="Например, Москва"
+            />
           </label>
         </div>
 
