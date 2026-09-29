@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - ".github/workflows/living-menaion-db.yml"
+      - "ops/living-menaion/migrations.cms.b64"
 
 permissions:
   contents: read
@@ -28,5 +29,130 @@ jobs:
       BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
 
     steps:
-      - name: Apply canonical Living Menaion migrations
-        uses: Peerivo/living-menaion/.github/actions/migrate-mercy@544f111cf87f414be797720e318f5d6d9435f4d8
+      - name: Check out bridge payload
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Validate protected SSH configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing production configuration: ${name}"
+              missing=1
+            fi
+          done
+          test "${missing}" -eq 0
+
+      - name: Configure pinned SSH host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Ensure server-side deployment key
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          cert_b64="$(ssh "${remote}" 'set -euo pipefail
+            install -d -m 700 /etc/living-menaion
+            if [ ! -s /etc/living-menaion/deploy-private.pem ] || [ ! -s /etc/living-menaion/deploy-cert.pem ]; then
+              umask 077
+              openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
+                -keyout /etc/living-menaion/deploy-private.pem \
+                -out /etc/living-menaion/deploy-cert.pem \
+                -subj "/CN=Living Menaion Deployment" \
+                -days 3650 >/dev/null 2>&1
+              chmod 600 /etc/living-menaion/deploy-private.pem
+              chmod 644 /etc/living-menaion/deploy-cert.pem
+            fi
+            base64 -w0 /etc/living-menaion/deploy-cert.pem
+          ')"
+          test -n "${cert_b64}"
+          echo "::notice::LIVING_MENAION_DEPLOY_CERT_B64=${cert_b64}"
+
+      - name: Apply encrypted migration bundle
+        if: ${{ hashFiles('ops/living-menaion/migrations.cms.b64') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          base64 -d ops/living-menaion/migrations.cms.b64 |
+            ssh "${remote}" 'cat > /tmp/living-menaion-migrations.cms'
+
+          ssh "${remote}" 'set -euo pipefail
+            cleanup() {
+              rm -rf /tmp/living-menaion-migrations.cms /tmp/living-menaion-migrations.tar.gz /tmp/living-menaion-migrations
+            }
+            trap cleanup EXIT
+
+            openssl cms -decrypt -binary -inform DER \
+              -in /tmp/living-menaion-migrations.cms \
+              -recip /etc/living-menaion/deploy-cert.pem \
+              -inkey /etc/living-menaion/deploy-private.pem \
+              -out /tmp/living-menaion-migrations.tar.gz
+
+            mkdir -p /tmp/living-menaion-migrations
+            tar -xzf /tmp/living-menaion-migrations.tar.gz -C /tmp/living-menaion-migrations
+            migrations_dir=/tmp/living-menaion-migrations/supabase/migrations
+            test -d "${migrations_dir}"
+            test -n "$(find "${migrations_dir}" -maxdepth 1 -type f -name "*.sql" -print -quit)"
+
+            result="$(docker exec supabase-db psql -U supabase_admin -d postgres -At -F "|" -c "select (select count(*) from pg_database where datname='''living_menaion'''), (select count(*) from pg_roles where rolname='''living_menaion_owner'''), (select count(*) from pg_roles where rolname='''living_menaion_app'''), (select count(*) from pg_roles where rolname='''service_role''');")"
+            IFS="|" read -r database_count owner_count app_count service_role_count <<< "${result}"
+            test "${database_count}" = 1
+            test "${owner_count}" = 1
+            test "${app_count}" = 1
+            test "${service_role_count}" = 1
+            test -f /etc/living-menaion/db.env
+            test "$(stat -c "%a" /etc/living-menaion/db.env)" = 600
+
+            docker exec -i supabase-db psql -U supabase_admin -d living_menaion -v ON_ERROR_STOP=1 <<'''SQL'''
+            create table if not exists public.living_menaion_schema_migrations (
+              version text primary key,
+              checksum text not null,
+              applied_at timestamptz not null default now()
+            );
+            revoke all on public.living_menaion_schema_migrations from public;
+            SQL
+
+            while IFS= read -r file; do
+              name="$(basename "${file}")"
+              version="${name%%_*}"
+              [[ "${version}" =~ ^[0-9]{14}$ ]]
+              checksum="$(sha256sum "${file}" | awk '''{print $1}''')"
+              existing="$(docker exec supabase-db psql -U supabase_admin -d living_menaion -Atc "select checksum from public.living_menaion_schema_migrations where version='''${version}''';")"
+
+              if [ -n "${existing}" ]; then
+                test "${existing}" = "${checksum}"
+                echo "Migration ${name} already applied"
+                continue
+              fi
+
+              echo "Applying ${name}"
+              {
+                printf "begin;\n"
+                cat "${file}"
+                printf "\ninsert into public.living_menaion_schema_migrations(version, checksum) values ('''%s''', '''%s''');\n" "${version}" "${checksum}"
+                printf "commit;\n"
+              } | docker exec -i supabase-db psql -U supabase_admin -d living_menaion -v ON_ERROR_STOP=1
+            done < <(find "${migrations_dir}" -maxdepth 1 -type f -name "*.sql" | sort)
+
+            result="$(docker exec supabase-db psql -U supabase_admin -d living_menaion -At -F "|" -c "select coalesce(to_regclass('''living_menaion.liturgical_day_editions''')::text,''''''), coalesce(to_regclass('''living_menaion.audio_assets''')::text,''''''), coalesce(to_regclass('''living_menaion.edition_generation_jobs''')::text,''''''), coalesce(to_regprocedure('''living_menaion.assert_liturgical_day_edition_complete(uuid)''')::text,''''''), (select count(*) from public.living_menaion_schema_migrations);")"
+            IFS="|" read -r editions audio jobs completeness migration_count <<< "${result}"
+            test "${editions}" = living_menaion.liturgical_day_editions
+            test "${audio}" = living_menaion.audio_assets
+            test "${jobs}" = living_menaion.edition_generation_jobs
+            test -n "${completeness}"
+            test "${migration_count}" -ge 7
+            echo "Living Menaion database migrations verified."
+          '
