@@ -7,6 +7,7 @@ target_host="smtp.resend.com"
 target_port="465"
 target_user="resend"
 target_admin="no-reply@mercy.peerivo.net"
+target_sender="Peerivo. Язык Милосердия"
 target_site="https://mercy.peerivo.net"
 target_redirect="https://mercy.peerivo.net/auth/callback"
 target_api="https://api.mercy.peerivo.net/auth/v1"
@@ -125,7 +126,7 @@ if [[ "${labels_trusted}" != "1" || "${#config_files[@]}" -eq 0 ]]; then
     exit 1
   }
   config_files+=("${working_dir}/${base_rel}")
-  for candidate in docker-compose.override.yml docker-compose.override.yaml compose.override.yml compose.override.yaml; do
+  for candidate in docker-compose.override.yml docker-compose.override.yaml compose.override.yml compose.override.yaml mercy-auth-session.override.yml; do
     if workdir_file_exists "${candidate}"; then
       config_files+=("${working_dir}/${candidate}")
     fi
@@ -152,6 +153,7 @@ services:
       GOTRUE_SMTP_USER: ${SMTP_USER}
       GOTRUE_SMTP_PASS: ${SMTP_PASS}
       GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
 OVERRIDE
 chmod 600 "${scratch_target_override}"
 
@@ -168,6 +170,7 @@ services:
       GOTRUE_SMTP_USER: ${MERCY_ROLLBACK_SMTP_USER}
       GOTRUE_SMTP_PASS: ${MERCY_ROLLBACK_SMTP_PASS}
       GOTRUE_SMTP_ADMIN_EMAIL: ${MERCY_ROLLBACK_SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_SENDER_NAME: ${MERCY_ROLLBACK_SMTP_SENDER_NAME}
 OVERRIDE
 chmod 600 "${scratch_rollback_override}"
 
@@ -214,7 +217,7 @@ full_env_hash() {
 }
 
 non_smtp_env_hash() {
-  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1"     | grep -Ev '^(GOTRUE_SMTP_HOST|GOTRUE_SMTP_PORT|GOTRUE_SMTP_USER|GOTRUE_SMTP_PASS|GOTRUE_SMTP_ADMIN_EMAIL)='     | LC_ALL=C sort     | sha256sum     | awk '{print $1}'
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1"     | grep -Ev '^(GOTRUE_SMTP_HOST|GOTRUE_SMTP_PORT|GOTRUE_SMTP_USER|GOTRUE_SMTP_PASS|GOTRUE_SMTP_ADMIN_EMAIL|GOTRUE_SMTP_SENDER_NAME)='     | LC_ALL=C sort     | sha256sum     | awk '{print $1}'
 }
 
 validate_canonical_urls() {
@@ -226,18 +229,19 @@ validate_rendered_auth() {
   "${compose_target_args[@]}" config -q </dev/null
   local rendered
   rendered="$("${compose_target_args[@]}" run --rm --no-deps -T --entrypoint /bin/sh auth -c \
-    'printf "%s\\n" "$GOTRUE_SMTP_HOST" "$GOTRUE_SMTP_PORT" "$GOTRUE_SMTP_USER" "$GOTRUE_SMTP_ADMIN_EMAIL" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"' </dev/null)"
+    'printf "%s\\n" "$GOTRUE_SMTP_HOST" "$GOTRUE_SMTP_PORT" "$GOTRUE_SMTP_USER" "$GOTRUE_SMTP_ADMIN_EMAIL" "$GOTRUE_SMTP_SENDER_NAME" "$API_EXTERNAL_URL" "$GOTRUE_SITE_URL" "$GOTRUE_URI_ALLOW_LIST" "$GOTRUE_JWT_ISSUER"' </dev/null)"
   mapfile -t values <<< "${rendered}"
   unset rendered
-  [[ "${#values[@]}" -eq 8 \
+  [[ "${#values[@]}" -eq 9 \
     && "${values[0]}" == "${target_host}" \
     && "${values[1]}" == "${target_port}" \
     && "${values[2]}" == "${target_user}" \
     && "${values[3]}" == "${target_admin}" \
-    && "${values[4]}" == "${target_api}" \
-    && "${values[5]}" == "${target_site}" \
-    && "${values[6]}" == "${target_redirect}" \
-    && "${values[7]}" == "${target_api}" ]] || {
+    && "${values[4]}" == "${target_sender}" \
+    && "${values[5]}" == "${target_api}" \
+    && "${values[6]}" == "${target_site}" \
+    && "${values[7]}" == "${target_redirect}" \
+    && "${values[8]}" == "${target_api}" ]] || {
       echo "Rendered Auth configuration is not canonical; refusing host mutation." >&2
       return 1
     }
@@ -290,6 +294,7 @@ smtp_port_before="$(get_env_value "${auth_before}" GOTRUE_SMTP_PORT)"
 smtp_user_before="$(get_env_value "${auth_before}" GOTRUE_SMTP_USER)"
 smtp_pass_before="$(get_env_value "${auth_before}" GOTRUE_SMTP_PASS)"
 smtp_admin_before="$(get_env_value "${auth_before}" GOTRUE_SMTP_ADMIN_EMAIL)"
+smtp_sender_before="$(get_env_value "${auth_before}" GOTRUE_SMTP_SENDER_NAME)"
 
 declare -A other_before
 for service in db rest realtime storage kong; do
@@ -300,6 +305,7 @@ if [[ "${smtp_host_before}" == "${target_host}" \
   && "${smtp_port_before}" == "${target_port}" \
   && "${smtp_user_before}" == "${target_user}" \
   && "${smtp_admin_before}" == "${target_admin}" \
+  && "${smtp_sender_before}" == "${target_sender}" \
   && "${smtp_pass_before}" == "${smtp_pass}" ]]; then
   smtp_probe "${auth_before}" "${other_before[storage]}"
   echo "AUTH_SMTP_REPAIR_ALREADY_OK=1"
@@ -335,6 +341,7 @@ rollback() {
   export MERCY_ROLLBACK_SMTP_USER="${smtp_user_before}"
   export MERCY_ROLLBACK_SMTP_PASS="${smtp_pass_before}"
   export MERCY_ROLLBACK_SMTP_ADMIN_EMAIL="${smtp_admin_before}"
+  export MERCY_ROLLBACK_SMTP_SENDER_NAME="${smtp_sender_before}"
 
   if compose_auth_up_rollback >/dev/null 2>&1; then
     sleep 3
@@ -372,6 +379,7 @@ set_env_line SMTP_PORT "${target_port}"
 set_env_line SMTP_USER "${target_user}"
 set_env_line SMTP_PASS "${smtp_pass}"
 set_env_line SMTP_ADMIN_EMAIL "${target_admin}"
+set_env_line SMTP_SENDER_NAME "${target_sender}"
 
 validate_rendered_auth
 
@@ -418,6 +426,7 @@ validate_canonical_urls "${auth_after}" || {
 [[ "$(get_env_value "${auth_after}" GOTRUE_SMTP_PORT)" == "${target_port}" ]] || exit 1
 [[ "$(get_env_value "${auth_after}" GOTRUE_SMTP_USER)" == "${target_user}" ]] || exit 1
 [[ "$(get_env_value "${auth_after}" GOTRUE_SMTP_ADMIN_EMAIL)" == "${target_admin}" ]] || exit 1
+[[ "$(get_env_value "${auth_after}" GOTRUE_SMTP_SENDER_NAME)" == "${target_sender}" ]] || exit 1
 runtime_pass="$(get_env_value "${auth_after}" GOTRUE_SMTP_PASS)"
 [[ -n "${runtime_pass}" && "${runtime_pass}" == "${smtp_pass}" ]] || {
   unset runtime_pass

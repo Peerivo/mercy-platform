@@ -21,6 +21,7 @@ EXPECTED = {
     "GOTRUE_SMTP_HOST": "smtp.resend.com",
     "GOTRUE_SMTP_USER": "resend",
     "GOTRUE_SMTP_ADMIN_EMAIL": "no-reply@mercy.peerivo.net",
+    "GOTRUE_SMTP_SENDER_NAME": "Peerivo. Язык Милосердия",
 }
 TOKEN_PATHS = (
     "GOTRUE_MAILER_URLPATHS_CONFIRMATION",

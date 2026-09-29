@@ -51,7 +51,7 @@ export default async function NearbyPage({
             <input
               name="city"
               defaultValue={city}
-              placeholder="Например, Батуми"
+              placeholder="Например, Москва"
             />
           </label>
           <button className="btn secondary">Показать список</button>
