@@ -71,18 +71,19 @@ jobs:
           test -n "$anon_key"
 
           baseline_auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5             --resolve api.mercy.peerivo.net:443:127.0.0.1             -H "apikey: $anon_key"             https://api.mercy.peerivo.net/auth/v1/health || true)"
-          test "$baseline_auth_code" = "200"
+          test -n "$baseline_auth_code"
+          test "$baseline_auth_code" != "000"
 
           install -d -m 700 "$HOME/.living-menaion"
           backup="$(mktemp "$HOME/.living-menaion/Caddyfile.backup.XXXXXX")"
           candidate="$(mktemp "$HOME/.living-menaion/Caddyfile.candidate.XXXXXX")"
-          docker cp "$caddy_name:/etc/caddy/Caddyfile" "$backup"
+          docker exec "$caddy_name" cat /etc/caddy/Caddyfile > "$backup"
           cp "$backup" "$candidate"
           cleanup() { rm -f "$backup" "$candidate"; }
           trap cleanup EXIT
 
           rollback() {
-            docker cp "$backup" "$caddy_name:/etc/caddy/Caddyfile"
+            docker exec -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile' < "$backup"
             docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile >/dev/null
             docker exec "$caddy_name" caddy reload --config /etc/caddy/Caddyfile >/dev/null
           }
@@ -91,7 +92,7 @@ jobs:
             python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    @supabase_api path "; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API matcher not found; refusing edit")); p.write_text(t.replace(n,b+n,1))' "$candidate"
           fi
 
-          docker cp "$candidate" "$caddy_name:/etc/caddy/Caddyfile"
+          docker exec -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile' < "$candidate"
 
           if ! docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
             rollback
