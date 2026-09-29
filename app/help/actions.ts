@@ -24,6 +24,18 @@ export async function createRequest(fd: FormData) {
     can_call: fd.get("can_call") === "on",
     contact_window: fd.get("contact_window") || "",
     external_contact: fd.get("external_contact") || "",
+    home_visit_required: fd.get("home_visit_required") === "on",
+    visit_household_members: fd.get("visit_household_members") || "",
+    dogs_present: fd.get("dogs_present") === "on",
+    cats_present: fd.get("cats_present") === "on",
+    visit_animals_notes: fd.get("visit_animals_notes") || "",
+    smoking_present: fd.get("smoking_present") === "on",
+    visit_allergen_notes: fd.get("visit_allergen_notes") || "",
+    visit_access_notes: fd.get("visit_access_notes") || "",
+    visit_other_notes: fd.get("visit_other_notes") || "",
+    visit_trusted_contact: fd.get("visit_trusted_contact") || "",
+    video_call_possible: fd.get("video_call_possible") === "on",
+    visit_safety_acknowledged: fd.get("visit_safety_acknowledged") === "on",
     consent: fd.get("consent") === "on",
   });
 
