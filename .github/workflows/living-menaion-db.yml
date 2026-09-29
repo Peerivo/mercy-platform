@@ -135,7 +135,7 @@ jobs:
             fi
 
             checksum="$(sha256sum "$file" | awk '{print $1}')"
-            existing="$(docker exec supabase-db               psql -U supabase_admin -d living_menaion -At               -v version="$version"               -c "select checksum from public.living_menaion_schema_migrations where version = :'version';")"
+            existing="$(docker exec supabase-db               psql -U supabase_admin -d living_menaion -At               -c "select checksum from public.living_menaion_schema_migrations where version = '$version';")"
 
             if [ -n "$existing" ]; then
               if [ "$existing" != "$checksum" ]; then
