@@ -54,72 +54,53 @@ jobs:
           kong="$(docker ps -q --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=kong")"
           test -n "$kong"
 
-          get_env_value() {
-            local cid="$1" key="$2"
-            docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" |
-              awk -F= -v k="$key" '$1 == k {sub(/^[^=]*=/, ""); print; exit}'
-          }
-
-          service_key="$(get_env_value "$kong" SUPABASE_SERVICE_KEY)"
-          if [ -z "$service_key" ]; then
-            service_key="$(get_env_value "$kong" SERVICE_ROLE_KEY)"
-          fi
+          service_key="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$kong" |
+            awk -F= '$1 == "SUPABASE_SERVICE_KEY" || $1 == "SERVICE_ROLE_KEY" {sub(/^[^=]*=/, ""); print; exit}')"
           test -n "$service_key"
 
           baseline_auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5             --resolve api.mercy.peerivo.net:443:127.0.0.1             https://api.mercy.peerivo.net/auth/v1/health || true)"
           test -n "$baseline_auth_code"
           test "$baseline_auth_code" != "000"
-
           echo "phase=baseline-ok"
+
           install -d -m 700 "$HOME/.living-menaion"
-          backup="$(mktemp "$HOME/.living-menaion/Caddyfile.backup.XXXXXX")"
-          candidate="$(mktemp "$HOME/.living-menaion/Caddyfile.candidate.XXXXXX")"
-          echo "phase=read-caddy"
-          docker exec "$caddy_name" cat /etc/caddy/Caddyfile > "$backup"
-          cp "$backup" "$candidate"
-          cleanup() { rm -f "$backup" "$candidate"; }
+          routes_backup="$(mktemp "$HOME/.living-menaion/caddy-routes.backup.XXXXXX")"
+          routes_candidate="$(mktemp "$HOME/.living-menaion/caddy-routes.candidate.XXXXXX")"
+          caddyfile_candidate="$(mktemp "$HOME/.living-menaion/Caddyfile.candidate.XXXXXX")"
+          cleanup() { rm -f "$routes_backup" "$routes_candidate" "$caddyfile_candidate"; unset service_key; }
           trap cleanup EXIT
 
-          write_caddyfile() {
-            docker run --rm -i --entrypoint sh               -v /opt/beget/supabase/volumes/proxy/caddy:/work               caddy:2 -c 'cat > /work/Caddyfile'
+          admin_curl() {
+            docker run --rm -i --network "container:$caddy_name" curlimages/curl:8.14.1 "$@"
           }
 
-          rollback() {
-            write_caddyfile < "$backup"
-            docker restart "$caddy_name" >/dev/null
-            for _ in $(seq 1 20); do
-              if [ "$(docker inspect -f '{{.State.Running}}' "$caddy_name" 2>/dev/null || true)" = "true" ]; then
-                break
-              fi
-              sleep 1
-            done
-          }
+          echo "phase=read-live-config"
+          admin_curl -fsS http://127.0.0.1:2019/config/apps/http/servers/srv0/routes > "$routes_backup"
+          jq -e 'type == "array"' "$routes_backup" >/dev/null
 
-          if ! grep -q 'handle_path /menaion/rest/v1/\*' "$candidate"; then
-            python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    handle @supabase_api {"; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API handle not found; refusing edit")); p.write_text(t.replace(n,b+n,1))' "$candidate"
+          if jq -e '.. | objects | select(.dial? == "living-menaion-rest:3000")' "$routes_backup" >/dev/null; then
+            cp "$routes_backup" "$routes_candidate"
+          else
+            route_json="$(printf '%s\n' ':9999 {' '  handle_path /menaion/rest/v1/* {' '    reverse_proxy living-menaion-rest:3000' '  }' '}' |
+              docker run --rm -i caddy:2 caddy adapt --adapter caddyfile --config /dev/stdin |
+              jq -c '.apps.http.servers.srv0.routes[0]')"
+            test -n "$route_json"
+            jq --argjson route "$route_json" '[$route] + .' "$routes_backup" > "$routes_candidate"
           fi
 
-          echo "phase=write-caddy"
-          write_caddyfile < "$candidate"
+          rollback() {
+            admin_curl -fsS -X PUT               -H 'Content-Type: application/json'               --data-binary @-               http://127.0.0.1:2019/config/apps/http/servers/srv0/routes < "$routes_backup" >/dev/null
+          }
 
-          echo "phase=restart-caddy"
-          docker restart "$caddy_name" >/dev/null
-          running=0
-          for _ in $(seq 1 20); do
-            if [ "$(docker inspect -f '{{.State.Running}}' "$caddy_name" 2>/dev/null || true)" = "true" ]; then
-              running=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$running" -ne 1 ]; then
-            rollback
-            echo "Caddy failed to restart with candidate; rolled back." >&2
+          echo "phase=apply-live-config"
+          if ! admin_curl -fsS -X PUT             -H 'Content-Type: application/json'             --data-binary @-             http://127.0.0.1:2019/config/apps/http/servers/srv0/routes < "$routes_candidate" >/dev/null; then
+            rollback || true
+            echo "Caddy admin API rejected Menaion route." >&2
             exit 1
           fi
 
           ok=0
-          for _ in $(seq 1 10); do
+          for _ in $(seq 1 15); do
             auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5               --resolve api.mercy.peerivo.net:443:127.0.0.1               https://api.mercy.peerivo.net/auth/v1/health || true)"
             body="$(curl --silent --show-error --max-time 5               --resolve api.mercy.peerivo.net:443:127.0.0.1               -H "Authorization: Bearer $service_key"               -H "apikey: $service_key"               -H "Accept-Profile: living_menaion"               "https://api.mercy.peerivo.net/menaion/rest/v1/liturgical_day_editions?select=id&limit=1" || true)"
             if [ "$auth_code" = "$baseline_auth_code" ] && [[ "$body" == \[*\] ]]; then
@@ -132,12 +113,18 @@ jobs:
           echo "phase=smoke-result ok=$ok auth_baseline=$baseline_auth_code"
           if [ "$ok" -ne 1 ]; then
             rollback
-            echo "Front-door verification failed; rolled back." >&2
+            echo "Front-door verification failed; live Caddy routes rolled back." >&2
             exit 1
           fi
 
-          unset service_key
-          echo "Living Menaion HTTPS REST route verified; existing Mercy Auth remained healthy."
+          # Persist the same route in the mounted Caddyfile for the next controlled recreate.
+          docker exec "$caddy_name" cat /etc/caddy/Caddyfile > "$caddyfile_candidate"
+          if ! grep -q 'handle_path /menaion/rest/v1/\*' "$caddyfile_candidate"; then
+            python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    handle @supabase_api {"; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API handle not found; refusing persistence")); p.write_text(t.replace(n,b+n,1))' "$caddyfile_candidate"
+            docker run --rm -i --entrypoint sh               -v /opt/beget/supabase/volumes/proxy/caddy:/work               caddy:2 -c 'cat > /work/Caddyfile' < "$caddyfile_candidate"
+          fi
+
+          echo "Living Menaion HTTPS REST route verified; Mercy Auth baseline preserved."
           REMOTE
 
       - name: Remove runner SSH material
