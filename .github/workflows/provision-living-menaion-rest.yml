@@ -1,0 +1,207 @@
+name: Provision Living Menaion PostgREST
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/provision-living-menaion-rest.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: living-menaion-postgrest-production
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+      MERCY_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.MERCY_SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Validate protected configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS MERCY_SERVICE_ROLE_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing production configuration: ${name}"
+              missing=1
+            fi
+          done
+          test "${missing}" -eq 0
+
+      - name: Configure pinned SSH host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Provision isolated PostgREST container
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          ssh "${remote}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+          test -n "$project"
+          network="${project}_default"
+          docker network inspect "$network" >/dev/null
+
+          get_service_id() {
+            local service="$1"
+            local ids=()
+            mapfile -t ids < <(
+              docker ps -aq                 --filter "label=com.docker.compose.project=$project"                 --filter "label=com.docker.compose.service=$service"
+            )
+            test "${#ids[@]}" -eq 1
+            printf '%s' "${ids[0]}"
+          }
+
+          rest_cid="$(get_service_id rest)"
+          db_cid="$(get_service_id db)"
+          auth_cid="$(get_service_id auth)"
+          storage_cid="$(get_service_id storage)"
+          realtime_cid="$(get_service_id realtime)"
+          kong_cid="$(get_service_id kong)"
+          rest_image="$(docker inspect -f '{{.Config.Image}}' "$rest_cid")"
+          test -n "$rest_image"
+
+          install -d -m 700 "$HOME/.living-menaion"
+          tmp_env="$(mktemp "$HOME/.living-menaion/postgrest.env.XXXXXX")"
+          chmod 600 "$tmp_env"
+          raw_env="$(mktemp "$HOME/.living-menaion/postgrest.raw.XXXXXX")"
+          chmod 600 "$raw_env"
+          trap 'rm -f "$tmp_env" "$raw_env"' EXIT
+
+          docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$rest_cid" > "$raw_env"
+
+          uri_seen=0
+          schemas_seen=0
+          while IFS= read -r line; do
+            case "$line" in
+              PGRST_DB_URI=*)
+                uri="${line#PGRST_DB_URI=}"
+                case "$uri" in
+                  */postgres)
+                    uri="${uri%/postgres}/living_menaion"
+                    ;;
+                  *)
+                    echo "Unexpected PostgREST database URI shape; refusing mutation." >&2
+                    exit 1
+                    ;;
+                esac
+                printf 'PGRST_DB_URI=%s\n' "$uri" >> "$tmp_env"
+                uri_seen=1
+                ;;
+              PGRST_DB_SCHEMAS=*)
+                printf 'PGRST_DB_SCHEMAS=living_menaion\n' >> "$tmp_env"
+                schemas_seen=1
+                ;;
+              *)
+                printf '%s\n' "$line" >> "$tmp_env"
+                ;;
+            esac
+          done < "$raw_env"
+
+          test "$uri_seen" -eq 1
+          if [ "$schemas_seen" -eq 0 ]; then
+            printf 'PGRST_DB_SCHEMAS=living_menaion\n' >> "$tmp_env"
+          fi
+
+          env_file="$HOME/.living-menaion/postgrest.env"
+          mv "$tmp_env" "$env_file"
+          chmod 600 "$env_file"
+          trap 'rm -f "$raw_env"' EXIT
+
+          if docker ps -a --format '{{.Names}}' | grep -qx 'living-menaion-rest'; then
+            docker rm -f living-menaion-rest >/dev/null
+          fi
+
+          docker run -d             --name living-menaion-rest             --restart unless-stopped             --network "$network"             --env-file "$env_file"             "$rest_image" >/dev/null
+
+          ready=0
+          for _ in $(seq 1 30); do
+            state="$(docker inspect -f '{{.State.Status}}' living-menaion-rest)"
+            if [ "$state" = "exited" ] || [ "$state" = "dead" ]; then
+              docker logs --tail 100 living-menaion-rest >&2 || true
+              exit 1
+            fi
+            ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' living-menaion-rest)"
+            if [ -n "$ip" ] && curl --fail --silent --show-error --max-time 2 "http://$ip:3000/" >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+
+          test "$(get_service_id db)" = "$db_cid"
+          test "$(get_service_id rest)" = "$rest_cid"
+          test "$(get_service_id auth)" = "$auth_cid"
+          test "$(get_service_id storage)" = "$storage_cid"
+          test "$(get_service_id realtime)" = "$realtime_cid"
+          test "$(get_service_id kong)" = "$kong_cid"
+
+          echo "Living Menaion internal PostgREST is running; Mercy services are unchanged."
+          REMOTE
+
+      - name: Verify service-role access through isolated PostgREST
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          printf '%s\n' "${MERCY_SERVICE_ROLE_KEY}" |
+            ssh "${remote}" 'umask 077; cat > "$HOME/.living-menaion/service-role.key.tmp"'
+
+          ssh "${remote}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          key_file="$HOME/.living-menaion/service-role.key.tmp"
+          trap 'rm -f "$key_file"' EXIT
+          service_key="$(cat "$key_file")"
+          test -n "$service_key"
+
+          ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' living-menaion-rest)"
+          test -n "$ip"
+
+          body="$(curl --fail --silent --show-error --max-time 5 \
+            -H "Authorization: Bearer $service_key" \
+            -H "apikey: $service_key" \
+            -H "Accept-Profile: living_menaion" \
+            "http://$ip:3000/liturgical_day_editions?select=id&limit=1")"
+
+          case "$body" in
+            \[*\]) ;;
+            *)
+              echo "Unexpected PostgREST response shape." >&2
+              exit 1
+              ;;
+          esac
+
+          unset service_key
+          echo "Living Menaion PostgREST service-role query verified."
+          REMOTE
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519
