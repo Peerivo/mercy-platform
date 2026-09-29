@@ -33,6 +33,16 @@ Catalog tests publish only verified organization+point records; pending rows sta
 
 At mobile width and keyboard-only, labels, focus, loading/error/empty states and horizontal overflow remain usable. Quick Exit must not wait for network and must prevent private content/session recovery through Back/BFCache behavior.
 
+## Home-visit volunteer safety
+- ESIA proves identity only; it does not establish that a private home is suitable for a volunteer visit.
+- A request that needs entry to a home captures private household, animal, smoke/allergen and access conditions plus explicit acknowledgement before curator approval.
+- Home-visit safety details stay out of public list/detail RPCs and anonymous surfaces.
+- Home visits remain paired: the current curator is the default companion, or another active ESIA-verified volunteer may accompany.
+- If the requester says a preliminary video call is possible, assignment fails until the curator records that it was completed.
+- Dog, cat and smoke restrictions are private matching inputs; conflicting assignments fail in the database RPC.
+- Assigned volunteers can read the bounded visit-safety projection for their case; unrelated users and anonymous callers cannot.
+- Production migration remains GitHub-Actions-only; merging code does not apply it to production.
+
 ## Volunteer offer MVP
 A user creates an offer only through the atomic RPC: owner identity comes from JWT, bounded payload/rate limits are checked, and consent is recorded. Direct INSERT is revoked. RLS exposes a row only to its owner and ADMIN; creating an offer never grants staff privileges. ADMIN moderation requires a reason and writes audit data without copying private contact/description into the audit log.
 
