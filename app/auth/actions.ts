@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { peerivoLogoutUrl } from "@/lib/peerivo-auth";
 import { serverSupabase } from "@/lib/supabase/server";
 import { siteUrl } from "@/lib/config";
 
@@ -55,5 +56,6 @@ export async function updatePassword(fd: FormData) {
 export async function signOut() {
   const s = await serverSupabase();
   await s.auth.signOut();
-  redirect("/");
+  const peerivoLogout = peerivoLogoutUrl("/");
+  redirect(peerivoLogout ?? "/");
 }
