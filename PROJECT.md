@@ -105,7 +105,18 @@ The correction resolves the installed `Image` ID, preserves `--pull never`, and 
 - Curators manage ESIA-verified volunteers and registered patrons; only admins manage curator/admin grants. Patron types cover physical persons, sole proprietors, legal entities and government bodies.
 - Added curator volunteer directory, city/status/category/home-clearance filtering, volunteer cards, contact persons, request assignment and volunteer-service statistics.
 - Added beneficiary-consent/home-visit safety gates, paired home visits and an incident workflow that suspends volunteer access until explicit reactivation.
+- Home-visit safety explicitly separates ESIA identity from place safety: requester-declared private household/animal/smoke/access conditions, optional trusted contact and preliminary video-call state stay outside public request projections. Paired assignment fails closed on missing conditions, missing required video call, or dog/cat/smoke incompatibility with the selected volunteer.
 - Assigned volunteer case access is narrower than curator access: no case lifecycle changes and no visibility into other responders' private contacts.
 - Added protected Beget repository-migration workflow with backup/history verification and trusted bootstrap for the registered `oleg-kabatchenko@yandex.ru` administrator.
 - External ESIA provider provisioning is not claimed as complete; this increment consumes verified ESIA identity links once the connector supplies them.
 
+
+
+## GLOBAL CONTRACT 1.10.0 SNAPSHOT — 2026-09-29
+The local binding snapshot is refreshed to Global 1.10.0
+(`sha256:90b04165dc60a5ce3c2fa5aaeef329515dc85ae6d2d02a29b56d5dbe5cf037f9`,
+contract commit `7ef6771ec51fdd8359d30aad25a12d1deb130835`). Under the 1.9+ automatic
+propagation model this records the already-effective canonical policy rather than a new
+per-project approval. Global 1.10 keeps CI/review evidence advisory for merge authority while
+preserving separate scoped approval for high-impact runtime operations. No production database
+migration or deployment is dispatched by this change.
