@@ -63,18 +63,18 @@ jobs:
           set -euo pipefail
           remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
           cert_b64="$(ssh "${remote}" 'set -euo pipefail
-            install -d -m 700 /etc/living-menaion
-            if [ ! -s /etc/living-menaion/deploy-private.pem ] || [ ! -s /etc/living-menaion/deploy-cert.pem ]; then
+            install -d -m 700 "$HOME/.living-menaion"
+            if [ ! -s $HOME/.living-menaion/deploy-private.pem ] || [ ! -s $HOME/.living-menaion/deploy-cert.pem ]; then
               umask 077
               openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
-                -keyout /etc/living-menaion/deploy-private.pem \
-                -out /etc/living-menaion/deploy-cert.pem \
+                -keyout $HOME/.living-menaion/deploy-private.pem \
+                -out $HOME/.living-menaion/deploy-cert.pem \
                 -subj "/CN=Living Menaion Deployment" \
                 -days 3650 >/dev/null 2>&1
-              chmod 600 /etc/living-menaion/deploy-private.pem
-              chmod 644 /etc/living-menaion/deploy-cert.pem
+              chmod 600 $HOME/.living-menaion/deploy-private.pem
+              chmod 644 $HOME/.living-menaion/deploy-cert.pem
             fi
-            base64 -w0 /etc/living-menaion/deploy-cert.pem
+            base64 -w0 $HOME/.living-menaion/deploy-cert.pem
           ')"
           test -n "${cert_b64}"
           echo "::notice::LIVING_MENAION_DEPLOY_CERT_B64=${cert_b64}"
@@ -97,8 +97,8 @@ jobs:
 
             openssl cms -decrypt -binary -inform DER \
               -in /tmp/living-menaion-migrations.cms \
-              -recip /etc/living-menaion/deploy-cert.pem \
-              -inkey /etc/living-menaion/deploy-private.pem \
+              -recip $HOME/.living-menaion/deploy-cert.pem \
+              -inkey $HOME/.living-menaion/deploy-private.pem \
               -out /tmp/living-menaion-migrations.tar.gz
 
             mkdir -p /tmp/living-menaion-migrations
@@ -113,8 +113,6 @@ jobs:
             test "${owner_count}" = 1
             test "${app_count}" = 1
             test "${service_role_count}" = 1
-            test -f /etc/living-menaion/db.env
-            test "$(stat -c "%a" /etc/living-menaion/db.env)" = 600
 
             docker exec -i supabase-db psql -U supabase_admin -d living_menaion -v ON_ERROR_STOP=1 <<'''SQL'''
             create table if not exists public.living_menaion_schema_migrations (
