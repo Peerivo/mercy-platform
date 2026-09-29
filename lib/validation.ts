@@ -1,25 +1,59 @@
 import { z } from "zod";
 
-export const requestSchema = z.object({
-  category: z.enum([
-    "PREGNANCY",
-    "FAMILY",
-    "HOUSING",
-    "FOOD_GOODS",
-    "LEGAL_DOCUMENTS",
-    "WORK_EDUCATION",
-    "OTHER",
-  ]),
-  country: z.string().trim().min(2).max(80),
-  city: z.string().trim().min(2).max(120),
-  description: z.string().trim().min(20).max(5000),
-  urgency: z.enum(["NORMAL", "SOON", "URGENT"]),
-  can_message: z.boolean(),
-  can_call: z.boolean(),
-  contact_window: z.string().max(120),
-  external_contact: z.string().max(200),
-  consent: z.literal(true),
-});
+export const requestSchema = z
+  .object({
+    category: z.enum([
+      "PREGNANCY",
+      "FAMILY",
+      "HOUSING",
+      "FOOD_GOODS",
+      "LEGAL_DOCUMENTS",
+      "WORK_EDUCATION",
+      "OTHER",
+    ]),
+    country: z.string().trim().min(2).max(80),
+    city: z.string().trim().min(2).max(120),
+    description: z.string().trim().min(20).max(5000),
+    urgency: z.enum(["NORMAL", "SOON", "URGENT"]),
+    can_message: z.boolean(),
+    can_call: z.boolean(),
+    contact_window: z.string().max(120),
+    external_contact: z.string().max(200),
+    home_visit_required: z.boolean().default(false),
+    visit_household_members: z.string().trim().max(1000).default(""),
+    dogs_present: z.boolean().default(false),
+    cats_present: z.boolean().default(false),
+    visit_animals_notes: z.string().trim().max(1000).default(""),
+    smoking_present: z.boolean().default(false),
+    visit_allergen_notes: z.string().trim().max(1000).default(""),
+    visit_access_notes: z.string().trim().max(1000).default(""),
+    visit_other_notes: z.string().trim().max(1500).default(""),
+    visit_trusted_contact: z.string().trim().max(240).default(""),
+    video_call_possible: z.boolean().default(false),
+    visit_safety_acknowledged: z.boolean().default(false),
+    consent: z.literal(true),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.home_visit_required) return;
+    const required: Array<[keyof typeof value, string]> = [
+      ["visit_household_members", "Расскажите, кто может находиться дома"],
+      ["visit_animals_notes", "Опишите животных или укажите, что их нет"],
+      ["visit_allergen_notes", "Опишите аллергены/дым или укажите, что их нет"],
+      ["visit_access_notes", "Опишите особенности входа и передвижения"],
+    ];
+    for (const [field, message] of required) {
+      if (String(value[field]).trim().length < 2) {
+        ctx.addIssue({ code: "custom", path: [field], message });
+      }
+    }
+    if (!value.visit_safety_acknowledged) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["visit_safety_acknowledged"],
+        message: "home visit safety acknowledgement required",
+      });
+    }
+  });
 
 export const offerSchema = z
   .object({
@@ -183,6 +217,22 @@ export const volunteerProfileSchema = z.object({
   availableOnline: z.boolean(),
   homeClearance: z.enum(["NOT_CLEARED", "CLEARED", "SUSPENDED"]),
   supervisionRequired: z.boolean(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const volunteerVisitLimitationsSchema = z.object({
+  targetUser: z.string().uuid(),
+  avoidDogs: z.boolean(),
+  avoidCats: z.boolean(),
+  avoidSmoke: z.boolean(),
+  limitations: z.string().trim().max(1000),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const visitVideoCheckSchema = z.object({
+  caseId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  completed: z.boolean(),
   reason: z.string().trim().min(3).max(500),
 });
 
