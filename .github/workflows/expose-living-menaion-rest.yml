@@ -80,28 +80,43 @@ jobs:
           cleanup() { rm -f "$backup" "$candidate"; }
           trap cleanup EXIT
 
+          write_caddyfile() {
+            docker run --rm -i --entrypoint sh               -v /opt/beget/supabase/volumes/proxy/caddy:/work               caddy:2 -c 'cat > /work/Caddyfile'
+          }
+
           rollback() {
-            docker exec -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile' < "$backup"
-            docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile >/dev/null
-            echo "phase=reload-caddy"
-          docker exec "$caddy_name" caddy reload --config /etc/caddy/Caddyfile >/dev/null
+            write_caddyfile < "$backup"
+            docker restart "$caddy_name" >/dev/null
+            for _ in $(seq 1 20); do
+              if [ "$(docker inspect -f '{{.State.Running}}' "$caddy_name" 2>/dev/null || true)" = "true" ]; then
+                break
+              fi
+              sleep 1
+            done
           }
 
           if ! grep -q 'handle_path /menaion/rest/v1/\*' "$candidate"; then
-            python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    @supabase_api path "; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API matcher not found; refusing edit")); p.write_text(t.replace(n,b+n,1))' "$candidate"
+            python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    handle @supabase_api {"; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API handle not found; refusing edit")); p.write_text(t.replace(n,b+n,1))' "$candidate"
           fi
 
           echo "phase=write-caddy"
-          docker exec -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile' < "$candidate"
+          write_caddyfile < "$candidate"
 
-          echo "phase=validate-caddy"
-          if ! docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+          echo "phase=restart-caddy"
+          docker restart "$caddy_name" >/dev/null
+          running=0
+          for _ in $(seq 1 20); do
+            if [ "$(docker inspect -f '{{.State.Running}}' "$caddy_name" 2>/dev/null || true)" = "true" ]; then
+              running=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$running" -ne 1 ]; then
             rollback
-            echo "Caddy validation failed; rolled back." >&2
+            echo "Caddy failed to restart with candidate; rolled back." >&2
             exit 1
           fi
-
-          docker exec "$caddy_name" caddy reload --config /etc/caddy/Caddyfile >/dev/null
 
           ok=0
           for _ in $(seq 1 10); do
