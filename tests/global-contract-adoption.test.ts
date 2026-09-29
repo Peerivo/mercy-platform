@@ -54,7 +54,6 @@ describe("Peerivo Global Contract adoption", () => {
       "contract.updated.peerivo-global.1.8.0",
     );
     expect(adoption18.newContract).toEqual({
-      id: "peerivo-global",
       version: "1.8.0",
       digest:
         "sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed",
