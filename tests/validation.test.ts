@@ -38,6 +38,27 @@ describe("help request validation", () => {
       requestSchema.safeParse({ ...valid, description: "x".repeat(5001) })
         .success
     ).toBe(false));
+
+  it("requires complete private safety details for a home visit", () => {
+    const homeVisit = {
+      ...valid,
+      home_visit_required: true,
+      visit_household_members: "Живу одна",
+      dogs_present: true,
+      cats_present: false,
+      visit_animals_notes: "Собака будет в другой комнате",
+      smoking_present: false,
+      visit_allergen_notes: "Особенностей нет",
+      visit_access_notes: "Четвёртый этаж, лифта нет",
+      visit_other_notes: "",
+      visit_trusted_contact: "Дочь, связь через чат",
+      video_call_possible: true,
+      visit_safety_acknowledged: true,
+    };
+    expect(requestSchema.safeParse(homeVisit).success).toBe(true);
+    expect(requestSchema.safeParse({ ...homeVisit, visit_household_members: "" }).success).toBe(false);
+    expect(requestSchema.safeParse({ ...homeVisit, visit_safety_acknowledged: false }).success).toBe(false);
+  });
 });
 
 describe("volunteer offer validation", () => {
