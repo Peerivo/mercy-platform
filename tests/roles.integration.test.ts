@@ -207,6 +207,18 @@ describe.sequential("Mercy roles and volunteer service", () => {
         city: "Test",
         description: "A sufficiently long volunteer service integration request",
         urgency: "NORMAL",
+        home_visit_required: true,
+        visit_household_members: "Owner and relative may be present",
+        dogs_present: true,
+        cats_present: false,
+        visit_animals_notes: "One calm dog can be kept in another room",
+        smoking_present: false,
+        visit_allergen_notes: "No known smoke or other airborne issue",
+        visit_access_notes: "Third floor with stairs",
+        visit_other_notes: "Call before arriving",
+        visit_trusted_contact: "Relative via private chat",
+        video_call_possible: true,
+        visit_safety_acknowledged: true,
       },
       consent_version: "request-v1",
     });
@@ -253,6 +265,48 @@ describe.sequential("Mercy roles and volunteer service", () => {
       reason_text: "beneficiary consent independently confirmed",
     })).error).toBeNull();
 
+    expect((await clients["role-curator"].rpc("update_volunteer_visit_limitations", {
+      target_user: ids["role-volunteer"],
+      avoid_dogs: true,
+      avoid_cats: false,
+      avoid_smoke: false,
+      limitations_text: "No dog visits during integration check",
+      reason_text: "record volunteer safety preference",
+    })).error).toBeNull();
+
+    const deniedDogConflict = await clients["role-curator"].rpc("assign_volunteer_to_case", {
+      case_id: helpRequestId,
+      target_volunteer: ids["role-volunteer"],
+      assignment_mode: "HOME_PAIRED",
+      task_text: "Deliver groceries and confirm receipt",
+      companion_user: null,
+    });
+    expect(deniedDogConflict.error?.message).toContain("dogs");
+
+    expect((await clients["role-curator"].rpc("update_volunteer_visit_limitations", {
+      target_user: ids["role-volunteer"],
+      avoid_dogs: false,
+      avoid_cats: false,
+      avoid_smoke: false,
+      limitations_text: "",
+      reason_text: "clear integration dog restriction",
+    })).error).toBeNull();
+
+    const deniedBeforeVideo = await clients["role-curator"].rpc("assign_volunteer_to_case", {
+      case_id: helpRequestId,
+      target_volunteer: ids["role-volunteer"],
+      assignment_mode: "HOME_PAIRED",
+      task_text: "Deliver groceries and confirm receipt",
+      companion_user: null,
+    });
+    expect(deniedBeforeVideo.error?.message).toContain("video call required");
+
+    expect((await clients["role-curator"].rpc("confirm_home_visit_video_call", {
+      case_id: helpRequestId,
+      completed: true,
+      reason_text: "integration video call completed",
+    })).error).toBeNull();
+
     const assigned = await clients["role-curator"].rpc("assign_volunteer_to_case", {
       case_id: helpRequestId,
       target_volunteer: ids["role-volunteer"],
@@ -284,6 +338,21 @@ describe.sequential("Mercy roles and volunteer service", () => {
       case_id: helpRequestId,
     });
     expect(role.data).toBe("VOLUNTEER");
+
+    const privateSafety = await clients["role-volunteer"].rpc("current_case_visit_safety", {
+      case_id: helpRequestId,
+    });
+    expect(privateSafety.error).toBeNull();
+    expect(privateSafety.data?.[0]).toMatchObject({
+      home_visit_requested: true,
+      dogs_present: true,
+      video_call_possible: true,
+    });
+    expect(
+      (await clients["role-outsider"].rpc("current_case_visit_safety", {
+        case_id: helpRequestId,
+      })).error,
+    ).not.toBeNull();
   });
 
   test("opening an incident suspends access until explicit curator reactivation", async () => {
