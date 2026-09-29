@@ -314,9 +314,9 @@ $$;
 
 create function public.update_volunteer_visit_limitations(
   target_user uuid,
-  avoid_dogs boolean,
-  avoid_cats boolean,
-  avoid_smoke boolean,
+  avoid_dogs_value boolean,
+  avoid_cats_value boolean,
+  avoid_smoke_value boolean,
   limitations_text text,
   reason_text text
 )
@@ -342,8 +342,8 @@ begin
   end if;
 
   update public.volunteer_profiles
-  set avoid_dogs=coalesce(avoid_dogs,false),avoid_cats=coalesce(avoid_cats,false),
-      avoid_smoke=coalesce(avoid_smoke,false),visit_limitations=clean_limitations,
+  set avoid_dogs=coalesce(avoid_dogs_value,false),avoid_cats=coalesce(avoid_cats_value,false),
+      avoid_smoke=coalesce(avoid_smoke_value,false),visit_limitations=clean_limitations,
       updated_by=caller,updated_at=now()
   where user_id=target_user;
   if not found then raise exception 'volunteer profile not found'; end if;
