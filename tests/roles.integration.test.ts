@@ -267,9 +267,9 @@ describe.sequential("Mercy roles and volunteer service", () => {
 
     expect((await clients["role-curator"].rpc("update_volunteer_visit_limitations", {
       target_user: ids["role-volunteer"],
-      avoid_dogs: true,
-      avoid_cats: false,
-      avoid_smoke: false,
+      avoid_dogs_value: true,
+      avoid_cats_value: false,
+      avoid_smoke_value: false,
       limitations_text: "No dog visits during integration check",
       reason_text: "record volunteer safety preference",
     })).error).toBeNull();
@@ -285,9 +285,9 @@ describe.sequential("Mercy roles and volunteer service", () => {
 
     expect((await clients["role-curator"].rpc("update_volunteer_visit_limitations", {
       target_user: ids["role-volunteer"],
-      avoid_dogs: false,
-      avoid_cats: false,
-      avoid_smoke: false,
+      avoid_dogs_value: false,
+      avoid_cats_value: false,
+      avoid_smoke_value: false,
       limitations_text: "",
       reason_text: "clear integration dog restriction",
     })).error).toBeNull();
