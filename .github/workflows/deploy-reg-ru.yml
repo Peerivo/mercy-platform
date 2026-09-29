@@ -30,6 +30,9 @@ env:
   SITE_URL: https://mercy.peerivo.net
   RUSSIAN_HOST: xn----htbcggcjkhwxk7j6bn.xn--p1ai
   EXPECTED_SUPABASE_URL: https://api.mercy.peerivo.net
+  PEERIVO_AUTH_URL: https://auth.peerivo.net
+  PEERIVO_AUTH_CLIENT_ID: mercy
+  PEERIVO_AUTH_REDIRECT_URI: https://mercy.peerivo.net/auth/callback
   IMAGE_NAME: mercy-platform
   CONTAINER_NAME: mercy
   REMOTE_DIR: /opt/peerivo/mercy
@@ -47,6 +50,8 @@ jobs:
       NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.MERCY_SUPABASE_SERVICE_ROLE_KEY }}
+      PEERIVO_AUTH_LOCAL_PASSWORD_SECRET: ${{ secrets.PEERIVO_AUTH_LOCAL_PASSWORD_SECRET }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL || secrets.RESEND_FROM_EMAIL }}
       FEEDBACK_TO_EMAIL: ${{ vars.FEEDBACK_TO_EMAIL || secrets.FEEDBACK_TO_EMAIL }}
@@ -83,7 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for name in REG_RU_HOST REG_RU_USER REG_RU_SSH_KEY REG_RU_KNOWN_HOSTS NEXT_PUBLIC_SUPABASE_URL RESEND_API_KEY RESEND_FROM_EMAIL FEEDBACK_TO_EMAIL; do
+          for name in REG_RU_HOST REG_RU_USER REG_RU_SSH_KEY REG_RU_KNOWN_HOSTS NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY PEERIVO_AUTH_LOCAL_PASSWORD_SECRET PEERIVO_AUTH_URL PEERIVO_AUTH_CLIENT_ID PEERIVO_AUTH_REDIRECT_URI RESEND_API_KEY RESEND_FROM_EMAIL FEEDBACK_TO_EMAIL; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing protected production configuration: ${name}"
               missing=1
@@ -132,6 +137,11 @@ jobs:
             printf 'NEXT_PUBLIC_SUPABASE_URL=%s\n' "${NEXT_PUBLIC_SUPABASE_URL}"
             printf 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=%s\n' "${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}"
             printf 'NEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n' "${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}"
+            printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "${SUPABASE_SERVICE_ROLE_KEY}"
+            printf 'PEERIVO_AUTH_URL=%s\n' "${PEERIVO_AUTH_URL}"
+            printf 'PEERIVO_AUTH_CLIENT_ID=%s\n' "${PEERIVO_AUTH_CLIENT_ID}"
+            printf 'PEERIVO_AUTH_REDIRECT_URI=%s\n' "${PEERIVO_AUTH_REDIRECT_URI}"
+            printf 'PEERIVO_AUTH_LOCAL_PASSWORD_SECRET=%s\n' "${PEERIVO_AUTH_LOCAL_PASSWORD_SECRET}"
             printf 'RESEND_API_KEY=%s\n' "${RESEND_API_KEY}"
             printf 'RESEND_FROM_EMAIL=%s\n' "${RESEND_FROM_EMAIL}"
             printf 'FEEDBACK_TO_EMAIL=%s\n' "${FEEDBACK_TO_EMAIL}"
@@ -278,6 +288,13 @@ jobs:
             false
           }
 
+          peerivo_headers="$(curl --silent --show-error --max-time 10 --dump-header - --output /dev/null 'http://127.0.0.1:3100/auth/start?next=%2Fcabinet')"
+          printf '%s\n' "${peerivo_headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
+          peerivo_location="$(printf '%s\n' "${peerivo_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
+          printf '%s' "${peerivo_location}" | grep -F 'https://auth.peerivo.net/authorize?' >/dev/null
+          printf '%s' "${peerivo_location}" | grep -F 'client_id=mercy' >/dev/null
+          printf '%s' "${peerivo_location}" | grep -F 'code_challenge_method=S256' >/dev/null
+
           redirect_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             -H "Host: ${RUSSIAN_HOST}"             'http://127.0.0.1:3100/requests?cutover_probe=1')"
           printf '%s\n' "${redirect_headers}" | head -n 1 | grep -E ' 308 ' >/dev/null
           redirect_location="$(printf '%s\n' "${redirect_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
@@ -388,6 +405,13 @@ jobs:
             echo "::error::Canonical production Auth callback redirect is wrong"
             exit 1
           }
+
+          peerivo_headers="$(curl --silent --show-error --max-time 20 --dump-header - --output /dev/null "${SITE_URL}/auth/start?next=%2Fcabinet")"
+          printf '%s\n' "${peerivo_headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
+          peerivo_location="$(printf '%s\n' "${peerivo_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
+          printf '%s' "${peerivo_location}" | grep -F 'https://auth.peerivo.net/authorize?' >/dev/null
+          printf '%s' "${peerivo_location}" | grep -F 'client_id=mercy' >/dev/null
+          printf '%s' "${peerivo_location}" | grep -F 'code_challenge_method=S256' >/dev/null
 
       - name: Verify Russian hostname permanently redirects to canonical site
         shell: bash
