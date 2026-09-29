@@ -26,7 +26,7 @@ jobs:
       BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
       BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
       BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
-      MERCY_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.MERCY_SUPABASE_SERVICE_ROLE_KEY }}
+
 
     steps:
       - name: Validate protected configuration
@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS MERCY_SERVICE_ROLE_KEY; do
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing production configuration: ${name}"
               missing=1
@@ -170,14 +170,37 @@ jobs:
           set -euo pipefail
           remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
 
-          printf '%s\n' "${MERCY_SERVICE_ROLE_KEY}" |
-            ssh "${remote}" 'umask 077; cat > "$HOME/.living-menaion/service-role.key.tmp"'
-
           ssh "${remote}" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          key_file="$HOME/.living-menaion/service-role.key.tmp"
-          trap 'rm -f "$key_file"' EXIT
-          service_key="$(cat "$key_file")"
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+          test -n "$project"
+
+          get_service_id() {
+            local service="$1"
+            local ids=()
+            mapfile -t ids < <(
+              docker ps -aq \
+                --filter "label=com.docker.compose.project=$project" \
+                --filter "label=com.docker.compose.service=$service"
+            )
+            test "${#ids[@]}" -eq 1
+            printf '%s' "${ids[0]}"
+          }
+
+          get_env_value() {
+            local cid="$1"
+            local key="$2"
+            docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" \
+              | sed -n "s/^${key}=//p" \
+              | head -n 1
+          }
+
+          kong_cid="$(get_service_id kong)"
+          service_key="$(get_env_value "$kong_cid" SUPABASE_SERVICE_KEY)"
+          if [ -z "$service_key" ]; then
+            service_key="$(get_env_value "$kong_cid" SERVICE_ROLE_KEY)"
+          fi
           test -n "$service_key"
 
           ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' living-menaion-rest)"
@@ -198,7 +221,7 @@ jobs:
           esac
 
           unset service_key
-          echo "Living Menaion PostgREST service-role query verified."
+          echo "Living Menaion PostgREST runtime service-role query verified."
           REMOTE
 
       - name: Remove runner SSH material
