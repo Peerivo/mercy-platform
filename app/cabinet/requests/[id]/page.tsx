@@ -39,6 +39,23 @@ type PrivateRequestAccess = {
 
 type CaseAccess = "OWNER" | "CURATOR" | "VOLUNTEER";
 
+type VisitSafety = {
+  home_visit_requested: boolean;
+  household_members: string;
+  dogs_present: boolean;
+  cats_present: boolean;
+  animals_note: string;
+  smoking_present: boolean;
+  allergen_note: string;
+  access_note: string;
+  other_visit_note: string;
+  trusted_contact: string;
+  video_call_possible: boolean;
+  video_call_completed_at: string | null;
+  beneficiary_consent_status: string;
+  home_visit_approved: boolean;
+};
+
 export default async function Case({
   params,
 }: {
@@ -66,6 +83,7 @@ export default async function Case({
   let steps: SupportStep[] = [];
   let responses: HelpResponse[] = [];
   let ownResponse: OwnResponse | null = null;
+  let visitSafety: VisitSafety | null = null;
 
   if (user) {
     const [privateAccessResult, ownResponseResult, caseAccessResult] = await Promise.all([
@@ -104,7 +122,7 @@ export default async function Case({
         : null;
 
     if (accessRole) {
-      const [messagesResult, stepsResult, responsesResult] = await Promise.all([
+      const [messagesResult, stepsResult, responsesResult, visitSafetyResult] = await Promise.all([
         s
           .from("messages")
           .select("id,body,created_at,author_id,client_nonce")
@@ -125,11 +143,16 @@ export default async function Case({
               .eq("status", "PENDING")
               .order("created_at", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
+        s.rpc("current_case_visit_safety", { case_id: id }),
       ]);
 
       messages = (messagesResult.data ?? []) as ChatMessage[];
       steps = (stepsResult.data ?? []) as SupportStep[];
       responses = (responsesResult.data ?? []) as HelpResponse[];
+      visitSafety =
+        visitSafetyResult.data?.[0] && !visitSafetyResult.error
+          ? (visitSafetyResult.data[0] as VisitSafety)
+          : null;
     }
   }
 
@@ -180,6 +203,52 @@ export default async function Case({
           </p>
         )}
       </div>
+
+      {accessRole && visitSafety?.home_visit_requested && (
+        <section className="card">
+          <h2>Условия домашнего визита</h2>
+          <p className="muted">
+            Эти сведения приватны и не входят в публичную карточку просьбы.
+          </p>
+          <p><strong>Кто может быть дома:</strong> {visitSafety.household_members}</p>
+          <p>
+            <strong>Животные:</strong>{" "}
+            {visitSafety.dogs_present ? "есть собака; " : ""}
+            {visitSafety.cats_present ? "есть кошка; " : ""}
+            {visitSafety.animals_note}
+          </p>
+          <p>
+            <strong>Аллергены и дым:</strong>{" "}
+            {visitSafety.smoking_present ? "в помещении курят; " : ""}
+            {visitSafety.allergen_note}
+          </p>
+          <p><strong>Вход и передвижение:</strong> {visitSafety.access_note}</p>
+          {visitSafety.trusted_contact && (
+            <p><strong>Доверенный контакт:</strong> {visitSafety.trusted_contact}</p>
+          )}
+          {visitSafety.other_visit_note && (
+            <p><strong>Дополнительно:</strong> {visitSafety.other_visit_note}</p>
+          )}
+          <p>
+            <strong>Видеозвонок:</strong>{" "}
+            {visitSafety.video_call_possible
+              ? visitSafety.video_call_completed_at
+                ? "проведён"
+                : "возможен, но ещё не зафиксирован"
+              : "не заявлен как доступный"}
+          </p>
+          <p>
+            <strong>Домашний визит:</strong>{" "}
+            {visitSafety.home_visit_approved ? "разрешён куратором" : "ещё не разрешён куратором"}
+          </p>
+          {isVolunteer && (
+            <p className="muted">
+              Домашний визит проводится не в одиночку. Если фактические условия
+              отличаются от описанных, свяжитесь с куратором до продолжения визита.
+            </p>
+          )}
+        </section>
+      )}
 
       {!completed && !accessRole && (
         <RequestResponse
