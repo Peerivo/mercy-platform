@@ -14,12 +14,13 @@ export const PEERIVO_COOKIE_OPTIONS = {
   maxAge: 10 * 60,
 };
 
-const configSchema = z.object({
+const clientConfigSchema = z.object({
   authUrl: z.string().url(),
   clientId: z.string().min(1),
   redirectUri: z.string().url(),
-  localPasswordSecret: z.string().min(32),
 });
+
+const localSecretSchema = z.string().min(32);
 
 const verifyResponseSchema = z.object({
   active: z.literal(true),
@@ -42,19 +43,31 @@ export function isPeerivoAuthEnabled() {
   return process.env.PEERIVO_AUTH_ENABLED === "1" || Boolean(process.env.PEERIVO_AUTH_URL);
 }
 
-export function peerivoAuthConfig() {
+export function peerivoClientConfig() {
   const origin = siteUrl();
-  const parsed = configSchema.safeParse({
+  const parsed = clientConfigSchema.safeParse({
     authUrl: process.env.PEERIVO_AUTH_URL,
     clientId: process.env.PEERIVO_AUTH_CLIENT_ID ?? "mercy",
     redirectUri: process.env.PEERIVO_AUTH_REDIRECT_URI ?? new URL("/auth/callback", origin).toString(),
-    localPasswordSecret: process.env.PEERIVO_AUTH_LOCAL_PASSWORD_SECRET,
   });
 
   if (!parsed.success) {
     throw new Error(
-      "Peerivo Auth не настроен: задайте PEERIVO_AUTH_URL, PEERIVO_AUTH_CLIENT_ID, " +
-        "PEERIVO_AUTH_REDIRECT_URI и PEERIVO_AUTH_LOCAL_PASSWORD_SECRET через canonical secrets store.",
+      "Peerivo Auth не настроен: задайте PEERIVO_AUTH_URL, PEERIVO_AUTH_CLIENT_ID и " +
+        "PEERIVO_AUTH_REDIRECT_URI через canonical secrets store.",
+    );
+  }
+
+  return parsed.data;
+}
+
+function peerivoLocalPasswordSecret() {
+  const parsed = localSecretSchema.safeParse(process.env.PEERIVO_AUTH_LOCAL_PASSWORD_SECRET);
+
+  if (!parsed.success) {
+    throw new Error(
+      "Не настроен PEERIVO_AUTH_LOCAL_PASSWORD_SECRET для Mercy local-session bridge. " +
+        "Значение должно приходить из canonical Peerivo secrets store.",
     );
   }
 
@@ -91,7 +104,7 @@ export function createPeerivoState() {
 }
 
 export function buildPeerivoAuthorizeUrl(input: { state: string; codeChallenge: string }) {
-  const config = peerivoAuthConfig();
+  const config = peerivoClientConfig();
   const url = new URL("/authorize", config.authUrl);
   url.searchParams.set("client_id", config.clientId);
   url.searchParams.set("redirect_uri", config.redirectUri);
@@ -102,7 +115,7 @@ export function buildPeerivoAuthorizeUrl(input: { state: string; codeChallenge: 
 }
 
 export async function verifyPeerivoCode(input: { code: string; codeVerifier: string }) {
-  const config = peerivoAuthConfig();
+  const config = peerivoClientConfig();
   const response = await fetch(new URL("/api/verify-code", config.authUrl), {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -128,15 +141,15 @@ export async function verifyPeerivoCode(input: { code: string; codeVerifier: str
 }
 
 export function deriveMercyLocalPassword(input: { peerivoUserId: string; email: string }) {
-  const config = peerivoAuthConfig();
-  return createHmac("sha256", config.localPasswordSecret)
+  const config = peerivoClientConfig();
+  return createHmac("sha256", peerivoLocalPasswordSecret())
     .update(`${config.clientId}:${input.peerivoUserId}:${input.email.toLowerCase()}`)
     .digest("base64url");
 }
 
 export function peerivoLogoutUrl(returnTo = "/") {
   if (!isPeerivoAuthEnabled()) return null;
-  const config = peerivoAuthConfig();
+  const config = peerivoClientConfig();
   const url = new URL("/logout", config.authUrl);
   url.searchParams.set("returnTo", new URL(returnTo, siteUrl()).toString());
   return url.toString();
