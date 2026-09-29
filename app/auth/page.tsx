@@ -36,9 +36,6 @@ export default async function Auth({
         </div>
 
         {notice && <p role={notice.role}>{notice.message}</p>}
-        {q.error === "peerivo-config" && <p role="alert">Peerivo ID ещё не настроен для этой среды.</p>}
-        {q.error === "peerivo-state" && <p role="alert">Сессия входа устарела. Попробуйте войти ещё раз.</p>}
-        {q.error === "peerivo-callback" && <p role="alert">Не удалось завершить вход через Peerivo.</p>}
 
         {peerivoEnabled ? (
           <p>
