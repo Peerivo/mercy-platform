@@ -171,15 +171,23 @@ jobs:
           remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
 
           printf '%s\n' "${MERCY_SERVICE_ROLE_KEY}" |
-            ssh "${remote}" 'bash -s' <<'REMOTE'
+            ssh "${remote}" 'umask 077; cat > "$HOME/.living-menaion/service-role.key.tmp"'
+
+          ssh "${remote}" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          IFS= read -r service_key
+          key_file="$HOME/.living-menaion/service-role.key.tmp"
+          trap 'rm -f "$key_file"' EXIT
+          service_key="$(cat "$key_file")"
           test -n "$service_key"
 
           ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' living-menaion-rest)"
           test -n "$ip"
 
-          body="$(curl --fail --silent --show-error --max-time 5             -H "Authorization: Bearer $service_key"             -H "apikey: $service_key"             -H "Accept-Profile: living_menaion"             "http://$ip:3000/liturgical_day_editions?select=id&limit=1")"
+          body="$(curl --fail --silent --show-error --max-time 5 \
+            -H "Authorization: Bearer $service_key" \
+            -H "apikey: $service_key" \
+            -H "Accept-Profile: living_menaion" \
+            "http://$ip:3000/liturgical_day_editions?select=id&limit=1")"
 
           case "$body" in
             \[*\]) ;;
