@@ -1,0 +1,94 @@
+name: Inspect Living Menaion front door
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/inspect-living-menaion-frontdoor.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+
+    steps:
+      - name: Configure pinned SSH host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Inspect front-door topology without secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          ssh "${remote}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+          test -n "$project"
+
+          get_service_id() {
+            local service="$1"
+            local ids=()
+            mapfile -t ids < <(
+              docker ps -aq \
+                --filter "label=com.docker.compose.project=$project" \
+                --filter "label=com.docker.compose.service=$service"
+            )
+            test "${#ids[@]}" -eq 1
+            printf '%s' "${ids[0]}"
+          }
+
+          kong_cid="$(get_service_id kong)"
+          echo "compose_project=$project"
+          echo "kong_image=$(docker inspect -f '{{.Config.Image}}' "$kong_cid")"
+          echo "kong_ports=$(docker inspect -f '{{json .NetworkSettings.Ports}}' "$kong_cid")"
+          echo "menaion_rest_state=$(docker inspect -f '{{.State.Status}}' living-menaion-rest)"
+          echo "menaion_rest_networks=$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{printf "%s " $name}}{{end}}' living-menaion-rest)"
+
+          for service in caddy nginx apache2; do
+            state="$(systemctl is-active "$service" 2>/dev/null || true)"
+            echo "systemd_$service=${state:-not-found}"
+          done
+
+          echo "listeners_begin"
+          ss -ltn 2>/dev/null | awk 'NR==1 || $4 ~ /:(80|443|8000|8001|8443|2019)$/ {print}'
+          echo "listeners_end"
+
+          kong_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$kong_cid")"
+          if [ -n "$kong_ip" ]; then
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 "http://$kong_ip:8001/status" || true)"
+            echo "kong_admin_status_http=${code:-unreachable}"
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 "http://$kong_ip:8000/" || true)"
+            echo "kong_proxy_root_http=${code:-unreachable}"
+          fi
+
+          for path in /etc/caddy/Caddyfile /etc/nginx/nginx.conf; do
+            if [ -f "$path" ]; then
+              echo "frontdoor_config_present=$path"
+            fi
+          done
+          REMOTE
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519
