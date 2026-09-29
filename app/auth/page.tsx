@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { authLoginNotice } from "@/lib/auth-login-notice";
+import { isPeerivoAuthEnabled } from "@/lib/peerivo-auth";
 import { sendLoginLink } from "./actions";
 
 export const metadata = {
@@ -19,20 +21,29 @@ export default async function Auth({
   const q = await searchParams;
   const next = safeNext(q.next);
   const notice = authLoginNotice(q.error);
+  const peerivoEnabled = isPeerivoAuthEnabled();
 
   return (
     <section className="page-shell section auth-simple">
       <div className="auth-simple-card card">
         <div>
-          <p className="auth-kicker">Один шаг</p>
-          <h1>Войти по email</h1>
+          <p className="auth-kicker">Peerivo ID</p>
+          <h1>Войти через Peerivo</h1>
           <p className="page-lead">
-            Введите email — мы пришлём ссылку для входа. Если аккаунта ещё нет, он создастся автоматически.
-            Пароль придумывать не нужно.
+            Используйте единый Peerivo ID для входа в «Язык милосердия». Локальные роли и доступы Mercy
+            остаются внутри кабинета и не смешиваются с общей авторизацией Peerivo.
           </p>
         </div>
 
         {notice && <p role={notice.role}>{notice.message}</p>}
+
+        {peerivoEnabled ? (
+          <p>
+            <Link className="btn" href={`/auth/start?next=${encodeURIComponent(next)}`}>
+              Войти через Peerivo
+            </Link>
+          </p>
+        ) : null}
 
         {q.sent ? (
           <div className="auth-sent" role="status">
@@ -45,22 +56,25 @@ export default async function Auth({
             </p>
           </div>
         ) : (
-          <form className="grid auth-email-form" action={sendLoginLink}>
-            <input type="hidden" name="next" value={next} />
-            <label>
-              Email
-              <input
-                name="email"
-                type="email"
-                required
-                autoComplete="email"
-                inputMode="email"
-                placeholder="name@example.com"
-                autoFocus
-              />
-            </label>
-            <button className="btn">Получить ссылку для входа</button>
-          </form>
+          <details className="auth-email-fallback" open={!peerivoEnabled}>
+            <summary>Войти по email без Peerivo</summary>
+            <form className="grid auth-email-form" action={sendLoginLink}>
+              <input type="hidden" name="next" value={next} />
+              <label>
+                Email
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  inputMode="email"
+                  placeholder="name@example.com"
+                  autoFocus={!peerivoEnabled}
+                />
+              </label>
+              <button className="btn">Получить ссылку для входа</button>
+            </form>
+          </details>
         )}
 
         <p className="muted auth-privacy-note">
