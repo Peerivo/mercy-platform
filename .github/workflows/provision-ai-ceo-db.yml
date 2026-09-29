@@ -1,0 +1,177 @@
+name: Provision AI CEO Russian database
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact reviewed current main SHA"
+        required: true
+        type: string
+      confirm:
+        description: "Type PROVISION_AI_CEO_DB"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: peerivo-ai-ceo-russian-db-provision
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'PROVISION_AI_CEO_DB' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 1
+
+      - name: Require exact current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.expected_sha }}" =~ ^[0-9a-f]{40}$ ]]
+          test "${{ inputs.expected_sha }}" = "${GITHUB_SHA}" || {
+            echo "::error::Provisioning must target the exact reviewed main SHA."
+            exit 1
+          }
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "${GITHUB_SHA}" || {
+            echo "::error::Provisioning SHA is no longer current main."
+            exit 1
+          }
+
+      - name: Validate protected host access
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+          REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS || secrets.REG_RU_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS REG_RU_HOST REG_RU_USER REG_RU_SSH_KEY REG_RU_KNOWN_HOSTS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing protected infrastructure configuration: ${name}"
+              missing=1
+            fi
+          done
+          test "${missing}" -eq 0
+
+      - name: Syntax-check scoped provisioners
+        run: bash -n scripts/provision-ai-ceo-beget-db-remote.sh scripts/provision-ai-ceo-reg-ru-tunnel-remote.sh
+
+      - name: Configure separate pinned SSH identities
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+          REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS || secrets.REG_RU_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/beget_id
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/beget_known_hosts
+          printf '%s\n' "${REG_RU_SSH_KEY}" > ~/.ssh/reg_id
+          printf '%s\n' "${REG_RU_KNOWN_HOSTS}" > ~/.ssh/reg_known_hosts
+          chmod 600 ~/.ssh/beget_id ~/.ssh/beget_known_hosts ~/.ssh/reg_id ~/.ssh/reg_known_hosts
+          ssh -i ~/.ssh/beget_id -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/beget_known_hosts "${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}" true
+          ssh -i ~/.ssh/reg_id -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts "${REG_RU_USER}@${REG_RU_HOST}" true
+
+      - name: Create dedicated REG.RU tunnel identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh -i ~/.ssh/reg_id -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts "${remote}" '
+            set -euo pipefail
+            umask 077
+            base=/opt/peerivo/ai-ceo
+            mkdir -p "$base"
+            chmod 700 "$base"
+            key="$base/db-tunnel-ed25519"
+            if [ ! -s "$key" ] || [ ! -s "$key.pub" ]; then
+              rm -f "$key" "$key.pub"
+              ssh-keygen -q -t ed25519 -N "" -C ai-ceo-db-tunnel -f "$key"
+            fi
+            chmod 600 "$key"
+            chmod 644 "$key.pub"
+            cat "$key.pub"
+          ' > /tmp/ai-ceo-db-tunnel.pub
+          grep -Eq '^ssh-ed25519 [A-Za-z0-9+/=]+ ai-ceo-db-tunnel$' /tmp/ai-ceo-db-tunnel.pub
+
+      - name: Provision isolated PostgreSQL on Beget
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          ssh_opts=(-i ~/.ssh/beget_id -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/beget_known_hosts)
+          ssh "${ssh_opts[@]}" "${remote}" 'umask 077; mkdir -p "$HOME/.peerivo/ai-ceo"'
+          scp -q "${ssh_opts[@]}" scripts/provision-ai-ceo-beget-db-remote.sh "${remote}:~/.peerivo/ai-ceo/provision-db.sh"
+          scp -q "${ssh_opts[@]}" /tmp/ai-ceo-db-tunnel.pub "${remote}:~/.peerivo/ai-ceo/tunnel.pub"
+          ssh "${ssh_opts[@]}" "${remote}" 'chmod 700 "$HOME/.peerivo/ai-ceo/provision-db.sh"; "$HOME/.peerivo/ai-ceo/provision-db.sh" "$HOME/.peerivo/ai-ceo/tunnel.pub"'
+          scp -q "${ssh_opts[@]}" "${remote}:~/.peerivo/ai-ceo/postgres.env" /tmp/ai-ceo-postgres.env
+          chmod 600 /tmp/ai-ceo-postgres.env
+
+      - name: Prepare scoped REG.RU runtime database environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          set -a
+          # shellcheck disable=SC1091
+          source /tmp/ai-ceo-postgres.env
+          set +a
+          [[ "${POSTGRES_USER:-}" == "ai_ceo" ]]
+          [[ "${POSTGRES_DB:-}" == "ai_ceo" ]]
+          [[ "${POSTGRES_PASSWORD:-}" =~ ^[a-f0-9]{64}$ ]]
+          [[ "${RESEARCH_LINK_SECRET:-}" =~ ^[a-f0-9]{64}$ ]]
+          db_url="postgresql://ai_ceo:${POSTGRES_PASSWORD}@ai-ceo-db-tunnel:5432/ai_ceo?sslmode=disable"
+          {
+            printf 'DATABASE_URL=%s\n' "${db_url}"
+            printf 'DIRECT_URL=%s\n' "${db_url}"
+            printf 'RESEARCH_LINK_SECRET=%s\n' "${RESEARCH_LINK_SECRET}"
+          } > /tmp/ai-ceo-database.env
+          chmod 600 /tmp/ai-ceo-database.env
+          unset POSTGRES_PASSWORD RESEARCH_LINK_SECRET db_url
+
+      - name: Install and verify REG.RU database tunnel
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh_opts=(-i ~/.ssh/reg_id -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts)
+          ssh "${ssh_opts[@]}" "${remote}" 'mkdir -p /opt/peerivo/ai-ceo && chmod 700 /opt/peerivo/ai-ceo'
+          scp -q "${ssh_opts[@]}" /tmp/ai-ceo-database.env "${remote}:/opt/peerivo/ai-ceo/database.env.next"
+          scp -q "${ssh_opts[@]}" ~/.ssh/beget_known_hosts "${remote}:/opt/peerivo/ai-ceo/beget-known-hosts.next"
+          scp -q "${ssh_opts[@]}" scripts/provision-ai-ceo-reg-ru-tunnel-remote.sh "${remote}:/opt/peerivo/ai-ceo/provision-db-tunnel.sh"
+          ssh "${ssh_opts[@]}" "${remote}" "
+            set -euo pipefail
+            chmod 700 /opt/peerivo/ai-ceo/provision-db-tunnel.sh
+            chmod 600 /opt/peerivo/ai-ceo/database.env.next /opt/peerivo/ai-ceo/beget-known-hosts.next
+            mv -f /opt/peerivo/ai-ceo/database.env.next /opt/peerivo/ai-ceo/database.env
+            mv -f /opt/peerivo/ai-ceo/beget-known-hosts.next /opt/peerivo/ai-ceo/beget-known-hosts
+            /opt/peerivo/ai-ceo/provision-db-tunnel.sh '${BEGET_SUPABASE_USER}' '${BEGET_SUPABASE_HOST}'
+          "
+
+      - name: Clean temporary provisioning material
+        if: always()
+        shell: bash
+        run: |
+          rm -f ~/.ssh/beget_id ~/.ssh/beget_known_hosts ~/.ssh/reg_id ~/.ssh/reg_known_hosts \
+            /tmp/ai-ceo-db-tunnel.pub /tmp/ai-ceo-postgres.env /tmp/ai-ceo-database.env
