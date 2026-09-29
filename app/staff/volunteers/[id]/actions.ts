@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 import {
   requestSafetySchema,
+  visitVideoCheckSchema,
   volunteerAssignmentFinishSchema,
   volunteerAssignmentSchema,
   volunteerContactRevokeSchema,
@@ -12,6 +13,7 @@ import {
   volunteerIncidentResolveSchema,
   volunteerIncidentSchema,
   volunteerProfileSchema,
+  volunteerVisitLimitationsSchema,
 } from "@/lib/validation";
 
 function targetPath(targetUser: string, suffix: string) {
@@ -47,6 +49,34 @@ export async function updateVolunteerProfile(formData: FormData) {
   if (error) redirect(targetPath(parsed.data.targetUser, "error=profile-save"));
   revalidatePath(`/staff/volunteers/${parsed.data.targetUser}`);
   redirect(targetPath(parsed.data.targetUser, "saved=profile"));
+}
+
+export async function updateVolunteerVisitLimitations(formData: FormData) {
+  const parsed = volunteerVisitLimitationsSchema.safeParse({
+    targetUser: formData.get("targetUser"),
+    avoidDogs: formData.get("avoidDogs") === "on",
+    avoidCats: formData.get("avoidCats") === "on",
+    avoidSmoke: formData.get("avoidSmoke") === "on",
+    limitations: formData.get("limitations") ?? "",
+    reason: formData.get("reason"),
+  });
+  const target = String(formData.get("targetUser") ?? "");
+  if (!parsed.success) redirect(targetPath(target, "error=visit-limitations"));
+
+  const s = await serverSupabase();
+  const { data: { user } } = await s.auth.getUser();
+  if (!user) redirect("/auth");
+  const { error } = await s.rpc("update_volunteer_visit_limitations", {
+    target_user: parsed.data.targetUser,
+    avoid_dogs: parsed.data.avoidDogs,
+    avoid_cats: parsed.data.avoidCats,
+    avoid_smoke: parsed.data.avoidSmoke,
+    limitations_text: parsed.data.limitations,
+    reason_text: parsed.data.reason,
+  });
+  if (error) redirect(targetPath(parsed.data.targetUser, "error=visit-limitations-save"));
+  revalidatePath(`/staff/volunteers/${parsed.data.targetUser}`);
+  redirect(targetPath(parsed.data.targetUser, "saved=visit-limitations"));
 }
 
 export async function addVolunteerContact(formData: FormData) {
@@ -123,6 +153,29 @@ export async function saveRequestSafety(formData: FormData) {
   if (error) redirect(targetPath(parsed.data.targetUser, "error=safety-save"));
   revalidatePath(`/staff/volunteers/${parsed.data.targetUser}`);
   redirect(targetPath(parsed.data.targetUser, "saved=safety"));
+}
+
+export async function saveVisitVideoCheck(formData: FormData) {
+  const parsed = visitVideoCheckSchema.safeParse({
+    caseId: formData.get("caseId"),
+    targetUser: formData.get("targetUser"),
+    completed: formData.get("completed") === "on",
+    reason: formData.get("reason"),
+  });
+  const target = String(formData.get("targetUser") ?? "");
+  if (!parsed.success) redirect(targetPath(target, "error=video-check"));
+
+  const s = await serverSupabase();
+  const { data: { user } } = await s.auth.getUser();
+  if (!user) redirect("/auth");
+  const { error } = await s.rpc("confirm_home_visit_video_call", {
+    case_id: parsed.data.caseId,
+    completed: parsed.data.completed,
+    reason_text: parsed.data.reason,
+  });
+  if (error) redirect(targetPath(parsed.data.targetUser, "error=video-check-save"));
+  revalidatePath(`/staff/volunteers/${parsed.data.targetUser}`);
+  redirect(targetPath(parsed.data.targetUser, "saved=video-check"));
 }
 
 export async function assignVolunteer(formData: FormData) {
