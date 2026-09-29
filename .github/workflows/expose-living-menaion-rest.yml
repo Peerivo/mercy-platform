@@ -74,9 +74,11 @@ jobs:
           test -n "$baseline_auth_code"
           test "$baseline_auth_code" != "000"
 
+          echo "phase=baseline-ok"
           install -d -m 700 "$HOME/.living-menaion"
           backup="$(mktemp "$HOME/.living-menaion/Caddyfile.backup.XXXXXX")"
           candidate="$(mktemp "$HOME/.living-menaion/Caddyfile.candidate.XXXXXX")"
+          echo "phase=read-caddy"
           docker exec "$caddy_name" cat /etc/caddy/Caddyfile > "$backup"
           cp "$backup" "$candidate"
           cleanup() { rm -f "$backup" "$candidate"; }
@@ -85,15 +87,18 @@ jobs:
           rollback() {
             docker exec -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile' < "$backup"
             docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile >/dev/null
-            docker exec "$caddy_name" caddy reload --config /etc/caddy/Caddyfile >/dev/null
+            echo "phase=reload-caddy"
+          docker exec "$caddy_name" caddy reload --config /etc/caddy/Caddyfile >/dev/null
           }
 
           if ! grep -q 'handle_path /menaion/rest/v1/\*' "$candidate"; then
             python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    @supabase_api path "; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API matcher not found; refusing edit")); p.write_text(t.replace(n,b+n,1))' "$candidate"
           fi
 
+          echo "phase=write-caddy"
           docker exec -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile' < "$candidate"
 
+          echo "phase=validate-caddy"
           if ! docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
             rollback
             echo "Caddy validation failed; rolled back." >&2
@@ -106,13 +111,14 @@ jobs:
           for _ in $(seq 1 10); do
             auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5               --resolve api.mercy.peerivo.net:443:127.0.0.1               -H "apikey: $anon_key"               https://api.mercy.peerivo.net/auth/v1/health || true)"
             body="$(curl --silent --show-error --max-time 5               --resolve api.mercy.peerivo.net:443:127.0.0.1               -H "Authorization: Bearer $service_key"               -H "apikey: $service_key"               -H "Accept-Profile: living_menaion"               "https://api.mercy.peerivo.net/menaion/rest/v1/liturgical_day_editions?select=id&limit=1" || true)"
-            if [ "$auth_code" = "200" ] && [[ "$body" == \[*\] ]]; then
+            if [ "$auth_code" = "$baseline_auth_code" ] && [[ "$body" == \[*\] ]]; then
               ok=1
               break
             fi
             sleep 1
           done
 
+          echo "phase=smoke-result ok=$ok auth_baseline=$baseline_auth_code"
           if [ "$ok" -ne 1 ]; then
             rollback
             echo "Front-door verification failed; rolled back." >&2
