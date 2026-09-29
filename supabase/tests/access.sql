@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(70);
+select plan(73);
 select has_table('public','help_requests','schema reproduced');
 select has_column('public','help_requests','published_at','help requests have explicit publication state');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
@@ -12,6 +12,13 @@ select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.case
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.consents'::regclass),'consents: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.audit_events'::regclass),'audit_events: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.volunteer_offers'::regclass),'volunteer offers use RLS');
+select has_column('public','help_request_safety','household_members','home-visit safety stores private household conditions');
+select has_column('public','volunteer_profiles','avoid_dogs','volunteer profile stores visit compatibility limits');
+select ok(
+  not has_table_privilege('anon','public.help_request_safety','SELECT')
+  and not has_table_privilege('authenticated','public.help_request_safety','SELECT'),
+  'home-visit safety details are not directly readable through Data API'
+);
 select ok(not has_table_privilege('authenticated','public.volunteer_offers','INSERT'),'offer identity and consent cannot bypass the atomic RPC');
 select ok(has_function_privilege('authenticated','public.create_volunteer_offer(jsonb,text)','EXECUTE') and not has_function_privilege('anon','public.create_volunteer_offer(jsonb,text)','EXECUTE'),'offer creation requires a user JWT');
 select ok(has_function_privilege('authenticated','public.moderate_volunteer_offer(uuid,public.review_status,text)','EXECUTE') and not has_function_privilege('anon','public.moderate_volunteer_offer(uuid,public.review_status,text)','EXECUTE'),'offer moderation requires a user JWT and checks admin internally');
@@ -106,10 +113,12 @@ select results_eq(
       ('assign_case(uuid,uuid,text)'::text),
       ('assignment_queue(integer,integer)'::text),
       ('change_case_status(uuid,request_status)'::text),
+      ('confirm_home_visit_video_call(uuid,boolean,text)'::text),
       ('coordinator_cases(integer,integer)'::text),
       ('create_help_request(jsonb,text)'::text),
       ('create_volunteer_offer(jsonb,text)'::text),
       ('current_case_access(uuid)'::text),
+      ('current_case_visit_safety(uuid)'::text),
       ('current_mercy_access()'::text),
       ('current_staff_role()'::text),
       ('get_public_help_request(uuid)'::text),
@@ -134,10 +143,12 @@ select results_eq(
       ('staff_volunteer_contacts(uuid)'::text),
       ('staff_volunteer_detail(uuid)'::text),
       ('staff_volunteer_incidents(uuid)'::text),
+      ('staff_volunteer_visit_limitations(uuid)'::text),
       ('staff_volunteers(text,volunteer_service_status,text,home_visit_clearance,integer,integer)'::text),
       ('submit_feedback(text,text,text)'::text),
       ('submit_help_request_report(uuid,text,text,uuid)'::text),
       ('update_volunteer_profile(uuid,volunteer_service_status,text[],boolean,home_visit_clearance,boolean,text)'::text),
+      ('update_volunteer_visit_limitations(uuid,boolean,boolean,boolean,text,text)'::text),
       ('volunteer_service_stats()'::text)
     ) as allowed(signature) order by signature$$,
   'authenticated security-definer API surface matches the explicit allowlist'
