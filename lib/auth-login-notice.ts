@@ -30,6 +30,27 @@ export function authLoginNotice(code?: string | null): AuthLoginNotice | null {
     };
   }
 
+  if (code === "peerivo-config") {
+    return {
+      role: "alert",
+      message: "Peerivo ID ещё не настроен для этой среды. Используйте вход по email или проверьте переменные окружения.",
+    };
+  }
+
+  if (code === "peerivo-state") {
+    return {
+      role: "alert",
+      message: "Сессия входа через Peerivo устарела. Попробуйте войти ещё раз.",
+    };
+  }
+
+  if (code === "peerivo-callback") {
+    return {
+      role: "alert",
+      message: "Не удалось завершить вход через Peerivo. Попробуйте снова или используйте вход по email.",
+    };
+  }
+
   return {
     role: "alert",
     message: "Не удалось отправить письмо. Проверьте email и попробуйте ещё раз.",
