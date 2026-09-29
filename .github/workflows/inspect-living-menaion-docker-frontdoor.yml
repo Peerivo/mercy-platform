@@ -61,6 +61,29 @@ jobs:
           echo "kong_env_names_end"
 
           echo "menaion_rest_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' living-menaion-rest)"
+
+          echo "host_network_containers_begin"
+          for cid in $(docker ps -q); do
+            mode="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$cid")"
+            if [ "$mode" = "host" ]; then
+              docker inspect -f '{{.Name}}|{{.Config.Image}}|{{.HostConfig.NetworkMode}}' "$cid"
+            fi
+          done
+          echo "host_network_containers_end"
+
+          echo "listener_processes_begin"
+          command -v fuser >/dev/null 2>&1 && (fuser -v 80/tcp 443/tcp 2>&1 || true)
+          command -v lsof >/dev/null 2>&1 && (lsof -nP -iTCP:80 -iTCP:443 -sTCP:LISTEN 2>/dev/null || true)
+          echo "listener_processes_end"
+
+          echo "https_local_headers_begin"
+          curl -ksS -D - -o /dev/null --max-time 5 https://127.0.0.1/ | sed -n '1,20p' || true
+          echo "https_local_headers_end"
+
+          echo "certificate_subject_begin"
+          timeout 5 openssl s_client -connect 127.0.0.1:443 -servername api.mercy.peerivo.net </dev/null 2>/dev/null |
+            openssl x509 -noout -subject -issuer -ext subjectAltName 2>/dev/null || true
+          echo "certificate_subject_end"
           REMOTE
 
       - name: Remove runner SSH material
