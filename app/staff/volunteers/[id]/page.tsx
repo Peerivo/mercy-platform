@@ -17,7 +17,9 @@ import {
   resolveVolunteerIncident,
   revokeVolunteerContact,
   saveRequestSafety,
+  saveVisitVideoCheck,
   updateVolunteerProfile,
+  updateVolunteerVisitLimitations,
 } from "./actions";
 
 type Access = { is_curator: boolean; is_admin: boolean };
@@ -35,6 +37,13 @@ type Volunteer = {
   completed_assignments: number;
   open_incidents: number;
 };
+type VisitLimitations = {
+  avoid_dogs: boolean;
+  avoid_cats: boolean;
+  avoid_smoke: boolean;
+  visit_limitations: string;
+};
+
 type Contact = {
   id: string;
   display_name: string;
@@ -96,9 +105,10 @@ export default async function VolunteerCard({
   const access = (accessResult.data?.[0] ?? null) as Access | null;
   if (!access || (!access.is_curator && !access.is_admin)) redirect("/cabinet");
 
-  const [detailResult, contactsResult, assignmentsResult, incidentsResult, casesResult] =
+  const [detailResult, limitationsResult, contactsResult, assignmentsResult, incidentsResult, casesResult] =
     await Promise.all([
       s.rpc("staff_volunteer_detail", { target_user: id }),
+      s.rpc("staff_volunteer_visit_limitations", { target_user: id }),
       s.rpc("staff_volunteer_contacts", { target_user: id }),
       s.rpc("staff_volunteer_assignments", { target_user: id }),
       s.rpc("staff_volunteer_incidents", { target_user: id }),
@@ -107,6 +117,12 @@ export default async function VolunteerCard({
 
   if (detailResult.error || !detailResult.data?.[0]) notFound();
   const volunteer = detailResult.data[0] as Volunteer;
+  const limitations = (limitationsResult.data?.[0] ?? {
+    avoid_dogs: false,
+    avoid_cats: false,
+    avoid_smoke: false,
+    visit_limitations: "",
+  }) as VisitLimitations;
   const contacts = (contactsResult.data ?? []) as Contact[];
   const assignments = (assignmentsResult.data ?? []) as Assignment[];
   const incidents = (incidentsResult.data ?? []) as Incident[];
@@ -186,6 +202,42 @@ export default async function VolunteerCard({
             <textarea name="reason" minLength={3} maxLength={500} required />
           </label>
           <button className="btn" type="submit">Сохранить профиль</button>
+        </form>
+      </section>
+
+      <section className="card">
+        <h2>Ограничения для домашних визитов</h2>
+        <p className="muted">
+          Эти сведения используются при подборе и не публикуются. Если условия
+          дома несовместимы с ограничениями волонтёра, назначение автоматически
+          отклоняется.
+        </p>
+        <form action={updateVolunteerVisitLimitations} className="grid">
+          <input type="hidden" name="targetUser" value={id} />
+          <div className="compact-choice-grid">
+            <label className="compact-choice">
+              <input type="checkbox" name="avoidDogs" defaultChecked={limitations.avoid_dogs} />
+              Не назначать туда, где есть собака
+            </label>
+            <label className="compact-choice">
+              <input type="checkbox" name="avoidCats" defaultChecked={limitations.avoid_cats} />
+              Не назначать туда, где есть кошка
+            </label>
+            <label className="compact-choice">
+              <input type="checkbox" name="avoidSmoke" defaultChecked={limitations.avoid_smoke} />
+              Не назначать в помещение, где курят
+            </label>
+          </div>
+          <label>
+            Другие ограничения
+            <textarea name="limitations" maxLength={1000} defaultValue={limitations.visit_limitations}
+              placeholder="Аллергии, ограничения по лестницам или другие важные условия" />
+          </label>
+          <label>
+            Основание изменения
+            <textarea name="reason" minLength={3} maxLength={500} required />
+          </label>
+          <button className="btn" type="submit">Сохранить ограничения</button>
         </form>
       </section>
 
@@ -270,6 +322,35 @@ export default async function VolunteerCard({
             <textarea name="reason" minLength={3} maxLength={500} required />
           </label>
           <button className="btn secondary" type="submit">Сохранить условия безопасности</button>
+        </form>
+
+        <form action={saveVisitVideoCheck} className="card grid">
+          <input type="hidden" name="targetUser" value={id} />
+          <h3>Предварительный видеозвонок</h3>
+          <p className="muted">
+            Если заявитель указал, что видеозвонок возможен, домашний визит не
+            назначается, пока куратор не зафиксирует его проведение.
+          </p>
+          <label>
+            Просьба
+            <select name="caseId" required defaultValue="">
+              <option value="" disabled>Выберите просьбу</option>
+              {cases.map((item) => (
+                <option value={item.id} key={item.id}>
+                  № {item.case_number} · {item.city} · {item.category}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input type="checkbox" name="completed" />{" "}
+            Видеозвонок проведён
+          </label>
+          <label>
+            Как подтверждено
+            <textarea name="reason" minLength={3} maxLength={500} required />
+          </label>
+          <button className="btn secondary" type="submit">Сохранить отметку о видеозвонке</button>
         </form>
 
         <form action={assignVolunteer} className="card grid">
