@@ -93,6 +93,27 @@ jobs:
           echo "caddy_env_names_begin"
           docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$caddy_cid" | sed 's/=.*$/=REDACTED/' | sort
           echo "caddy_env_names_end"
+          echo "caddy_networks=$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{printf "%s " $name}}{{end}}' "$caddy_cid")"
+          echo "menaion_networks=$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{printf "%s " $name}}{{end}}' living-menaion-rest)"
+          echo "caddyfile_host_readable=$(test -r /opt/beget/supabase/volumes/proxy/caddy/Caddyfile && echo yes || echo no)"
+          echo "caddyfile_host_writable=$(test -w /opt/beget/supabase/volumes/proxy/caddy/Caddyfile && echo yes || echo no)"
+          echo "home_living_menaion_writable=$(test -w "$HOME/.living-menaion" && echo yes || echo no)"
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+          kong_cid2="$(docker ps -q --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=kong")"
+          service_key_present=no
+          if [ -n "$kong_cid2" ]; then
+            if docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$kong_cid2" | grep -Eq '^(SUPABASE_SERVICE_KEY|SERVICE_ROLE_KEY)=.+'; then
+              service_key_present=yes
+            fi
+          fi
+          echo "service_key_present=$service_key_present"
+
+          auth_probe="$(mktemp)"
+          auth_code="$(curl -sS -o "$auth_probe" -w '%{http_code}' --max-time 5 --resolve api.mercy.peerivo.net:443:127.0.0.1 https://api.mercy.peerivo.net/auth/v1/health || true)"
+          echo "auth_probe_http=$auth_code"
+          echo "auth_probe_bytes=$(wc -c < "$auth_probe" | tr -d ' ')"
+          rm -f "$auth_probe"
           for candidate in /etc/caddy/Caddyfile /config/Caddyfile /Caddyfile; do
             if docker exec "$caddy_cid" test -f "$candidate"; then
               echo "caddyfile_path=$candidate"
