@@ -84,24 +84,7 @@ jobs:
           }
 
           if ! grep -q 'handle_path /menaion/rest/v1/\*' "$caddyfile"; then
-            python3 - "$caddyfile" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text()
-needle = "    @supabase_api path "
-if needle not in text:
-    raise SystemExit("Supabase API matcher not found; refusing edit")
-block = """    # Living Menaion isolated REST API
-    handle_path /menaion/rest/v1/* {
-        reverse_proxy living-menaion-rest:3000
-    }
-
-"""
-text = text.replace(needle, block + needle, 1)
-path.write_text(text)
-PY
+            python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    @supabase_api path "; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API matcher not found; refusing edit")); p.write_text(t.replace(n,b+n,1))' "$caddyfile"
           fi
 
           if ! docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
