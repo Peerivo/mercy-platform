@@ -84,6 +84,23 @@ jobs:
           timeout 5 openssl s_client -connect 127.0.0.1:443 -servername api.mercy.peerivo.net </dev/null 2>/dev/null |
             openssl x509 -noout -subject -issuer -ext subjectAltName 2>/dev/null || true
           echo "certificate_subject_end"
+
+          caddy_cid="$(docker ps -q --filter "name=^/supabase-caddy$")"
+          test -n "$caddy_cid"
+          echo "caddy_mounts_begin"
+          docker inspect -f '{{range .Mounts}}{{println .Type "|" .Source "|" .Destination "|" .RW}}{{end}}' "$caddy_cid"
+          echo "caddy_mounts_end"
+          echo "caddy_env_names_begin"
+          docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$caddy_cid" | sed 's/=.*$/=REDACTED/' | sort
+          echo "caddy_env_names_end"
+          for candidate in /etc/caddy/Caddyfile /config/Caddyfile /Caddyfile; do
+            if docker exec "$caddy_cid" test -f "$candidate"; then
+              echo "caddyfile_path=$candidate"
+              echo "caddyfile_begin"
+              docker exec "$caddy_cid" cat "$candidate"
+              echo "caddyfile_end"
+            fi
+          done
           REMOTE
 
       - name: Remove runner SSH material
