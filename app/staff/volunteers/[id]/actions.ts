@@ -68,9 +68,9 @@ export async function updateVolunteerVisitLimitations(formData: FormData) {
   if (!user) redirect("/auth");
   const { error } = await s.rpc("update_volunteer_visit_limitations", {
     target_user: parsed.data.targetUser,
-    avoid_dogs: parsed.data.avoidDogs,
-    avoid_cats: parsed.data.avoidCats,
-    avoid_smoke: parsed.data.avoidSmoke,
+    avoid_dogs_value: parsed.data.avoidDogs,
+    avoid_cats_value: parsed.data.avoidCats,
+    avoid_smoke_value: parsed.data.avoidSmoke,
     limitations_text: parsed.data.limitations,
     reason_text: parsed.data.reason,
   });
