@@ -68,6 +68,28 @@ describe.sequential("direct help responses and public feedback", () => {
       ids[name] = data.user.id;
     }
 
+    const identityConsent = await service
+      .from("consents")
+      .insert({
+        user_id: ids["response-coordinator"],
+        kind: "IDENTITY_INTEGRATION",
+        text_version: "help-response-roles-v1",
+      })
+      .select("id")
+      .single();
+    if (identityConsent.error || !identityConsent.data) {
+      throw identityConsent.error ?? new Error("coordinator identity consent missing");
+    }
+
+    const identityLink = await service.from("identity_links").insert({
+      local_user_id: ids["response-coordinator"],
+      provider: "ESIA",
+      external_subject: "help-response-coordinator",
+      verified_at: new Date().toISOString(),
+      consent_id: identityConsent.data.id,
+    });
+    if (identityLink.error) throw identityLink.error;
+
     const { error: staffError } = await service.from("staff_roles").insert([
       {
         user_id: ids["response-coordinator"],
