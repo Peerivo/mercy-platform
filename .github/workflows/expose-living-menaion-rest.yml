@@ -46,8 +46,6 @@ jobs:
           set -euo pipefail
 
           caddy_name=supabase-caddy
-          caddyfile=/opt/beget/supabase/volumes/proxy/caddy/Caddyfile
-          test -f "$caddyfile"
           test "$(docker inspect -f '{{.State.Running}}' "$caddy_name")" = "true"
           test "$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{if eq $name "supabase_default"}}yes{{end}}{{end}}' "$caddy_name")" = "yes"
           test "$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{if eq $name "supabase_default"}}yes{{end}}{{end}}' living-menaion-rest)" = "yes"
