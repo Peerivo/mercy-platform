@@ -36,3 +36,17 @@ An assigned volunteer may read the exact assigned request, its shared plan and c
 
 The application is ready to consume an ESIA identity adapter through `identity_links`, but this schema change does not claim that the external ESIA OAuth/OIDC integration is already provisioned.
 
+
+
+## Home-visit safety
+ESIA identity verification and home-visit safety are separate controls. `help_request_safety`
+stores requester-declared household, animal, smoke and access conditions, an optional trusted
+contact, video-call status and curator approval. These fields stay outside public request
+projections and are available only through bounded authenticated RPCs to people who need them
+for the case.
+
+`volunteer_profiles` stores home-visit compatibility limits for dogs, cats, smoke and a
+bounded free-text limitation note. A paired home assignment fails closed when required
+conditions, consent, curator approval or a declared-possible preliminary video call are missing,
+and when recorded volunteer restrictions conflict with the home conditions. ESIA identity
+verification does not satisfy these visit-safety checks.
