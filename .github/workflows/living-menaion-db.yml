@@ -1,0 +1,135 @@
+name: Living Menaion database bridge
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: living-menaion-database-production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: ${{ github.repository == 'Peerivo/living-menaion' && github.ref == 'refs/heads/master' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+
+    steps:
+      - name: Check out Living Menaion exact caller revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Validate protected SSH configuration
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing production configuration: ${name}"
+              missing=1
+            fi
+          done
+          test "${missing}" -eq 0
+          test -d supabase/migrations
+          test -n "$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print -quit)"
+
+      - name: Configure pinned SSH host key
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Verify isolated Living Menaion target
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          result="$(ssh "${remote}" "docker exec supabase-db psql -U supabase_admin -d postgres -At -F '|' -c \"select (select count(*) from pg_database where datname='living_menaion'), (select count(*) from pg_roles where rolname='living_menaion_owner'), (select count(*) from pg_roles where rolname='living_menaion_app'), (select count(*) from pg_roles where rolname='service_role');\"")"
+          IFS='|' read -r database_count owner_count app_count service_role_count <<< "${result}"
+
+          test "${database_count}" = "1"
+          test "${owner_count}" = "1"
+          test "${app_count}" = "1"
+          test "${service_role_count}" = "1"
+
+          ssh "${remote}" "test -f /etc/living-menaion/db.env && test \"\$(stat -c '%a' /etc/living-menaion/db.env)\" = 600"
+
+      - name: Apply Living Menaion migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          ssh "${remote}" "docker exec -i supabase-db psql -U supabase_admin -d living_menaion -v ON_ERROR_STOP=1" <<'SQL'
+          create table if not exists public.living_menaion_schema_migrations (
+            version text primary key,
+            checksum text not null,
+            applied_at timestamptz not null default now()
+          );
+          revoke all on public.living_menaion_schema_migrations from public;
+          SQL
+
+          while IFS= read -r file; do
+            name="$(basename "${file}")"
+            version="${name%%_*}"
+            if ! [[ "${version}" =~ ^[0-9]{14}$ ]]; then
+              echo "::error file=${file}::Migration filename must start with a 14-digit version"
+              exit 1
+            fi
+
+            checksum="$(sha256sum "${file}" | awk '{print $1}')"
+            existing="$(ssh "${remote}" "docker exec supabase-db psql -U supabase_admin -d living_menaion -Atc \"select checksum from public.living_menaion_schema_migrations where version='${version}';\"")"
+
+            if [ -n "${existing}" ]; then
+              if [ "${existing}" != "${checksum}" ]; then
+                echo "::error file=${file}::Applied migration ${version} has a different checksum"
+                exit 1
+              fi
+              echo "Migration ${name} already applied"
+              continue
+            fi
+
+            echo "Applying ${name}"
+            {
+              printf 'begin;\n'
+              cat "${file}"
+              printf "\ninsert into public.living_menaion_schema_migrations(version, checksum) values ('%s', '%s');\n" "${version}" "${checksum}"
+              printf 'commit;\n'
+            } | ssh "${remote}" "docker exec -i supabase-db psql -U supabase_admin -d living_menaion -v ON_ERROR_STOP=1"
+          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+
+      - name: Verify migrated production schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          result="$(ssh "${remote}" "docker exec supabase-db psql -U supabase_admin -d living_menaion -At -F '|' -c \"select coalesce(to_regclass('living_menaion.liturgical_day_editions')::text,''), coalesce(to_regclass('living_menaion.audio_assets')::text,''), coalesce(to_regclass('living_menaion.edition_generation_jobs')::text,''), coalesce(to_regprocedure('living_menaion.assert_liturgical_day_edition_complete(uuid)')::text,''), (select count(*) from public.living_menaion_schema_migrations);\"")"
+          IFS='|' read -r editions audio jobs completeness migration_count <<< "${result}"
+
+          test "${editions}" = "living_menaion.liturgical_day_editions"
+          test "${audio}" = "living_menaion.audio_assets"
+          test "${jobs}" = "living_menaion.edition_generation_jobs"
+          test -n "${completeness}"
+          test "${migration_count}" -ge 7
+
+          echo "Living Menaion database migrations verified."
