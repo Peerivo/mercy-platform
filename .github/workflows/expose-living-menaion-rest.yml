@@ -1,0 +1,139 @@
+name: Expose Living Menaion REST
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/expose-living-menaion-rest.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: living-menaion-rest-frontdoor
+  cancel-in-progress: false
+
+jobs:
+  expose:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+
+    steps:
+      - name: Configure pinned SSH host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Add isolated Menaion route with rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+
+          ssh "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          caddy_name=supabase-caddy
+          caddyfile=/opt/beget/supabase/volumes/proxy/caddy/Caddyfile
+          test -f "$caddyfile"
+          test "$(docker inspect -f '{{.State.Running}}' "$caddy_name")" = "true"
+          test "$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{if eq $name "supabase_default"}}yes{{end}}{{end}}' "$caddy_name")" = "yes"
+          test "$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{if eq $name "supabase_default"}}yes{{end}}{{end}}' living-menaion-rest)" = "yes"
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+          kong="$(docker ps -q --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=kong")"
+          test -n "$kong"
+
+          get_env_value() {
+            local cid="$1" key="$2"
+            docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" |
+              sed -n "s/^${key}=//p" | head -n1
+          }
+
+          service_key="$(get_env_value "$kong" SUPABASE_SERVICE_KEY)"
+          if [ -z "$service_key" ]; then
+            service_key="$(get_env_value "$kong" SERVICE_ROLE_KEY)"
+          fi
+          test -n "$service_key"
+
+          baseline_auth="$(curl --fail --silent --show-error --max-time 5             --resolve api.mercy.peerivo.net:443:127.0.0.1             https://api.mercy.peerivo.net/auth/v1/health)"
+          test -n "$baseline_auth"
+
+          install -d -m 700 "$HOME/.living-menaion"
+          backup="$(mktemp "$HOME/.living-menaion/Caddyfile.backup.XXXXXX")"
+          cp "$caddyfile" "$backup"
+          cleanup() { rm -f "$backup"; }
+          trap cleanup EXIT
+
+          rollback() {
+            cp "$backup" "$caddyfile"
+            docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile >/dev/null
+            docker exec "$caddy_name" caddy reload --config /etc/caddy/Caddyfile >/dev/null
+          }
+
+          if ! grep -q 'handle_path /menaion/rest/v1/\*' "$caddyfile"; then
+            python3 - "$caddyfile" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "    @supabase_api path "
+if needle not in text:
+    raise SystemExit("Supabase API matcher not found; refusing edit")
+block = """    # Living Menaion isolated REST API
+    handle_path /menaion/rest/v1/* {
+        reverse_proxy living-menaion-rest:3000
+    }
+
+"""
+text = text.replace(needle, block + needle, 1)
+path.write_text(text)
+PY
+          fi
+
+          if ! docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+            rollback
+            echo "Caddy validation failed; rolled back." >&2
+            exit 1
+          fi
+
+          docker exec "$caddy_name" caddy reload --config /etc/caddy/Caddyfile >/dev/null
+
+          ok=0
+          for _ in $(seq 1 10); do
+            auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5               --resolve api.mercy.peerivo.net:443:127.0.0.1               https://api.mercy.peerivo.net/auth/v1/health || true)"
+            body="$(curl --silent --show-error --max-time 5               --resolve api.mercy.peerivo.net:443:127.0.0.1               -H "Authorization: Bearer $service_key"               -H "apikey: $service_key"               -H "Accept-Profile: living_menaion"               "https://api.mercy.peerivo.net/menaion/rest/v1/liturgical_day_editions?select=id&limit=1" || true)"
+            if [ "$auth_code" = "200" ] && [[ "$body" == \[*\] ]]; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            rollback
+            echo "Front-door verification failed; rolled back." >&2
+            exit 1
+          fi
+
+          unset service_key
+          echo "Living Menaion HTTPS REST route verified; existing Mercy Auth remained healthy."
+          REMOTE
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519
