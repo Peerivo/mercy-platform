@@ -1,0 +1,69 @@
+name: Inspect Living Menaion Docker front door
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/inspect-living-menaion-docker-frontdoor.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+
+    steps:
+      - name: Configure pinned SSH host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Inspect Docker front door without secret values
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          ssh "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "published_ports_begin"
+          docker ps --format '{{.Names}}|{{.Image}}|{{.Ports}}' | while IFS='|' read -r name image ports; do
+            if [[ "$ports" == *"0.0.0.0:80->"* || "$ports" == *"0.0.0.0:443->"* || "$ports" == *":::80->"* || "$ports" == *":::443->"* ]]; then
+              printf '%s|%s|%s\n' "$name" "$image" "$ports"
+            fi
+          done
+          echo "published_ports_end"
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+          kong="$(docker ps -q --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=kong")"
+          test -n "$kong"
+
+          echo "kong_network_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$kong")"
+          echo "kong_mounts_begin"
+          docker inspect -f '{{range .Mounts}}{{println .Type "|" .Source "|" .Destination "|" .RW}}{{end}}' "$kong"
+          echo "kong_mounts_end"
+
+          echo "kong_env_names_begin"
+          docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$kong" | sed 's/=.*$/=REDACTED/' | sort
+          echo "kong_env_names_end"
+
+          echo "menaion_rest_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' living-menaion-rest)"
+          REMOTE
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519
