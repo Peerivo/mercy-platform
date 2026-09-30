@@ -1,0 +1,263 @@
+name: Peerivo Auth production E2E
+
+on:
+  push:
+    branches:
+      - ops/peerivo-auth-production-e2e
+
+permissions:
+  contents: read
+
+concurrency:
+  group: peerivo-auth-production-e2e
+  cancel-in-progress: false
+
+env:
+  EXPECTED_MERCY_SHA: 82e646c6ccfecb82bb629dd73b0f907756418b22
+  BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+  BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+  BEGET_SUPABASE_KNOWN_HOSTS: ${{ vars.BEGET_SUPABASE_KNOWN_HOSTS || secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Generate isolated test identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          email="peerivo-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}@peerivo.net"
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::${password}"
+          printf 'TEST_EMAIL=%s\n' "${email}" >> "${GITHUB_ENV}"
+          printf 'TEST_PASSWORD=%s\n' "${password}" >> "${GITHUB_ENV}"
+
+      - name: Configure pinned SSH trust
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_KNOWN_HOSTS BEGET_SUPABASE_SSH_KEY; do
+            test -n "${!name:-}" || {
+              echo "::error::Missing ${name}"
+              exit 1
+            }
+          done
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes             "${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}" true
+
+      - name: Verify public production surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          auth_web="$(curl --fail --silent --show-error --max-time 20 https://auth.peerivo.net/api/health)"
+          printf '%s' "${auth_web}" | jq -e '.ok == true and .service == "peerivo-auth"' >/dev/null
+
+          curl --fail --silent --show-error --max-time 20             https://api.auth.peerivo.net/auth/v1/health >/dev/null
+
+          mercy="$(curl --fail --silent --show-error --max-time 20 https://mercy.peerivo.net/health)"
+          printf '%s' "${mercy}" | jq -e --arg sha "${EXPECTED_MERCY_SHA}"             '.status == "ok" and .environment == "production" and .version == $sha' >/dev/null
+
+          headers="$(curl --silent --show-error --max-time 20             --dump-header - --output /dev/null             'https://mercy.peerivo.net/auth/start?next=%2Fcabinet')"
+          printf '%s\n' "${headers}" | head -n1 | grep -E ' 30[78] ' >/dev/null
+          location="$(printf '%s\n' "${headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
+          printf '%s' "${location}" | grep -F 'https://auth.peerivo.net/authorize?' >/dev/null
+          printf '%s' "${location}" | grep -F 'client_id=mercy' >/dev/null
+          printf '%s' "${location}" | grep -F 'code_challenge_method=S256' >/dev/null
+
+          echo "PUBLIC_CUTOVER_SURFACES_OK"
+
+      - name: Create confirmed temporary Peerivo ID
+        id: create-user
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          auth_user_id="$(
+            ssh "${remote}"               "TEST_EMAIL='${TEST_EMAIL}' TEST_PASSWORD='${TEST_PASSWORD}' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          service_key="$(sed -n 's/^SERVICE_ROLE_KEY=//p' /etc/peerivo/auth-api.env | tail -n1)"
+          test -n "${service_key}"
+
+          payload="$(
+            python3 - <<'PY'
+          import json, os
+          print(json.dumps({
+              "email": os.environ["TEST_EMAIL"],
+              "password": os.environ["TEST_PASSWORD"],
+              "email_confirm": True,
+          }))
+          PY
+          )"
+
+          response="$(
+            curl --fail --silent --show-error               --request POST               'https://api.auth.peerivo.net/auth/v1/admin/users'               --header "apikey: ${service_key}"               --header "Authorization: Bearer ${service_key}"               --header 'Content-Type: application/json'               --data "${payload}"
+          )"
+
+          printf '%s' "${response}" | python3 -c '
+          import json, sys
+          data=json.load(sys.stdin)
+          uid=data.get("id")
+          if not uid:
+              raise SystemExit("Auth admin createUser returned no id")
+          print(uid)
+          '
+          REMOTE
+          )"
+
+          test -n "${auth_user_id}"
+          printf 'AUTH_USER_ID=%s\n' "${auth_user_id}" >> "${GITHUB_ENV}"
+          echo "Temporary Peerivo ID created."
+
+      - name: Browser E2E Mercy to Peerivo Auth to Mercy
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { chromium } from "@playwright/test";
+
+          const email = process.env.TEST_EMAIL;
+          const password = process.env.TEST_PASSWORD;
+          if (!email || !password) throw new Error("Missing E2E credentials");
+
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext();
+          const page = await context.newPage();
+
+          const start = "https://mercy.peerivo.net/auth/start?next=%2Fcabinet";
+
+          await page.goto(start, { waitUntil: "domcontentloaded", timeout: 60000 });
+
+          if (new URL(page.url()).origin !== "https://auth.peerivo.net") {
+            throw new Error("Mercy did not redirect to Peerivo Auth: " + page.url());
+          }
+
+          await page.locator('input[name="email"]').waitFor({ state: "visible", timeout: 30000 });
+          await page.locator('input[name="email"]').fill(email);
+          await page.locator('input[name="password"]').fill(password);
+
+          await Promise.all([
+            page.waitForURL(
+              (url) => url.origin === "https://mercy.peerivo.net" && url.pathname === "/cabinet",
+              { timeout: 60000 },
+            ),
+            page.locator('button[type="submit"]').click(),
+          ]);
+
+          if (page.url() !== "https://mercy.peerivo.net/cabinet") {
+            throw new Error("Unexpected first callback target: " + page.url());
+          }
+
+          await page.goto(start, { waitUntil: "domcontentloaded", timeout: 60000 });
+          await page.waitForURL(
+            (url) => url.origin === "https://mercy.peerivo.net" && url.pathname === "/cabinet",
+            { timeout: 60000 },
+          );
+
+          if (page.url() !== "https://mercy.peerivo.net/cabinet") {
+            throw new Error("Existing Peerivo session did not SSO back to cabinet: " + page.url());
+          }
+
+          console.log("PRODUCTION_PEERIVO_AUTH_E2E_OK");
+          await browser.close();
+          NODE
+
+      - name: Cleanup temporary identities
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          ssh "${remote}"             "TEST_EMAIL='${TEST_EMAIL:-}' AUTH_USER_ID='${AUTH_USER_ID:-}' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          test -n "${TEST_EMAIL:-}" || exit 0
+
+          auth_key="$(sed -n 's/^SERVICE_ROLE_KEY=//p' /etc/peerivo/auth-api.env | tail -n1)"
+          test -n "${auth_key}"
+
+          auth_user_id="${AUTH_USER_ID:-}"
+          if [ -z "${auth_user_id}" ]; then
+            users="$(
+              curl --fail --silent --show-error                 'https://api.auth.peerivo.net/auth/v1/admin/users?page=1&per_page=1000'                 -H "apikey: ${auth_key}"                 -H "Authorization: Bearer ${auth_key}"
+            )"
+            auth_user_id="$(
+              printf '%s' "${users}" | TEST_EMAIL="${TEST_EMAIL}" python3 -c '
+          import json, os, sys
+          email=os.environ["TEST_EMAIL"].lower()
+          data=json.load(sys.stdin)
+          for user in data.get("users", []):
+              if (user.get("email") or "").lower() == email:
+                  print(user.get("id") or "")
+                  break
+          '
+            )"
+          fi
+
+          if [ -n "${auth_user_id}" ]; then
+            curl --fail --silent --show-error               --request DELETE               "https://api.auth.peerivo.net/auth/v1/admin/users/${auth_user_id}"               -H "apikey: ${auth_key}"               -H "Authorization: Bearer ${auth_key}" >/dev/null
+          fi
+
+          encoded_email="$(
+            TEST_EMAIL="${TEST_EMAIL}" python3 -c               'import os, urllib.parse; print(urllib.parse.quote(os.environ["TEST_EMAIL"], safe=""))'
+          )"
+          curl --fail --silent --show-error             --request DELETE             "https://api.auth.peerivo.net/rest/v1/peerivo_auth_codes?email=eq.${encoded_email}"             -H "apikey: ${auth_key}"             -H "Authorization: Bearer ${auth_key}" >/dev/null || true
+
+          mercy_key="$(
+            docker inspect mercy --format '{{range .Config.Env}}{{println .}}{{end}}'               | sed -n -e 's/^SUPABASE_SERVICE_ROLE_KEY=//p' -e 's/^MERCY_SUPABASE_SERVICE_ROLE_KEY=//p'               | head -n1
+          )"
+
+          if [ -n "${mercy_key}" ]; then
+            mercy_users="$(
+              curl --fail --silent --show-error                 'https://api.mercy.peerivo.net/auth/v1/admin/users?page=1&per_page=1000'                 -H "apikey: ${mercy_key}"                 -H "Authorization: Bearer ${mercy_key}"
+            )"
+
+            local_id="$(
+              printf '%s' "${mercy_users}" | TEST_EMAIL="${TEST_EMAIL}" python3 -c '
+          import json, os, sys
+          email=os.environ["TEST_EMAIL"].lower()
+          data=json.load(sys.stdin)
+          for user in data.get("users", []):
+              if (user.get("email") or "").lower() == email:
+                  print(user.get("id") or "")
+                  break
+          '
+            )"
+
+            if [ -n "${local_id}" ]; then
+              curl --fail --silent --show-error                 --request DELETE                 "https://api.mercy.peerivo.net/auth/v1/admin/users/${local_id}"                 -H "apikey: ${mercy_key}"                 -H "Authorization: Bearer ${mercy_key}" >/dev/null
+            fi
+          fi
+
+          echo "Temporary E2E identities cleaned."
+          REMOTE
+
+      - name: Remove SSH credentials
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
