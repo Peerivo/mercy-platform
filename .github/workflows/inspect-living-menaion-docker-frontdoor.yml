@@ -89,6 +89,20 @@ jobs:
 
           caddy_cid="$(docker ps -q --filter "name=^/supabase-caddy$")"
           test -n "$caddy_cid"
+          echo "caddy_image=$(docker inspect -f '{{.Config.Image}}' "$caddy_cid")"
+          echo "caddy_started_at=$(docker inspect -f '{{.State.StartedAt}}' "$caddy_cid")"
+          echo "caddy_restart_count=$(docker inspect -f '{{.RestartCount}}' "$caddy_cid")"
+          echo "caddy_path=$(docker inspect -f '{{.Path}}' "$caddy_cid")"
+          echo "caddy_args=$(docker inspect -f '{{json .Args}}' "$caddy_cid")"
+          echo "caddy_labels_begin"
+          docker inspect -f '{{range $k,$v := .Config.Labels}}{{println $k "=" $v}}{{end}}' "$caddy_cid" | sort
+          echo "caddy_labels_end"
+          echo "caddy_host_dir_listing_begin"
+          docker run --rm -v /opt/beget/supabase/volumes/proxy/caddy:/work:ro alpine:3.22 sh -c 'find /work -maxdepth 2 -type f -printf "%p|%s|%TY-%Tm-%TdT%TH:%TM:%TSZ\n" 2>/dev/null | sort'
+          echo "caddy_host_dir_listing_end"
+          echo "caddyfile_stat_begin"
+          docker exec "$caddy_cid" stat -c '%i|%s|%y|%n' /etc/caddy/Caddyfile || true
+          echo "caddyfile_stat_end"
           echo "caddy_mounts_begin"
           docker inspect -f '{{range .Mounts}}{{println .Type "|" .Source "|" .Destination "|" .RW}}{{end}}' "$caddy_cid"
           echo "caddy_mounts_end"
