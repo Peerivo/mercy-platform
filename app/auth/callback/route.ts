@@ -26,7 +26,10 @@ async function findLocalUserByEmail(email: string) {
   for (let page = 1; page <= 20; page += 1) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 100 });
 
-    if (error) throw error;
+    if (error) {
+      console.error("PEERIVO_AUTH_CALLBACK_STAGE: admin-list");
+      throw error;
+    }
 
     const user = data.users.find((candidate) => candidate.email?.toLowerCase() === normalized);
     if (user) return user;
@@ -64,7 +67,10 @@ async function ensureLocalMercyUser(identity: Awaited<ReturnType<typeof verifyPe
       },
     });
 
-    if (error) throw error;
+    if (error) {
+      console.error("PEERIVO_AUTH_CALLBACK_STAGE: admin-update");
+      throw error;
+    }
     return { email, password };
   }
 
@@ -75,7 +81,10 @@ async function ensureLocalMercyUser(identity: Awaited<ReturnType<typeof verifyPe
     user_metadata: peerivoMetadata(identity),
   });
 
-  if (error) throw error;
+  if (error) {
+    console.error("PEERIVO_AUTH_CALLBACK_STAGE: admin-create");
+    throw error;
+  }
   return { email, password };
 }
 
@@ -98,9 +107,13 @@ async function handlePeerivoCallback(requestUrl: URL, code: string) {
     return canonicalRedirect("/auth?error=peerivo-state");
   }
 
+  let stage = "verify-code";
+
   try {
     const identity = await verifyPeerivoCode({ code, codeVerifier: verifier });
+    stage = "local-user";
     const local = await ensureLocalMercyUser(identity);
+    stage = "local-sign-in";
     const supabase = await serverSupabase();
     const { error } = await supabase.auth.signInWithPassword(local);
 
@@ -109,6 +122,7 @@ async function handlePeerivoCallback(requestUrl: URL, code: string) {
     await clearPeerivoHandshakeCookies();
     return canonicalRedirect(next);
   } catch (error) {
+    console.error("PEERIVO_AUTH_CALLBACK_STAGE:", stage);
     console.error("PEERIVO_AUTH_CALLBACK:", error);
     await clearPeerivoHandshakeCookies();
     return canonicalRedirect("/auth?error=peerivo-callback");
