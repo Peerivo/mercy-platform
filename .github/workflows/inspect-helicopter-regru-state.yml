@@ -1,0 +1,86 @@
+name: Inspect Helicopter REG.RU state
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".peerivo/inspect-helicopter-regru-state.once"
+      - ".github/workflows/inspect-helicopter-regru-state.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate protected configuration
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_KNOWN_HOSTS REG_RU_SSH_KEY; do
+            test -n "${!name:-}" || { echo "::error::Missing production configuration: $name"; exit 1; }
+          done
+
+      - name: Configure pinned SSH
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$REG_RU_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$REG_RU_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Inspect Helicopter files and keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$REG_RU_USER@$REG_RU_HOST"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          echo "HELICOPTER_ROOT=$(test -d /opt/peerivo/helicopter && echo present || echo absent)"
+          echo "HELICOPTER_CURRENT=$(test -L /opt/peerivo/helicopter/current -o -d /opt/peerivo/helicopter/current && echo present || echo absent)"
+          echo "HELICOPTER_ENV=$(test -s /etc/peerivo/helicopter.env && echo present || echo absent)"
+          echo "HELICOPTER_DB_KEY=$(test -s /root/.ssh/helicopter-db-actions && echo present || echo absent)"
+          echo "HELICOPTER_TUNNEL_KEY=$(test -s /root/.ssh/helicopter-db-tunnel && echo present || echo absent)"
+
+          if test -s /root/.ssh/helicopter-db-actions; then
+            echo "HELICOPTER_DB_PUBLIC=$(ssh-keygen -y -f /root/.ssh/helicopter-db-actions)"
+          fi
+
+          if test -s /root/.ssh/helicopter-db-tunnel; then
+            echo "HELICOPTER_TUNNEL_PUBLIC=$(ssh-keygen -y -f /root/.ssh/helicopter-db-tunnel)"
+          fi
+
+          if test -d /opt/peerivo/helicopter; then
+            echo "HELICOPTER_RELEASE_COUNT=$(find /opt/peerivo/helicopter/releases -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+            if test -e /opt/peerivo/helicopter/current; then
+              echo "HELICOPTER_CURRENT_TARGET=$(readlink -f /opt/peerivo/helicopter/current || true)"
+              echo "CURRENT_HAS_MIGRATIONS=$(test -d /opt/peerivo/helicopter/current/db/migrations && echo yes || echo no)"
+              echo "CURRENT_HAS_COMPOSE=$(test -f /opt/peerivo/helicopter/current/deploy/docker-compose.production.yml && echo yes || echo no)"
+            fi
+          fi
+
+          echo "PORT_3300=$(ss -ltnH '( sport = :3300 )' | grep -q . && echo occupied || echo free)"
+          echo "PORT_55432=$(ss -ltnH '( sport = :55432 )' | grep -q . && echo occupied || echo free)"
+          echo "SYSTEMD_TUNNEL=$(systemctl is-active peerivo-helicopter-db-tunnel 2>/dev/null || true)"
+          REMOTE
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
