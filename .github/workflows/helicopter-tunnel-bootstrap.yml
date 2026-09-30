@@ -63,7 +63,7 @@ jobs:
           fi
           chmod 600 "$key"
           chmod 644 "$key.pub"
-          ssh-keygen -y -f "$key"
+          ssh-keygen -y -f "$key" | awk '{print $1 " " $2}'
           REMOTE
           )"
           [[ "$pub" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+$ ]]
@@ -110,8 +110,10 @@ jobs:
 
           scp "${reg_opts[@]}" -q ~/.ssh/beget_known_hosts "$remote:/root/.ssh/helicopter-beget-known_hosts"
 
-          ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          ssh "${reg_opts[@]}" "$remote" "bash -s -- '$BEGET_SUPABASE_USER'" <<'REMOTE'
           set -euo pipefail
+          beget_user="$1"
+          [[ "$beget_user" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
           chmod 600 /root/.ssh/helicopter-beget-known_hosts /root/.ssh/helicopter-db-tunnel
 
           gateway="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')"
@@ -136,7 +138,7 @@ jobs:
 
           [Service]
           Type=simple
-          ExecStart=/usr/bin/ssh -NT -F /dev/null -i /root/.ssh/helicopter-db-tunnel -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/helicopter-beget-known_hosts -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L $gateway:55432:127.0.0.1:5432 root@45.144.176.213
+          ExecStart=/usr/bin/ssh -NT -F /dev/null -i /root/.ssh/helicopter-db-tunnel -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/helicopter-beget-known_hosts -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L $gateway:55432:127.0.0.1:5432 $beget_user@45.144.176.213
           Restart=always
           RestartSec=3
 
