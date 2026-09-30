@@ -90,7 +90,7 @@ jobs:
             });
           '
 
-          docker exec mercy sh -lc 'node - <<'"'"'NODE'"'"'
+          docker exec -i mercy node - <<'NODE'
           const { createClient } = require("@supabase/supabase-js");
           const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
           const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.MERCY_SUPABASE_SERVICE_ROLE_KEY;
@@ -109,7 +109,7 @@ jobs:
           })().catch(() => {
             console.log("CALLBACK_ADMIN_LIST_STATUS=exception");
           });
-          NODE'
+          NODE
 
           logs="$(docker logs --since 2h mercy 2>&1 || true)"
           count="$(printf '%s\n' "${logs}" | grep -c 'PEERIVO_AUTH_CALLBACK:' || true)"
