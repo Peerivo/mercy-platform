@@ -126,6 +126,20 @@ jobs:
           fi
 
           echo "CALLBACK_ERROR_CATEGORY=${category}"
+
+          stage="unknown"
+          if printf '%s\n' "${logs}" | grep -Eqi 'auth\.admin\.listUsers|GoTrueAdminApi.*listUsers|ensureLocalMercyUser.*listUsers'; then
+            stage="local_admin_lookup"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'auth\.admin\.createUser|GoTrueAdminApi.*createUser|createUser'; then
+            stage="local_admin_create"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'auth\.admin\.updateUserById|GoTrueAdminApi.*updateUser|updateUserById'; then
+            stage="local_admin_update"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'signInWithPassword|_signInWithPassword'; then
+            stage="local_sign_in"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'ensureLocalMercyUser'; then
+            stage="local_admin_bridge"
+          fi
+          echo "CALLBACK_ERROR_STAGE=${stage}"
           REMOTE
 
       - name: Remove SSH credentials
