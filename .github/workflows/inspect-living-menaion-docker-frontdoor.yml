@@ -103,6 +103,9 @@ jobs:
           echo "caddyfile_stat_begin"
           docker exec "$caddy_cid" stat -c '%i|%s|%y|%n' /etc/caddy/Caddyfile || true
           echo "caddyfile_stat_end"
+          echo "caddy_bind_entry_begin"
+          docker run --rm -v /opt/beget/supabase/volumes/proxy/caddy:/work:ro alpine:3.22 sh -c 'ls -lan --full-time /work; echo target=$(readlink /work/Caddyfile 2>/dev/null || true); stat -c "%F|%i|%s|%y|%n" /work/Caddyfile'
+          echo "caddy_bind_entry_end"
           echo "caddy_mounts_begin"
           docker inspect -f '{{range .Mounts}}{{println .Type "|" .Source "|" .Destination "|" .RW}}{{end}}' "$caddy_cid"
           echo "caddy_mounts_end"
