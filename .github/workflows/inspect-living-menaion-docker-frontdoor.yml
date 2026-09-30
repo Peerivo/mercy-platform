@@ -1,6 +1,7 @@
 name: Inspect Living Menaion Docker front door
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
