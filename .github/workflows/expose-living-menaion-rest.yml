@@ -95,7 +95,7 @@ jobs:
           cp "$caddyfile_backup" "$caddyfile_candidate"
 
           if ! grep -q 'handle_path /menaion/rest/v1/\*' "$caddyfile_candidate"; then
-            python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    @supabase_api path /auth/v1/* /rest/v1/* /graphql/v1 /realtime/v1/* /storage/v1/* /functions/v1/* /mcp /sso/*"; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API matcher not found; refusing Caddy mutation")); p.write_text(t.replace(n,b+n,1))' "$caddyfile_candidate"
+            python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    handle @supabase_api {"; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API matcher not found; refusing Caddy mutation")); p.write_text(t.replace(n,b+n,1))' "$caddyfile_candidate"
           fi
 
           docker exec -i "$caddy_name" caddy adapt             --adapter caddyfile             --config /dev/stdin >/dev/null < "$caddyfile_candidate"
