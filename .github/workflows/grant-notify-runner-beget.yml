@@ -65,9 +65,10 @@ jobs:
         run: |
           set -euo pipefail
           remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
-          printf '%s\n' "$NOTIFY_RUNNER_PUBLIC_KEY" |             ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$remote" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$remote" \
+            "bash -s -- '$NOTIFY_RUNNER_PUBLIC_KEY'" <<'REMOTE'
           set -euo pipefail
-          IFS= read -r key
+          key="$1"
           test -n "$key"
           umask 077
           mkdir -p "$HOME/.ssh"
