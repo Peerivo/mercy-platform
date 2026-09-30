@@ -33,6 +33,16 @@ Catalog tests publish only verified organization+point records; pending rows sta
 
 At mobile width and keyboard-only, labels, focus, loading/error/empty states and horizontal overflow remain usable. Quick Exit must not wait for network and must prevent private content/session recovery through Back/BFCache behavior.
 
+## Home-visit volunteer safety
+- ESIA proves identity only; it does not establish that a private home is suitable for a volunteer visit.
+- A request that needs entry to a home captures private household, animal, smoke/allergen and access conditions plus explicit acknowledgement before curator approval.
+- Home-visit safety details stay out of public list/detail RPCs and anonymous surfaces.
+- Home visits remain paired: the current curator is the default companion, or another active ESIA-verified volunteer may accompany.
+- If the requester says a preliminary video call is possible, assignment fails until the curator records that it was completed.
+- Dog, cat and smoke restrictions are private matching inputs; conflicting assignments fail in the database RPC.
+- Assigned volunteers can read the bounded visit-safety projection for their case; unrelated users and anonymous callers cannot.
+- Production migration remains GitHub-Actions-only; merging code does not apply it to production.
+
 ## Volunteer offer MVP
 A user creates an offer only through the atomic RPC: owner identity comes from JWT, bounded payload/rate limits are checked, and consent is recorded. Direct INSERT is revoked. RLS exposes a row only to its owner and ADMIN; creating an offer never grants staff privileges. ADMIN moderation requires a reason and writes audit data without copying private contact/description into the audit log.
 
@@ -82,8 +92,8 @@ Before giving production-run instructions, the exact branch head must have a suc
 PREPARE must not promote a REG.RU candidate unless the local candidate callback `/auth/callback` returns 307/308 with exact Location `https://mercy.peerivo.net/auth?error=callback`. This check must run before `phase="promoting"` while rollback remains armed. VERIFY must repeat the callback assertion against the canonical public site.
 
 
-## Global Contract 1.7/1.8 migration acceptance
-The repository binding must pin exact Global Contract 1.8.0 version, digest `sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed`, and contract git SHA `223d57cd47ef176272cd9ebfd12ee7c52f887756`. Adoption evidence must retain the intermediate 1.7.0 safety migration and the 1.8.0 public-web migration; neither may claim runtime mutation in the adoption-only change.
+## Global Contract migration acceptance and current snapshot
+The repository binding must pin the current Global Contract 1.10.0 snapshot, digest `sha256:90b04165dc60a5ce3c2fa5aaeef329515dc85ae6d2d02a29b56d5dbe5cf037f9`, and contract git SHA `7ef6771ec51fdd8359d30aad25a12d1deb130835`. The historical 1.7.0 safety and 1.8.0 public-web adoption records remain unchanged as cumulative migration evidence.
 
 For 1.7, every security-critical decision gate changed in future work must have blocking fail-closed regression coverage for malformed/ambiguous input, invalid explicit policy and coercion paths before merge. For 1.8, Mercy remains `unknown_not_verified` until a separate reviewed implementation provides a valid runtime `/site-observability.json`, one GTM-only browser entrypoint, GA4 and Yandex Metrica tags managed inside GTM unless an approved exception applies, jurisdiction-aware denied-by-default analytics/advertising consent, no browser analytics secrets, DNS TXT ownership desired state, and evidence that analytics failure cannot break page availability. A production release must not be called 1.8-compliant until that evidence is present.
 
@@ -103,3 +113,21 @@ The only permitted retry is workflow run number 2, attempt 1, after a correction
 Run #2 (`36388250430`) consumed its dispatch approval, failed on `Storage image ID is not immutable.`, and reported verified Auth rollback. A new run is not authorized by that consumed approval. After fresh exact-HEAD merge approval and a fresh scoped production approval, the proposed run #3/attempt #1 must verify failed run #2 at `bdfc33f04e3c828c861d353fe826b9cc86dcc03a`, exact ancestry/file scope and successful exact-main push CI. Attempts other than that single dispatch remain rejected.
 
 SMTP probing must read Docker container `Image`, require a valid `sha256` ID, and retain `--pull never`. A tag in `Config.Image` must not invalidate an otherwise valid installed image. Probe image resolution, TLS and protected-key authentication must succeed before host env writes or Auth recreation, then succeed again from the repaired Auth network namespace. Regression tests must execute the real shell probe against distinct tag/ID metadata, reproduce the prior failure, reject malformed IDs before container creation, and verify credentials never enter command arguments. Existing backup, exact rollback, non-SMTP preservation, Auth-only mutation and no-email constraints remain unchanged.
+
+## Mercy roles and volunteer service acceptance
+
+- Email authentication creates only the base USER state. A USER becomes a derived VISITOR only when an active ESIA identity link exists.
+- VOLUNTEER, CURATOR, PATRON and ADMIN are server-authoritative audited grants. User metadata cannot grant them.
+- New VOLUNTEER, CURATOR and ordinary ADMIN grants fail when the target has no active ESIA identity. PATRON requires a registered account but not ESIA. Curators can manage only VOLUNTEER/PATRON; ADMIN is required for CURATOR/ADMIN.
+- PATRON requires one of PERSON, SOLE_PROPRIETOR, LEGAL_ENTITY or GOVERNMENT.
+- Staff user lookup is exact-email only; there is no broad account directory endpoint.
+- The volunteer directory supports bounded filtering by city, service status, help category and home-visit clearance.
+- An active volunteer can receive access only to an explicitly assigned request. The volunteer cannot change the request status and cannot read other responders' private contact data.
+- A home visit cannot be assigned until beneficiary consent/home-visit safety is recorded and the volunteer has home-visit clearance. HOME_PAIRED requires a second ESIA-verified participant.
+- Opening a volunteer incident suspends private volunteer access immediately. Closing the incident does not reactivate the volunteer automatically.
+- Contact persons require explicit recorded consent before they are linked to a volunteer.
+- Role, profile, contact, safety, assignment and incident mutations are RPC-only, audited where material, and covered by fail-closed pgTAP/integration tests.
+- `oleg-kabatchenko@yandex.ru` is bootstrapped as ADMIN only by the protected production migration workflow after verifying that the exact account already exists. The bootstrap helper is not callable through anon/authenticated/service-role API keys.
+- Production schema changes are applied from repository migrations through the protected Beget GitHub Actions workflow after exact-main green CI and scoped production approval. Manual production SQL is not part of the procedure.
+- This change consumes an existing active `identity_links(provider=ESIA)` record. Provisioning the external ESIA identity provider remains a separate integration and must not be represented as live until registered credentials and callback verification exist.
+

@@ -98,3 +98,25 @@ First production repair run `36386027226` failed before host mutation: the stage
 Fresh dispatch `36388250430` ran approved main `bdfc33f04e3c828c861d353fe826b9cc86dcc03a`. It reached Auth SMTP repair, then rejected the Storage image before probing because it read Docker `Config.Image` (the image reference/tag), not `Image` (the installed immutable ID). The run failed and emitted `Auth SMTP repair rolled back and verified.` No successful SMTP repair or email delivery is claimed.
 
 The correction resolves the installed `Image` ID, preserves `--pull never`, and tests TLS/SMTP authentication before host mutation as well as after Auth recreation. A shell regression fixture reproduces the old tag-vs-ID failure. The proposed next dispatch is bounded to run #3, attempt #1, exact main, the exact five-file correction and verified failed run #2. It requires fresh exact-HEAD merge approval and fresh scoped production approval; the approval consumed by run #2 is not reused. No third production dispatch has run.
+
+## Mercy roles / volunteer service — 2026-09-28
+
+- Added the USER → ESIA-derived VISITOR identity model and audited VOLUNTEER/CURATOR/PATRON/ADMIN grants.
+- Curators manage ESIA-verified volunteers and registered patrons; only admins manage curator/admin grants. Patron types cover physical persons, sole proprietors, legal entities and government bodies.
+- Added curator volunteer directory, city/status/category/home-clearance filtering, volunteer cards, contact persons, request assignment and volunteer-service statistics.
+- Added beneficiary-consent/home-visit safety gates, paired home visits and an incident workflow that suspends volunteer access until explicit reactivation.
+- Home-visit safety explicitly separates ESIA identity from place safety: requester-declared private household/animal/smoke/access conditions, optional trusted contact and preliminary video-call state stay outside public request projections. Paired assignment fails closed on missing conditions, missing required video call, or dog/cat/smoke incompatibility with the selected volunteer.
+- Assigned volunteer case access is narrower than curator access: no case lifecycle changes and no visibility into other responders' private contacts.
+- Added protected Beget repository-migration workflow with backup/history verification and trusted bootstrap for the registered `oleg-kabatchenko@yandex.ru` administrator.
+- External ESIA provider provisioning is not claimed as complete; this increment consumes verified ESIA identity links once the connector supplies them.
+
+
+
+## GLOBAL CONTRACT 1.10.0 SNAPSHOT — 2026-09-29
+The local binding snapshot is refreshed to Global 1.10.0
+(`sha256:90b04165dc60a5ce3c2fa5aaeef329515dc85ae6d2d02a29b56d5dbe5cf037f9`,
+contract commit `7ef6771ec51fdd8359d30aad25a12d1deb130835`). Under the 1.9+ automatic
+propagation model this records the already-effective canonical policy rather than a new
+per-project approval. Global 1.10 keeps CI/review evidence advisory for merge authority while
+preserving separate scoped approval for high-impact runtime operations. No production database
+migration or deployment is dispatched by this change.

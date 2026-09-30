@@ -1,25 +1,59 @@
 import { z } from "zod";
 
-export const requestSchema = z.object({
-  category: z.enum([
-    "PREGNANCY",
-    "FAMILY",
-    "HOUSING",
-    "FOOD_GOODS",
-    "LEGAL_DOCUMENTS",
-    "WORK_EDUCATION",
-    "OTHER",
-  ]),
-  country: z.string().trim().min(2).max(80),
-  city: z.string().trim().min(2).max(120),
-  description: z.string().trim().min(20).max(5000),
-  urgency: z.enum(["NORMAL", "SOON", "URGENT"]),
-  can_message: z.boolean(),
-  can_call: z.boolean(),
-  contact_window: z.string().max(120),
-  external_contact: z.string().max(200),
-  consent: z.literal(true),
-});
+export const requestSchema = z
+  .object({
+    category: z.enum([
+      "PREGNANCY",
+      "FAMILY",
+      "HOUSING",
+      "FOOD_GOODS",
+      "LEGAL_DOCUMENTS",
+      "WORK_EDUCATION",
+      "OTHER",
+    ]),
+    country: z.string().trim().min(2).max(80),
+    city: z.string().trim().min(2).max(120),
+    description: z.string().trim().min(20).max(5000),
+    urgency: z.enum(["NORMAL", "SOON", "URGENT"]),
+    can_message: z.boolean(),
+    can_call: z.boolean(),
+    contact_window: z.string().max(120),
+    external_contact: z.string().max(200),
+    home_visit_required: z.boolean().default(false),
+    visit_household_members: z.string().trim().max(1000).default(""),
+    dogs_present: z.boolean().default(false),
+    cats_present: z.boolean().default(false),
+    visit_animals_notes: z.string().trim().max(1000).default(""),
+    smoking_present: z.boolean().default(false),
+    visit_allergen_notes: z.string().trim().max(1000).default(""),
+    visit_access_notes: z.string().trim().max(1000).default(""),
+    visit_other_notes: z.string().trim().max(1500).default(""),
+    visit_trusted_contact: z.string().trim().max(240).default(""),
+    video_call_possible: z.boolean().default(false),
+    visit_safety_acknowledged: z.boolean().default(false),
+    consent: z.literal(true),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.home_visit_required) return;
+    const required: Array<[keyof typeof value, string]> = [
+      ["visit_household_members", "Расскажите, кто может находиться дома"],
+      ["visit_animals_notes", "Опишите животных или укажите, что их нет"],
+      ["visit_allergen_notes", "Опишите аллергены/дым или укажите, что их нет"],
+      ["visit_access_notes", "Опишите особенности входа и передвижения"],
+    ];
+    for (const [field, message] of required) {
+      if (String(value[field]).trim().length < 2) {
+        ctx.addIssue({ code: "custom", path: [field], message });
+      }
+    }
+    if (!value.visit_safety_acknowledged) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["visit_safety_acknowledged"],
+        message: "home visit safety acknowledgement required",
+      });
+    }
+  });
 
 export const offerSchema = z
   .object({
@@ -147,3 +181,110 @@ export const publicRequestSearchSchema = z.object({
   state: z.enum(["ACTIVE", "COMPLETED", "ALL"]).default("ACTIVE"),
   page: z.coerce.number().int().min(1).max(1000).default(1),
 });
+
+export const roleDirectorySearchSchema = z.object({
+  email: z.union([z.literal(""), z.email().max(320)]).default(""),
+});
+
+export const mercyRoleChangeSchema = z.object({
+  targetUser: z.string().uuid(),
+  role: z.enum(["VOLUNTEER", "CURATOR", "PATRON", "ADMIN"]),
+  enabled: z.boolean(),
+  reason: z.string().trim().min(3).max(500),
+  patronKind: z
+    .enum(["", "PERSON", "SOLE_PROPRIETOR", "LEGAL_ENTITY", "GOVERNMENT"])
+    .default(""),
+});
+
+export const volunteerDirectorySearchSchema = z.object({
+  city: z.string().trim().max(120).default(""),
+  status: z
+    .enum(["", "ONBOARDING", "ACTIVE", "PAUSED", "SUSPENDED"])
+    .default(""),
+  category: z
+    .enum(["", "THINGS", "TRANSPORT", "FOOD", "CHILDCARE", "EDUCATION_WORK", "OTHER"])
+    .default(""),
+  home: z.enum(["", "NOT_CLEARED", "CLEARED", "SUSPENDED"]).default(""),
+  page: z.coerce.number().int().min(1).max(1000).default(1),
+});
+
+export const volunteerProfileSchema = z.object({
+  targetUser: z.string().uuid(),
+  status: z.enum(["ONBOARDING", "ACTIVE", "PAUSED", "SUSPENDED"]),
+  categories: z
+    .array(z.enum(["THINGS", "TRANSPORT", "FOOD", "CHILDCARE", "EDUCATION_WORK", "OTHER"]))
+    .max(12),
+  availableOnline: z.boolean(),
+  homeClearance: z.enum(["NOT_CLEARED", "CLEARED", "SUSPENDED"]),
+  supervisionRequired: z.boolean(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const volunteerVisitLimitationsSchema = z.object({
+  targetUser: z.string().uuid(),
+  avoidDogs: z.boolean(),
+  avoidCats: z.boolean(),
+  avoidSmoke: z.boolean(),
+  limitations: z.string().trim().max(1000),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const visitVideoCheckSchema = z.object({
+  caseId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  completed: z.boolean(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const volunteerContactSchema = z.object({
+  targetUser: z.string().uuid(),
+  name: z.string().trim().min(2).max(160),
+  relationship: z.string().trim().min(2).max(120),
+  contact: z.string().trim().min(2).max(240),
+  linkedUser: z.union([z.literal(""), z.string().uuid()]).default(""),
+  consentConfirmed: z.literal(true),
+});
+
+export const volunteerContactRevokeSchema = z.object({
+  contactId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const requestSafetySchema = z.object({
+  caseId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  requesterIsBeneficiary: z.boolean(),
+  consentStatus: z.enum(["NOT_REQUIRED", "PENDING", "CONFIRMED", "DECLINED"]),
+  allowHomeVisit: z.boolean(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const volunteerAssignmentSchema = z.object({
+  caseId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  mode: z.enum(["REMOTE", "PUBLIC_PLACE", "HOME_PAIRED"]),
+  task: z.string().trim().min(3).max(500),
+  companionUser: z.union([z.literal(""), z.string().uuid()]).default(""),
+});
+
+export const volunteerAssignmentFinishSchema = z.object({
+  assignmentId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  outcome: z.enum(["COMPLETED", "REVOKED"]),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const volunteerIncidentSchema = z.object({
+  targetUser: z.string().uuid(),
+  caseId: z.union([z.literal(""), z.string().uuid()]).default(""),
+  category: z.string().trim().min(3).max(80),
+  summary: z.string().trim().min(10).max(1000),
+});
+
+export const volunteerIncidentResolveSchema = z.object({
+  incidentId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  resolution: z.string().trim().min(3).max(1000),
+});
+

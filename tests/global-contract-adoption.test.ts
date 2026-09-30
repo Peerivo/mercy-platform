@@ -15,15 +15,24 @@ const adoption18 = readJson(
 );
 
 describe("Peerivo Global Contract adoption", () => {
-  it("pins Mercy to the exact canonical 1.8.0 contract", () => {
+  it("pins Mercy to the exact canonical 1.10.0 contract", () => {
     expect(binding.project.repository).toBe("Peerivo/mercy-platform");
     expect(binding.globalRef).toEqual({
       repository: "Peerivo/global",
       id: "peerivo-global",
-      version: "1.8.0",
+      version: "1.10.0",
       digest:
-        "sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed",
-      gitSha: "223d57cd47ef176272cd9ebfd12ee7c52f887756",
+        "sha256:90b04165dc60a5ce3c2fa5aaeef329515dc85ae6d2d02a29b56d5dbe5cf037f9",
+      gitSha: "7ef6771ec51fdd8359d30aad25a12d1deb130835",
+    });
+    expect(binding.updatePolicy).toEqual({
+      observeAllUpdates: true,
+      canonicalMergeAppliesAutomatically: true,
+      perConsumerAcknowledgementRequired: false,
+      compatibleAdditive: "auto_apply_after_canonical_merge",
+      permissionOrSafetyChanging: "auto_apply_after_canonical_merge",
+      breaking:
+        "apply_policy_after_canonical_merge_migrate_before_incompatible_effects",
     });
   });
 
@@ -44,9 +53,12 @@ describe("Peerivo Global Contract adoption", () => {
     expect(adoption18.changeEventId).toBe(
       "contract.updated.peerivo-global.1.8.0",
     );
-    expect(adoption18.newContract.version).toBe(binding.globalRef.version);
-    expect(adoption18.newContract.digest).toBe(binding.globalRef.digest);
-    expect(adoption18.newContract.gitSha).toBe(binding.globalRef.gitSha);
+    expect(adoption18.newContract).toEqual({
+      version: "1.8.0",
+      digest:
+        "sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed",
+      gitSha: "223d57cd47ef176272cd9ebfd12ee7c52f887756",
+    });
     expect(adoption18.migration.requiredByEvent).toBe(true);
     expect(adoption18.migration.runtimeMutationInThisChange).toBe(false);
     expect(adoption18.migration.dnsMutationInThisChange).toBe(false);

@@ -1,0 +1,222 @@
+name: Apply Beget Mercy migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact reviewed 40-character current main SHA"
+        required: true
+        type: string
+      confirm:
+        description: "Type APPLY_MERCY_MIGRATIONS"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mercy-beget-migrations
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'APPLY_MERCY_MIGRATIONS' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+
+      - name: Require exact current main and green project CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::expected_sha must be a lowercase 40-character commit SHA"
+            exit 1
+          }
+          test "${EXPECTED_SHA}" = "${GITHUB_SHA}" || {
+            echo "::error::Dispatch revision does not match expected_sha"
+            exit 1
+          }
+
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "${GITHUB_SHA}" || {
+            echo "::error::Dispatch revision is no longer current main"
+            exit 1
+          }
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${EXPECTED_SHA}&event=push&per_page=1"             | jq -e --arg sha "${EXPECTED_SHA}" '
+                .workflow_runs[0] |
+                .head_sha == $sha and
+                .head_branch == "main" and
+                .status == "completed" and
+                .conclusion == "success"
+              ' >/dev/null || {
+                echo "::error::Exact current main does not have a successful push CI run"
+                exit 1
+              }
+
+      - name: Validate protected Beget access
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || {
+              echo "::error::Missing protected production configuration: ${name}"
+              exit 1
+            }
+          done
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes             "${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}" true
+
+      - name: Verify migration history is an exact repository prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n'             | LC_ALL=C sort > /tmp/repo-migrations.txt
+
+          while IFS= read -r file; do
+            [[ "${file}" =~ ^([0-9]{12}|[0-9]{14})_[a-z0-9_]+\.sql$ ]] || {
+              echo "::error::Migration filename is not deterministic: ${file}"
+              exit 1
+            }
+          done < /tmp/repo-migrations.txt
+
+          ssh "${remote}"             "docker exec supabase-db psql -X -U postgres -d postgres -At -c \"select version from supabase_migrations.schema_migrations order by version;\""             > /tmp/applied-versions.txt
+
+          awk -F_ '{print $1}' /tmp/repo-migrations.txt > /tmp/repo-versions.txt
+
+          while IFS= read -r applied; do
+            test -n "${applied}" || continue
+            grep -Fxq "${applied}" /tmp/repo-versions.txt || {
+              echo "::error::Production contains migration not present in this repository: ${applied}"
+              exit 1
+            }
+          done < /tmp/applied-versions.txt
+
+          expected_prefix="$(
+            head -n "$(wc -l < /tmp/applied-versions.txt)" /tmp/repo-versions.txt
+          )"
+          actual_prefix="$(cat /tmp/applied-versions.txt)"
+          test "${expected_prefix}" = "${actual_prefix}" || {
+            echo "::error::Production migration history is not an exact repository prefix"
+            exit 1
+          }
+
+      - name: Create protected pre-migration database backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          backup_name="mercy-before-${GITHUB_SHA}-${GITHUB_RUN_ID}.dump"
+
+          ssh "${remote}" bash -s -- "${backup_name}" <<'REMOTE'
+          set -euo pipefail
+          backup_name="${1:?backup name required}"
+          backup_dir="${HOME}/mercy-migration-backups"
+          umask 077
+          mkdir -p "${backup_dir}"
+          test ! -e "${backup_dir}/${backup_name}"
+          docker exec supabase-db pg_dump -U postgres -d postgres -Fc > "${backup_dir}/${backup_name}"
+          test -s "${backup_dir}/${backup_name}"
+          echo "Protected pre-migration backup created."
+          REMOTE
+
+      - name: Apply pending repository migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          while IFS= read -r file; do
+            version="${file%%_*}"
+            if grep -Fxq "${version}" /tmp/applied-versions.txt; then
+              continue
+            fi
+
+            name="${file#*_}"
+            name="${name%.sql}"
+            path="supabase/migrations/${file}"
+
+            echo "Applying migration ${version}_${name}"
+
+            {
+              printf 'BEGIN;\n'
+              cat "${path}"
+              printf "\\nINSERT INTO supabase_migrations.schema_migrations(version,statements,name) VALUES ('%s',ARRAY[]::text[],'%s');\\n" "${version}" "${name}"
+              printf 'COMMIT;\n'
+            } | ssh "${remote}"               "docker exec -i supabase-db psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres >/dev/null"
+
+            printf '%s\n' "${version}" >> /tmp/applied-versions.txt
+          done < /tmp/repo-migrations.txt
+
+      - name: Bootstrap requested Mercy administrator
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+
+          cat <<'SQL' | ssh "${remote}"             "docker exec -i supabase-db psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres >/dev/null"
+          select private.ensure_mercy_admin_by_email('oleg-kabatchenko@yandex.ru');
+          SQL
+
+          admin_count="$(
+            ssh "${remote}"               "docker exec supabase-db psql -X -U postgres -d postgres -At -c \"select count(*) from auth.users u join public.mercy_role_grants g on g.user_id=u.id and g.role='ADMIN' and g.revoked_at is null where lower(u.email)='oleg-kabatchenko@yandex.ru';\""
+          )"
+          test "${admin_count}" = "1" || {
+            echo "::error::Requested Mercy administrator was not verified after bootstrap"
+            exit 1
+          }
+
+          staff_count="$(
+            ssh "${remote}"               "docker exec supabase-db psql -X -U postgres -d postgres -At -c \"select count(*) from auth.users u join public.staff_roles r on r.user_id=u.id and r.role='ADMIN' where lower(u.email)='oleg-kabatchenko@yandex.ru';\""
+          )"
+          test "${staff_count}" = "1" || {
+            echo "::error::Legacy admin compatibility role was not verified"
+            exit 1
+          }
+
+          echo "Mercy migrations and administrator bootstrap verified."
+
+      - name: Verify final repository migration history
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          ssh "${remote}"             "docker exec supabase-db psql -X -U postgres -d postgres -At -c \"select version from supabase_migrations.schema_migrations order by version;\""             > /tmp/final-versions.txt
+          cmp -s /tmp/repo-versions.txt /tmp/final-versions.txt || {
+            echo "::error::Production migration history does not match repository after apply"
+            exit 1
+          }
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: |
+          rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts             /tmp/repo-migrations.txt /tmp/repo-versions.txt             /tmp/applied-versions.txt /tmp/final-versions.txt

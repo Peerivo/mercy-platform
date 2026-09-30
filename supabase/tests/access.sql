@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
-select plan(58);
+select plan(73);
 select has_table('public','help_requests','schema reproduced');
 select has_column('public','help_requests','published_at','help requests have explicit publication state');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.help_requests'::regclass),'help_requests: RLS enabled');
@@ -12,6 +12,13 @@ select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.case
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.consents'::regclass),'consents: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.audit_events'::regclass),'audit_events: RLS enabled');
 select ok((select relrowsecurity from pg_catalog.pg_class where oid='public.volunteer_offers'::regclass),'volunteer offers use RLS');
+select has_column('public','help_request_safety','household_members','home-visit safety stores private household conditions');
+select has_column('public','volunteer_profiles','avoid_dogs','volunteer profile stores visit compatibility limits');
+select ok(
+  not has_table_privilege('anon','public.help_request_safety','SELECT')
+  and not has_table_privilege('authenticated','public.help_request_safety','SELECT'),
+  'home-visit safety details are not directly readable through Data API'
+);
 select ok(not has_table_privilege('authenticated','public.volunteer_offers','INSERT'),'offer identity and consent cannot bypass the atomic RPC');
 select ok(has_function_privilege('authenticated','public.create_volunteer_offer(jsonb,text)','EXECUTE') and not has_function_privilege('anon','public.create_volunteer_offer(jsonb,text)','EXECUTE'),'offer creation requires a user JWT');
 select ok(has_function_privilege('authenticated','public.moderate_volunteer_offer(uuid,public.review_status,text)','EXECUTE') and not has_function_privilege('anon','public.moderate_volunteer_offer(uuid,public.review_status,text)','EXECUTE'),'offer moderation requires a user JWT and checks admin internally');
@@ -22,7 +29,7 @@ select ok(not has_function_privilege('anon','public.create_help_request(jsonb,te
 select ok(not has_function_privilege('anon','public.assignment_queue(integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.assignment_queue(integer,integer)','EXECUTE'),'queue RPC is authenticated only');
 select ok(not has_function_privilege('anon','public.staff_coordinators(integer)','EXECUTE') and has_function_privilege('authenticated','public.staff_coordinators(integer)','EXECUTE'),'coordinator directory is authenticated and checks admin internally');
 select ok(not has_function_privilege('anon','public.coordinator_cases(integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.coordinator_cases(integer,integer)','EXECUTE'),'coordinator case list requires a user JWT');
-select ok(not has_function_privilege('anon','public.current_staff_role()','EXECUTE') and has_function_privilege('authenticated','public.current_staff_role()','EXECUTE'),'current staff role requires a user JWT');
+select ok(not has_function_privilege('anon','public.current_staff_role()','EXECUTE') and has_function_privilege('authenticated','public.current_staff_role()','EXECUTE') and lower(pg_get_functiondef('public.current_staff_role()'::regprocedure)) like '%has_active_esia%','current curator role requires both a user JWT and active ESIA');
 select ok(not has_function_privilege('anon','public.enforce_message()','EXECUTE') and not has_function_privilege('authenticated','public.enforce_message()','EXECUTE'),'message trigger is not API callable');
 select ok(not has_function_privilege('anon','public.enforce_catalog_review()','EXECUTE') and not has_function_privilege('authenticated','public.enforce_catalog_review()','EXECUTE'),'catalog trigger is not API callable');
 select ok(has_function_privilege('anon','public.nearby_service_locations(double precision,double precision,integer,integer,integer)','EXECUTE') and has_function_privilege('authenticated','public.nearby_service_locations(double precision,double precision,integer,integer,integer)','EXECUTE'),'public geo RPC remains callable');
@@ -68,7 +75,7 @@ select ok(
   and lower(pg_get_functiondef('private.can_access_case(uuid,uuid)'::regprocedure)) like '%uid = auth.uid()%'
 ,'private security-definer helpers bind explicit uid to the caller');
 select ok(
-  (select count(*) from pg_policies where schemaname='public' and coalesce(qual,'') like '%private.can_access_case%') >= 4
+  (select count(*) from pg_policies where schemaname='public' and coalesce(qual,'') like '%private.can_access_case%') >= 3
   and exists(select 1 from pg_policies where schemaname='public' and tablename='volunteer_offers' and coalesce(qual,'') like '%private.is_admin%')
   and not exists(select 1 from pg_policies where schemaname='public' and (coalesce(qual,'') || coalesce(with_check,'')) ~ 'public\.(is_admin|is_active_coordinator|can_access_case)'),
   'RLS policies resolve authorization through private helpers'
@@ -100,25 +107,49 @@ select results_eq(
       and has_function_privilege('authenticated',p.oid,'EXECUTE')
     order by 1$$,
   $$select signature from (values
+      ('add_volunteer_contact_person(uuid,text,text,text,uuid,boolean)'::text),
+      ('assign_volunteer_to_case(uuid,uuid,volunteer_assignment_mode,text,uuid)'::text),
       ('admin_help_request_reports(integer,integer)'::text),
       ('assign_case(uuid,uuid,text)'::text),
       ('assignment_queue(integer,integer)'::text),
       ('change_case_status(uuid,request_status)'::text),
+      ('confirm_home_visit_video_call(uuid,boolean,text)'::text),
       ('coordinator_cases(integer,integer)'::text),
       ('create_help_request(jsonb,text)'::text),
       ('create_volunteer_offer(jsonb,text)'::text),
+      ('current_case_access(uuid)'::text),
+      ('current_case_visit_safety(uuid)'::text),
+      ('current_mercy_access()'::text),
       ('current_staff_role()'::text),
       ('get_public_help_request(uuid)'::text),
       ('list_public_help_requests(text,text,text,text,integer,integer)'::text),
+      ('finish_volunteer_assignment(uuid,text,text)'::text),
+      ('manage_mercy_role(uuid,mercy_role,boolean,text,patron_kind)'::text),
       ('moderate_volunteer_offer(uuid,review_status,text)'::text),
+      ('my_volunteer_assignments(integer)'::text),
+      ('open_volunteer_incident(uuid,uuid,text,text)'::text),
       ('respond_to_help_request(uuid,jsonb,text)'::text),
+      ('resolve_volunteer_incident(uuid,text)'::text),
+      ('revoke_volunteer_contact_person(uuid,text)'::text),
       ('review_help_request_report(uuid,text,text)'::text),
       ('revoke_case_assignment(uuid,text)'::text),
       ('send_message(uuid,text,uuid)'::text),
+      ('set_help_request_safety(uuid,boolean,beneficiary_consent_status,boolean,text)'::text),
       ('set_staff_role(uuid,staff_role,boolean,text)'::text),
+      ('staff_assignable_cases(integer)'::text),
       ('staff_coordinators(integer)'::text),
+      ('staff_find_user_by_email(text)'::text),
+      ('staff_volunteer_assignments(uuid)'::text),
+      ('staff_volunteer_contacts(uuid)'::text),
+      ('staff_volunteer_detail(uuid)'::text),
+      ('staff_volunteer_incidents(uuid)'::text),
+      ('staff_volunteer_visit_limitations(uuid)'::text),
+      ('staff_volunteers(text,volunteer_service_status,text,home_visit_clearance,integer,integer)'::text),
       ('submit_feedback(text,text,text)'::text),
-      ('submit_help_request_report(uuid,text,text,uuid)'::text)
+      ('submit_help_request_report(uuid,text,text,uuid)'::text),
+      ('update_volunteer_profile(uuid,volunteer_service_status,text[],boolean,home_visit_clearance,boolean,text)'::text),
+      ('update_volunteer_visit_limitations(uuid,boolean,boolean,boolean,text,text)'::text),
+      ('volunteer_service_stats()'::text)
     ) as allowed(signature) order by signature$$,
   'authenticated security-definer API surface matches the explicit allowlist'
 );
@@ -157,5 +188,102 @@ select ok(has_function_privilege('authenticated','public.respond_to_help_request
 select has_table('public','feedback_messages','feedback inbox exists');
 select ok(not has_table_privilege('anon','public.feedback_messages','SELECT') and not has_table_privilege('authenticated','public.feedback_messages','SELECT'),'feedback inbox is not directly readable');
 select ok(has_function_privilege('anon','public.submit_feedback(text,text,text)','EXECUTE') and has_function_privilege('authenticated','public.submit_feedback(text,text,text)','EXECUTE'),'feedback submission is available before and after login');
+
+select ok(
+  to_regtype('public.mercy_role') is not null
+  and to_regtype('public.patron_kind') is not null
+  and to_regtype('public.volunteer_service_status') is not null
+  and to_regtype('public.home_visit_clearance') is not null,
+  'Mercy role and volunteer enums exist'
+);
+select ok(
+  to_regclass('public.mercy_role_grants') is not null
+  and to_regclass('public.volunteer_profiles') is not null
+  and to_regclass('public.patron_profiles') is not null
+  and to_regclass('public.volunteer_contact_persons') is not null
+  and to_regclass('public.help_request_safety') is not null
+  and to_regclass('public.volunteer_case_assignments') is not null
+  and to_regclass('public.volunteer_incidents') is not null,
+  'Mercy role and volunteer tables exist'
+);
+select is(
+  (select count(*)::integer from pg_catalog.pg_class c
+   join pg_catalog.pg_namespace n on n.oid=c.relnamespace
+   where n.nspname='public'
+     and c.relname in (
+       'mercy_role_grants','volunteer_profiles','patron_profiles',
+       'volunteer_contact_persons','help_request_safety',
+       'volunteer_case_assignments','volunteer_incidents'
+     )
+     and c.relrowsecurity),
+  7,
+  'every new exposed role/volunteer table has RLS'
+);
+select ok(
+  not has_table_privilege('authenticated','public.mercy_role_grants','SELECT')
+  and not has_table_privilege('authenticated','public.volunteer_profiles','SELECT')
+  and not has_table_privilege('authenticated','public.patron_profiles','SELECT')
+  and not has_table_privilege('authenticated','public.volunteer_contact_persons','SELECT')
+  and not has_table_privilege('authenticated','public.help_request_safety','SELECT')
+  and not has_table_privilege('authenticated','public.volunteer_case_assignments','SELECT')
+  and not has_table_privilege('authenticated','public.volunteer_incidents','SELECT'),
+  'new private operational tables are RPC-only'
+);
+select ok(
+  to_regprocedure('private.has_active_esia(uuid)') is not null
+  and to_regprocedure('private.has_mercy_role(public.mercy_role,uuid)') is not null
+  and not has_function_privilege('authenticated','private.has_active_esia(uuid)','EXECUTE')
+  and not has_function_privilege('authenticated','private.has_mercy_role(public.mercy_role,uuid)','EXECUTE'),
+  'internal ESIA and Mercy role helpers are not directly API callable'
+);
+select ok(
+  to_regprocedure('private.ensure_mercy_admin_by_email(text)') is not null
+  and not has_function_privilege('anon','private.ensure_mercy_admin_by_email(text)','EXECUTE')
+  and not has_function_privilege('authenticated','private.ensure_mercy_admin_by_email(text)','EXECUTE')
+  and not has_function_privilege('service_role','private.ensure_mercy_admin_by_email(text)','EXECUTE'),
+  'admin bootstrap is trusted-database-only'
+);
+select ok(
+  has_function_privilege('authenticated','public.current_mercy_access()','EXECUTE')
+  and has_function_privilege('authenticated','public.manage_mercy_role(uuid,public.mercy_role,boolean,text,public.patron_kind)','EXECUTE')
+  and not has_function_privilege('anon','public.current_mercy_access()','EXECUTE')
+  and not has_function_privilege('anon','public.manage_mercy_role(uuid,public.mercy_role,boolean,text,public.patron_kind)','EXECUTE'),
+  'Mercy access and role mutation require a signed-in caller'
+);
+select ok(
+  has_function_privilege('authenticated','public.staff_volunteers(text,public.volunteer_service_status,text,public.home_visit_clearance,integer,integer)','EXECUTE')
+  and has_function_privilege('authenticated','public.assign_volunteer_to_case(uuid,uuid,public.volunteer_assignment_mode,text,uuid)','EXECUTE')
+  and has_function_privilege('authenticated','public.open_volunteer_incident(uuid,uuid,text,text)','EXECUTE')
+  and not has_function_privilege('anon','public.staff_volunteers(text,public.volunteer_service_status,text,public.home_visit_clearance,integer,integer)','EXECUTE'),
+  'volunteer service surface requires an authenticated caller and checks curator internally'
+);
+select ok(
+  lower(pg_get_functiondef('private.can_access_case(uuid,uuid)'::regprocedure)) like '%volunteer_case_assignments%'
+  and lower(pg_get_functiondef('private.can_access_case(uuid,uuid)'::regprocedure)) like '%has_active_esia%'
+  and lower(pg_get_functiondef('private.can_access_case(uuid,uuid)'::regprocedure)) like '%service_status=''active''%',
+  'case access requires an active ESIA-verified assigned volunteer'
+);
+select ok(
+  lower(pg_get_functiondef('public.change_case_status(uuid,request_status)'::regprocedure)) like '%private.is_active_coordinator%'
+  and lower(pg_get_functiondef('public.change_case_status(uuid,request_status)'::regprocedure)) not like '%private.can_access_case%',
+  'volunteer case access does not grant case-status mutation'
+);
+select ok(
+  exists(
+    select 1 from pg_policies
+    where schemaname='public'
+      and tablename='help_request_responses'
+      and policyname='help_response_read'
+      and coalesce(qual,'') like '%private.is_active_coordinator%'
+      and coalesce(qual,'') not like '%private.can_access_case%'
+  ),
+  'assigned volunteers cannot read other responders private contacts'
+);
+select ok(
+  lower(pg_get_functiondef('private.ensure_mercy_admin_by_email(text)'::regprocedure)) like '%lower(email)=normalized_email%'
+  and lower(pg_get_functiondef('private.ensure_mercy_admin_by_email(text)'::regprocedure)) like '%required admin account is not registered%',
+  'admin bootstrap requires an already-registered exact email account'
+);
+
 select * from finish();
 rollback;

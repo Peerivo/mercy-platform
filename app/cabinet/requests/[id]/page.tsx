@@ -37,6 +37,25 @@ type PrivateRequestAccess = {
   owner_id: string;
 };
 
+type CaseAccess = "OWNER" | "CURATOR" | "VOLUNTEER";
+
+type VisitSafety = {
+  home_visit_requested: boolean;
+  household_members: string;
+  dogs_present: boolean;
+  cats_present: boolean;
+  animals_note: string;
+  smoking_present: boolean;
+  allergen_note: string;
+  access_note: string;
+  other_visit_note: string;
+  trusted_contact: string;
+  video_call_possible: boolean;
+  video_call_completed_at: string | null;
+  beneficiary_consent_status: string;
+  home_visit_approved: boolean;
+};
+
 export default async function Case({
   params,
 }: {
@@ -59,16 +78,15 @@ export default async function Case({
     notFound();
   }
 
-  let canAccessPrivate = false;
-  let isCoordinator = false;
-  let isOwner = false;
+  let accessRole: CaseAccess | null = null;
   let messages: ChatMessage[] = [];
   let steps: SupportStep[] = [];
   let responses: HelpResponse[] = [];
   let ownResponse: OwnResponse | null = null;
+  let visitSafety: VisitSafety | null = null;
 
   if (user) {
-    const [privateAccessResult, ownResponseResult] = await Promise.all([
+    const [privateAccessResult, ownResponseResult, caseAccessResult] = await Promise.all([
       s
         .from("help_requests")
         .select("id,owner_id")
@@ -80,6 +98,7 @@ export default async function Case({
         .eq("help_request_id", id)
         .eq("responder_id", user.id)
         .maybeSingle(),
+      s.rpc("current_case_access", { case_id: id }),
     ]);
 
     const privateRequest =
@@ -87,19 +106,23 @@ export default async function Case({
         ? (privateAccessResult.data as PrivateRequestAccess)
         : null;
 
-    // The help_requests SELECT policy is the authorization source of truth:
-    // only the owner or the active coordinator can see this row.
-    canAccessPrivate = privateRequest !== null;
-    isOwner = privateRequest?.owner_id === user.id;
-    isCoordinator = canAccessPrivate && !isOwner;
+    if (!caseAccessResult.error && caseAccessResult.data) {
+      accessRole = caseAccessResult.data as CaseAccess;
+    } else if (privateRequest?.owner_id === user.id) {
+      // Compatibility while a preview is evaluated before the new migration is
+      // applied to production.
+      accessRole = "OWNER";
+    } else if (privateRequest) {
+      accessRole = "CURATOR";
+    }
 
     ownResponse =
       ownResponseResult.data && !ownResponseResult.error
         ? (ownResponseResult.data as OwnResponse)
         : null;
 
-    if (canAccessPrivate) {
-      const [messagesResult, stepsResult, responsesResult] = await Promise.all([
+    if (accessRole) {
+      const [messagesResult, stepsResult, responsesResult, visitSafetyResult] = await Promise.all([
         s
           .from("messages")
           .select("id,body,created_at,author_id,client_nonce")
@@ -112,20 +135,30 @@ export default async function Case({
           .select("id,title,responsible,due_at,status,organization_id")
           .eq("help_request_id", id)
           .order("created_at"),
-        s
-          .from("help_request_responses")
-          .select("id,message,contact_method,status,created_at")
-          .eq("help_request_id", id)
-          .eq("status", "PENDING")
-          .order("created_at", { ascending: false }),
+        accessRole === "OWNER" || accessRole === "CURATOR"
+          ? s
+              .from("help_request_responses")
+              .select("id,message,contact_method,status,created_at")
+              .eq("help_request_id", id)
+              .eq("status", "PENDING")
+              .order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        s.rpc("current_case_visit_safety", { case_id: id }),
       ]);
 
       messages = (messagesResult.data ?? []) as ChatMessage[];
       steps = (stepsResult.data ?? []) as SupportStep[];
       responses = (responsesResult.data ?? []) as HelpResponse[];
+      visitSafety =
+        visitSafetyResult.data?.[0] && !visitSafetyResult.error
+          ? (visitSafetyResult.data[0] as VisitSafety)
+          : null;
     }
   }
 
+  const isOwner = accessRole === "OWNER";
+  const isCurator = accessRole === "CURATOR";
+  const isVolunteer = accessRole === "VOLUNTEER";
   const publicStatus = getPublicRequestStatus(r.status);
   const completed = r.status === "RESOLVED" || r.status === "CLOSED";
 
@@ -133,8 +166,8 @@ export default async function Case({
     <section className="container section">
       <div className="nav">
         <h1>Просьба № {r.case_number}</h1>
-        {isCoordinator && <a href="/staff/cases">К назначенным обращениям</a>}
-        {canAccessPrivate && <QuickExit />}
+        {isCurator && <a href="/staff/cases">К назначенным обращениям</a>}
+        {accessRole && <QuickExit />}
       </div>
 
       <div className="card">
@@ -161,10 +194,63 @@ export default async function Case({
           <OwnerRequestActions caseId={id} />
         )}
 
-        {isCoordinator && <StatusForm caseId={id} status={r.status} />}
+        {isCurator && <StatusForm caseId={id} status={r.status} />}
+
+        {isVolunteer && (
+          <p className="muted">
+            Вы открыли просьбу как назначенный волонтёр. Статус обращения и
+            чужие отклики доступны только автору и куратору.
+          </p>
+        )}
       </div>
 
-      {!completed && !isOwner && !isCoordinator && (
+      {accessRole && visitSafety?.home_visit_requested && (
+        <section className="card">
+          <h2>Условия домашнего визита</h2>
+          <p className="muted">
+            Эти сведения приватны и не входят в публичную карточку просьбы.
+          </p>
+          <p><strong>Кто может быть дома:</strong> {visitSafety.household_members}</p>
+          <p>
+            <strong>Животные:</strong>{" "}
+            {visitSafety.dogs_present ? "есть собака; " : ""}
+            {visitSafety.cats_present ? "есть кошка; " : ""}
+            {visitSafety.animals_note}
+          </p>
+          <p>
+            <strong>Аллергены и дым:</strong>{" "}
+            {visitSafety.smoking_present ? "в помещении курят; " : ""}
+            {visitSafety.allergen_note}
+          </p>
+          <p><strong>Вход и передвижение:</strong> {visitSafety.access_note}</p>
+          {visitSafety.trusted_contact && (
+            <p><strong>Доверенный контакт:</strong> {visitSafety.trusted_contact}</p>
+          )}
+          {visitSafety.other_visit_note && (
+            <p><strong>Дополнительно:</strong> {visitSafety.other_visit_note}</p>
+          )}
+          <p>
+            <strong>Видеозвонок:</strong>{" "}
+            {visitSafety.video_call_possible
+              ? visitSafety.video_call_completed_at
+                ? "проведён"
+                : "возможен, но ещё не зафиксирован"
+              : "не заявлен как доступный"}
+          </p>
+          <p>
+            <strong>Домашний визит:</strong>{" "}
+            {visitSafety.home_visit_approved ? "разрешён куратором" : "ещё не разрешён куратором"}
+          </p>
+          {isVolunteer && (
+            <p className="muted">
+              Домашний визит проводится не в одиночку. Если фактические условия
+              отличаются от описанных, свяжитесь с куратором до продолжения визита.
+            </p>
+          )}
+        </section>
+      )}
+
+      {!completed && !accessRole && (
         <RequestResponse
           caseId={id}
           signedIn={Boolean(user)}
@@ -172,9 +258,9 @@ export default async function Case({
         />
       )}
 
-      {canAccessPrivate && user ? (
+      {accessRole && user ? (
         <>
-          {(isOwner || isCoordinator) && (
+          {(isOwner || isCurator) && (
             <section className="response-list-section">
               <h2>Отклики на просьбу</h2>
               <div className="grid">
@@ -214,7 +300,7 @@ export default async function Case({
                 </div>
               ))
             ) : (
-              <div className="card">Координатор пока не добавил шаги.</div>
+              <div className="card">Куратор пока не добавил шаги.</div>
             )}
           </div>
 
@@ -222,7 +308,8 @@ export default async function Case({
         </>
       ) : (
         <p>
-          Внутренний план и приватный чат доступны только автору обращения и назначенному координатору.
+          Внутренний план и приватный чат доступны автору обращения, назначенному
+          куратору и назначенному активному волонтёру.
         </p>
       )}
     </section>
