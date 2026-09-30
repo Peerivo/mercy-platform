@@ -1,5 +1,4 @@
 name: Expose Living Menaion REST
-# Production recovery trigger: 2026-09-30 public Menaion route
 
 on:
   push:
@@ -75,9 +74,7 @@ jobs:
           live_applied=0
 
           write_caddyfile() {
-            docker run --rm -i --entrypoint sh \
-              -v "$caddy_host_dir:/work" \
-              caddy:2 -c 'cat > /work/Caddyfile' < "$1"
+            docker exec -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile' < "$1"
           }
 
           admin_curl() {
