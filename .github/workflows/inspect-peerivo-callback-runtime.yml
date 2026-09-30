@@ -103,12 +103,24 @@ jobs:
             category="verify_payload"
           elif printf '%s\n' "${logs}" | grep -q 'PEERIVO_AUTH_LOCAL_PASSWORD_SECRET'; then
             category="local_password_secret"
-          elif printf '%s\n' "${logs}" | grep -qi 'Invalid login credentials'; then
+          elif printf '%s\n' "${logs}" | grep -Eqi 'Invalid login credentials|Email not confirmed'; then
             category="local_sign_in"
           elif printf '%s\n' "${logs}" | grep -qi 'fetch failed'; then
             category="outbound_fetch"
-          elif printf '%s\n' "${logs}" | grep -Eqi 'already registered|duplicate key|Database error'; then
+          elif printf '%s\n' "${logs}" | grep -Eqi 'Invalid API key|invalid api key'; then
+            category="mercy_admin_invalid_api_key"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'invalid JWT|JWT.*signature|signature.*JWT|token.*signature|JWS'; then
+            category="mercy_admin_jwt_invalid"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'not.*admin|service.?role|insufficient.*privilege|permission denied'; then
+            category="mercy_admin_forbidden"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'already registered|duplicate key|Database error|error creating user|failed to create user'; then
             category="local_user_write"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'AuthApiError.*401|status:[[:space:]]*401|statusCode:[[:space:]]*401'; then
+            category="mercy_auth_api_401"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'AuthApiError.*403|status:[[:space:]]*403|statusCode:[[:space:]]*403'; then
+            category="mercy_auth_api_403"
+          elif printf '%s\n' "${logs}" | grep -q 'AuthApiError'; then
+            category="mercy_auth_api_other"
           elif [ "${count}" -gt 0 ]; then
             category="other_callback_exception"
           fi
