@@ -1,0 +1,125 @@
+name: Helicopter DB bridge
+
+on:
+  workflow_call:
+    secrets:
+      runtime_password:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: ${{ github.repository == 'Peerivo/helicopter' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+      RUNTIME_PASSWORD: ${{ secrets.runtime_password }}
+
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Validate bridge inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "Peerivo/helicopter"
+          test -n "$BEGET_SUPABASE_HOST"
+          test -n "$BEGET_SUPABASE_USER"
+          test -n "$BEGET_SUPABASE_SSH_KEY"
+          test -n "$BEGET_SUPABASE_KNOWN_HOSTS"
+          test -n "$RUNTIME_PASSWORD"
+          test "${#RUNTIME_PASSWORD}" -ge 24
+          test -f db/migrations/001_init.sql
+
+      - name: Configure pinned Beget SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Verify target PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          result="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"             "docker exec supabase-db psql -U supabase_admin -d postgres -X -qAt -v ON_ERROR_STOP=1 -c 'select current_database();'")"
+          test "$result" = "postgres"
+
+      - name: Apply Helicopter migrations through Beget SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          for migration in db/migrations/*.sql; do
+            echo "Applying $(basename "$migration")"
+            cat "$migration" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"               "docker exec -i supabase-db psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1"
+          done
+
+      - name: Provision restricted runtime login
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+
+          printf '%s' "$RUNTIME_PASSWORD" |             ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"               'umask 077; cat > /tmp/helicopter-runtime-password'
+
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -f /tmp/helicopter-runtime-password' EXIT
+          runtime_password="$(cat /tmp/helicopter-runtime-password)"
+          test "${#runtime_password}" -ge 24
+
+          docker exec -i -e RUNTIME_PASSWORD="$runtime_password" supabase-db sh -lc '
+            set -euo pipefail
+            psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1               --set=runtime_password="$RUNTIME_PASSWORD" <<'"'"'SQL'"'"'
+            select '"'"'create role helicopter_runtime login'"'"'
+            where not exists (
+              select 1 from pg_roles where rolname = '"'"'helicopter_runtime'"'"'
+            )
+            \gexec
+
+            select format(
+              '"'"'alter role helicopter_runtime login password %L'"'"',
+              :'"'"'runtime_password'"'"'
+            )
+            \gexec
+
+            grant helicopter_app to helicopter_runtime;
+            alter role helicopter_runtime set search_path = helicopter, public;
+            revoke create on schema public from helicopter_runtime;
+SQL
+          '
+          REMOTE
+
+      - name: Verify isolated schema and runtime role
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          result="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"             "docker exec supabase-db psql -U supabase_admin -d postgres -X -qAt -v ON_ERROR_STOP=1 -F '|' -c \"select
+              exists(select 1 from information_schema.tables where table_schema='helicopter' and table_name='leads'),
+              exists(select 1 from information_schema.tables where table_schema='helicopter' and table_name='sites'),
+              pg_has_role('helicopter_runtime','helicopter_app','member'),
+              (select count(*) from helicopter.sites s join helicopter.cities c on c.id=s.city_id where c.slug='sochi' and s.active),
+              (select count(*) from helicopter.sites s join helicopter.cities c on c.id=s.city_id where c.slug='moscow' and s.active);\"")"
+          test "$result" = "t|t|t|3|3"
+          echo "Helicopter schema and restricted runtime role verified on Beget."
+
+      - name: Remove SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
