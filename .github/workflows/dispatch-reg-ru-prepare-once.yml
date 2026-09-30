@@ -14,12 +14,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APPROVED_BASE_SHA: 37b39dd9e74410740ce1afc709e4379f9504d8b7
+  APPROVED_BASE_SHA: edf0d47fcf633b1b7e940a411d92eb8a52bcf534
   TARGET_WORKFLOW: deploy-reg-ru.yml
 
 jobs:
   dispatch:
-    if: ${{ github.ref == 'refs/heads/main' && github.run_number == 1 && github.run_attempt == 1 && contains(github.event.head_commit.message, '[run-reg-ru-prepare]') }}
+    if: ${{ github.ref == 'refs/heads/main' && github.run_attempt == 1 && contains(github.event.head_commit.message, '[run-reg-ru-prepare]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
