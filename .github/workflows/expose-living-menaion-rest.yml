@@ -77,6 +77,10 @@ jobs:
             docker exec -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile' < "$1"
           }
 
+          reload_caddyfile() {
+            docker exec "$caddy_name" sh -c 'set -eu; PROXY_AUTH_PASSWORD="$(caddy hash-password --plaintext "$PROXY_AUTH_PASSWORD")"; export PROXY_AUTH_PASSWORD; caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile'
+          }
+
           admin_curl() {
             docker run --rm -i --network "container:$caddy_name" curlimages/curl:8.14.1 "$@"
           }
@@ -91,6 +95,7 @@ jobs:
             fi
             if [ "$file_applied" -eq 1 ]; then
               write_caddyfile "$caddyfile_backup" || true
+              reload_caddyfile || true
             fi
           }
 
@@ -129,29 +134,12 @@ jobs:
             --adapter caddyfile \
             --config /dev/stdin >/dev/null < "$caddyfile_candidate"
 
-          admin_curl -fsS http://127.0.0.1:2019/config/apps/http/servers/srv0/routes > "$routes_backup"
-          jq -e 'type == "array"' "$routes_backup" >/dev/null
-
-          if jq -e '.. | objects | select(.dial? == "living-menaion-rest:3000")' "$routes_backup" >/dev/null; then
-            cp "$routes_backup" "$routes_candidate"
-          else
-            route_json="$(printf '%s\n' ':9999 {' '  handle_path /menaion/rest/v1/* {' '    reverse_proxy living-menaion-rest:3000' '  }' '}' |
-              docker run --rm -i caddy:2 caddy adapt --adapter caddyfile --config /dev/stdin |
-              jq -c '.apps.http.servers.srv0.routes[0]')"
-            test -n "$route_json"
-            jq --argjson route "$route_json" '[$route] + .' "$routes_backup" > "$routes_candidate"
-          fi
-
-          # Persist for future Caddy recreates, then update only live route JSON.
+          # Persist the canonical Caddyfile, then reload the complete config.
+          # Re-hash the already-exported Studio password exactly as the container entrypoint does.
           write_caddyfile "$caddyfile_candidate"
           file_applied=1
-
-          admin_curl -fsS -X PUT \
-            -H 'Content-Type: application/json' \
-            --data-binary @- \
-            http://127.0.0.1:2019/config/apps/http/servers/srv0/routes \
-            < "$routes_candidate" >/dev/null
-          live_applied=1
+          reload_caddyfile
+          live_applied=0
 
           ok=0
           for _ in $(seq 1 20); do
