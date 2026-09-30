@@ -95,6 +95,18 @@ jobs:
           docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$caddy_cid" | sed 's/=.*$/=REDACTED/' | sort
           echo "caddy_env_names_end"
           echo "caddy_networks=$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{printf "%s " $name}}{{end}}' "$caddy_cid")"
+          echo "caddy_started_at=$(docker inspect -f '{{.State.StartedAt}}' "$caddy_cid")"
+          echo "menaion_route_persisted=$(docker exec "$caddy_cid" sh -c 'grep -q "handle_path /menaion/rest/v1/\\*" /etc/caddy/Caddyfile && echo yes || echo no')"
+          echo "menaion_live_route_count=$(docker run --rm --network "container:$caddy_name" curlimages/curl:8.14.1 -fsS http://127.0.0.1:2019/config/apps/http/servers/srv0/routes | jq '[.. | objects | select(.dial? == "living-menaion-rest:3000")] | length')"
+          external_headers="$(mktemp)"
+          external_code="$(curl -sS -D "$external_headers" -o /dev/null -w '%{http_code}' --max-time 5 https://api.mercy.peerivo.net/menaion/rest/v1/sources?select=id\\&limit=1 || true)"
+          echo "menaion_external_http=$external_code"
+          if grep -Eqi '^www-authenticate:[[:space:]]*Basic' "$external_headers"; then
+            echo "menaion_external_basic_auth=yes"
+          else
+            echo "menaion_external_basic_auth=no"
+          fi
+          rm -f "$external_headers"
           echo "menaion_networks=$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{printf "%s " $name}}{{end}}' living-menaion-rest)"
           echo "caddyfile_host_readable=$(test -r /opt/beget/supabase/volumes/proxy/caddy/Caddyfile && echo yes || echo no)"
           echo "caddyfile_host_writable=$(test -w /opt/beget/supabase/volumes/proxy/caddy/Caddyfile && echo yes || echo no)"
