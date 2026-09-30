@@ -3,7 +3,7 @@ name: Bootstrap Helicopter DB tunnel
 on:
   push:
     branches:
-      - ops/helicopter-tunnel-bootstrap
+      - main
     paths:
       - ".peerivo/helicopter-tunnel-bootstrap.once"
 
