@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - ".github/workflows/helicopter-db-bridge.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,19 +26,15 @@ jobs:
       BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
       BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
       BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
-      HELICOPTER_TUNNEL_PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW helicopter-reg-ru1-to-beget"
-      HELICOPTER_SOURCE_IP: "95.163.223.68"
 
     steps:
       - name: Validate protected configuration
         shell: bash
         run: |
           set -euo pipefail
-          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS HELICOPTER_TUNNEL_PUBLIC_KEY HELICOPTER_SOURCE_IP; do
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
             test -n "${!name:-}" || { echo "::error::Missing protected configuration: $name"; exit 1; }
           done
-          [[ "$HELICOPTER_TUNNEL_PUBLIC_KEY" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+[[:space:]]helicopter-reg-ru1-to-beget$ ]]
-          [[ "$HELICOPTER_SOURCE_IP" == "95.163.223.68" ]]
 
       - name: Configure pinned Beget SSH
         shell: bash
@@ -49,35 +46,28 @@ jobs:
           printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
-      - name: Verify live Beget host key
-        shell: bash
-        run: |
-          set -euo pipefail
-          scan="$(mktemp)"
-          trap 'rm -f "$scan"' EXIT
-          ssh-keyscan -T 5 -t ed25519 "$BEGET_SUPABASE_HOST" 2>/dev/null > "$scan"
-          test -s "$scan"
-          scan_fp="$(ssh-keygen -lf "$scan" | awk 'NR==1 {print $2}')"
-          test -n "$scan_fp"
-          ssh-keygen -lf ~/.ssh/known_hosts | awk '{print $2}' | grep -Fx "$scan_fp" >/dev/null || {
-            echo "::error::Live Beget host key does not match pinned known_hosts"
-            exit 1
-          }
-
-      - name: Install restricted tunnel key
+      - name: Verify Beget target before mutation
         shell: bash
         run: |
           set -euo pipefail
           remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
-          key_body="$(printf '%s\n' "$HELICOPTER_TUNNEL_PUBLIC_KEY" | awk '{print $2}')"
-          restricted_line="from=\"$HELICOPTER_SOURCE_IP\",restrict,port-forwarding,permitopen=\"127.0.0.1:5432\",command=\"/bin/false\" $HELICOPTER_TUNNEL_PUBLIC_KEY"
-
-          printf '%s\n%s\n' "$key_body" "$restricted_line" |             ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          IFS= read -r key_body
-          IFS= read -r restricted_line
-          test -n "$key_body"
-          test -n "$restricted_line"
+          docker exec supabase-db psql -U supabase_admin -d postgres -X -qAt -v ON_ERROR_STOP=1             -c 'select current_database();' | grep -qx postgres
+          ss -ltn | awk '{print $4}' | grep -qx '127.0.0.1:5432'
+          ! ss -ltn | awk '{print $4}' | grep -Eq '^(0\.0\.0\.0|\[::\]):5432$'
+          REMOTE
+
+      - name: Install restricted Helicopter tunnel key
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          key_body='AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW'
+          line='from="95.163.223.68",restrict,port-forwarding,permitopen="127.0.0.1:5432" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW helicopter-reg-ru1-to-beget'
 
           umask 077
           mkdir -p "$HOME/.ssh"
@@ -88,24 +78,16 @@ jobs:
           tmp="$(mktemp)"
           trap 'rm -f "$tmp"' EXIT
           grep -Fv "$key_body" "$HOME/.ssh/authorized_keys" > "$tmp" || true
-          printf '%s\n' "$restricted_line" >> "$tmp"
+          printf '%s\n' "$line" >> "$tmp"
           cat "$tmp" > "$HOME/.ssh/authorized_keys"
           chmod 600 "$HOME/.ssh/authorized_keys"
 
           test "$(grep -Fc "$key_body" "$HOME/.ssh/authorized_keys")" -eq 1
-          grep -Fx "$restricted_line" "$HOME/.ssh/authorized_keys" >/dev/null
+          grep -Fx "$line" "$HOME/.ssh/authorized_keys" >/dev/null
           REMOTE
 
-      - name: Verify PostgreSQL remains loopback-only
-        shell: bash
-        run: |
-          set -euo pipefail
-          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" '
-            set -euo pipefail
-            docker exec supabase-db psql -U supabase_admin -d postgres -X -qAt -c "select current_database();" | grep -qx postgres
-          '
-          echo "Restricted Helicopter tunnel key installed; PostgreSQL was not exposed publicly."
+      - name: Report
+        run: echo "Restricted Helicopter tunnel key installed on Beget."
 
       - name: Remove SSH material
         if: always()
