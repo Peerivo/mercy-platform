@@ -90,26 +90,6 @@ jobs:
             });
           '
 
-          docker exec -i mercy node - <<'NODE'
-          const { createClient } = require("@supabase/supabase-js");
-          const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-          const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.MERCY_SUPABASE_SERVICE_ROLE_KEY;
-          const client = createClient(url, key, {
-            auth: { autoRefreshToken: false, persistSession: false },
-          });
-          (async () => {
-            const { data, error } = await client.auth.admin.listUsers({ page: 1, perPage: 1 });
-            if (error) {
-              const status = Number(error.status || error.statusCode || 0);
-              console.log("CALLBACK_ADMIN_LIST_STATUS=" + (status || "error"));
-              process.exit(0);
-            }
-            console.log("CALLBACK_ADMIN_LIST_STATUS=200");
-            console.log("CALLBACK_ADMIN_LIST_SHAPE=" + (Array.isArray(data?.users) ? "ok" : "invalid"));
-          })().catch(() => {
-            console.log("CALLBACK_ADMIN_LIST_STATUS=exception");
-          });
-          NODE
 
           logs="$(docker logs --since 2h mercy 2>&1 || true)"
           count="$(printf '%s\n' "${logs}" | grep -c 'PEERIVO_AUTH_CALLBACK:' || true)"
