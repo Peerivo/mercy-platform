@@ -66,18 +66,33 @@ jobs:
           install -d -m 700 "$HOME/.living-menaion"
           caddyfile_backup="$(mktemp "$HOME/.living-menaion/Caddyfile.backup.XXXXXX")"
           caddyfile_candidate="$(mktemp "$HOME/.living-menaion/Caddyfile.candidate.XXXXXX")"
+          routes_backup="$(mktemp "$HOME/.living-menaion/routes.backup.XXXXXX")"
+          routes_candidate="$(mktemp "$HOME/.living-menaion/routes.candidate.XXXXXX")"
           probe_body="$(mktemp "$HOME/.living-menaion/menaion-probe.XXXXXX")"
           probe_headers="$(mktemp "$HOME/.living-menaion/menaion-headers.XXXXXX")"
-          applied=0
+          file_applied=0
+          live_applied=0
 
           write_caddyfile() {
-            docker run --rm -i --entrypoint sh               -v "$caddy_host_dir:/work"               caddy:2 -c 'cat > /work/Caddyfile' < "$1"
+            docker run --rm -i --entrypoint sh \
+              -v "$caddy_host_dir:/work" \
+              caddy:2 -c 'cat > /work/Caddyfile' < "$1"
+          }
+
+          admin_curl() {
+            docker run --rm -i --network "container:$caddy_name" curlimages/curl:8.14.1 "$@"
           }
 
           rollback() {
-            if [ "$applied" -eq 1 ]; then
+            if [ "$live_applied" -eq 1 ]; then
+              admin_curl -fsS -X PUT \
+                -H 'Content-Type: application/json' \
+                --data-binary @- \
+                http://127.0.0.1:2019/config/apps/http/servers/srv0/routes \
+                < "$routes_backup" >/dev/null 2>&1 || true
+            fi
+            if [ "$file_applied" -eq 1 ]; then
               write_caddyfile "$caddyfile_backup" || true
-              docker exec "$caddy_name" caddy reload                 --config /etc/caddy/Caddyfile                 --adapter caddyfile >/dev/null 2>&1 || true
             fi
           }
 
@@ -85,7 +100,7 @@ jobs:
             rc=$?
             trap - EXIT
             if [ "$rc" -ne 0 ]; then rollback; fi
-            rm -f "$caddyfile_backup" "$caddyfile_candidate" "$probe_body" "$probe_headers"
+            rm -f "$caddyfile_backup" "$caddyfile_candidate" "$routes_backup" "$routes_candidate" "$probe_body" "$probe_headers"
             unset service_key
             exit "$rc"
           }
@@ -110,12 +125,35 @@ jobs:
             mv "${caddyfile_candidate}.new" "$caddyfile_candidate"
           fi
 
-          docker exec -i "$caddy_name" caddy adapt             --adapter caddyfile             --config /dev/stdin >/dev/null < "$caddyfile_candidate"
+          # Syntax-check the persisted candidate. Do not provision/reload it here:
+          # the running container's entrypoint transforms the Studio Basic Auth secret at startup.
+          docker exec -i "$caddy_name" caddy adapt \
+            --adapter caddyfile \
+            --config /dev/stdin >/dev/null < "$caddyfile_candidate"
 
+          admin_curl -fsS http://127.0.0.1:2019/config/apps/http/servers/srv0/routes > "$routes_backup"
+          jq -e 'type == "array"' "$routes_backup" >/dev/null
+
+          if jq -e '.. | objects | select(.dial? == "living-menaion-rest:3000")' "$routes_backup" >/dev/null; then
+            cp "$routes_backup" "$routes_candidate"
+          else
+            route_json="$(printf '%s\n' ':9999 {' '  handle_path /menaion/rest/v1/* {' '    reverse_proxy living-menaion-rest:3000' '  }' '}' |
+              docker run --rm -i caddy:2 caddy adapt --adapter caddyfile --config /dev/stdin |
+              jq -c '.apps.http.servers.srv0.routes[0]')"
+            test -n "$route_json"
+            jq --argjson route "$route_json" '[$route] + .' "$routes_backup" > "$routes_candidate"
+          fi
+
+          # Persist for future Caddy recreates, then update only live route JSON.
           write_caddyfile "$caddyfile_candidate"
-          applied=1
+          file_applied=1
 
-          docker exec "$caddy_name" caddy reload             --config /etc/caddy/Caddyfile             --adapter caddyfile >/dev/null
+          admin_curl -fsS -X PUT \
+            -H 'Content-Type: application/json' \
+            --data-binary @- \
+            http://127.0.0.1:2019/config/apps/http/servers/srv0/routes \
+            < "$routes_candidate" >/dev/null
+          live_applied=1
 
           ok=0
           for _ in $(seq 1 20); do
@@ -138,7 +176,8 @@ jobs:
 
           docker exec "$caddy_name" cat /etc/caddy/Caddyfile             | grep -q 'handle_path /menaion/rest/v1/\*'
 
-          applied=0
+          file_applied=0
+          live_applied=0
           echo "Living Menaion public REST route persisted and verified through public DNS."
           REMOTE
 
