@@ -1,0 +1,87 @@
+name: Grant Notify runner Beget access
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/grant-notify-runner-beget.yml"
+      - ".peerivo/grant-notify-runner-beget.once"
+
+permissions:
+  contents: read
+
+jobs:
+  grant:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+      NOTIFY_RUNNER_PUBLIC_KEY: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJu/1p1YYEIA+yjQAn09KVjvDPD/OAibplHVlRPYDM6j peerivo-notify-runner
+
+    steps:
+      - name: Validate protected configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS NOTIFY_RUNNER_PUBLIC_KEY; do
+            test -n "${!name:-}" || { echo "::error::Missing protected configuration: $name"; exit 1; }
+          done
+          [[ "$NOTIFY_RUNNER_PUBLIC_KEY" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+[[:space:]]peerivo-notify-runner$ ]]
+
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Verify live host key matches pinned host
+        shell: bash
+        run: |
+          set -euo pipefail
+          scan="$(mktemp)"
+          trap 'rm -f "$scan"' EXIT
+          ssh-keyscan -T 5 -t ed25519 "$BEGET_SUPABASE_HOST" 2>/dev/null > "$scan"
+          test -s "$scan"
+          scan_fp="$(ssh-keygen -lf "$scan" | awk 'NR==1 {print $2}')"
+          test -n "$scan_fp"
+          ssh-keygen -lf ~/.ssh/known_hosts | awk '{print $2}' | grep -Fx "$scan_fp" >/dev/null || {
+            echo "::error::Live Beget host key does not match pinned known_hosts"
+            exit 1
+          }
+          echo "PINNED_BEGET_HOST_FINGERPRINT=$scan_fp"
+
+      - name: Authorize Notify runner public key
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          printf '%s\n' "$NOTIFY_RUNNER_PUBLIC_KEY" |             ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          IFS= read -r key
+          test -n "$key"
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          touch "$HOME/.ssh/authorized_keys"
+          chmod 700 "$HOME/.ssh"
+          chmod 600 "$HOME/.ssh/authorized_keys"
+          if ! grep -Fxq "$key" "$HOME/.ssh/authorized_keys"; then
+            printf '%s\n' "$key" >> "$HOME/.ssh/authorized_keys"
+          fi
+          grep -Fxq "$key" "$HOME/.ssh/authorized_keys"
+          REMOTE
+          echo "Notify runner public key authorized."
+
+      - name: Remove SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
