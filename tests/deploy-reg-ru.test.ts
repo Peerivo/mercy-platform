@@ -111,7 +111,7 @@ describe("REG.RU one-shot PREPARE dispatcher", () => {
     expect(dispatcher).toContain("[run-reg-ru-prepare]");
     expect(dispatcher).toContain("github.run_attempt == 1");
     expect(dispatcher).toContain(
-      "APPROVED_BASE_SHA: edf0d47fcf633b1b7e940a411d92eb8a52bcf534",
+      "APPROVED_BASE_SHA: 4b8d7acfaaa69b5da39c2115c2ad8cb1005b7905",
     );
     expect(dispatcher).toContain('test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"');
     expect(dispatcher).toContain("One-shot dispatcher increment contains unexpected files.");

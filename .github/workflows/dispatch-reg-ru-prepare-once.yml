@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APPROVED_BASE_SHA: 50efbf211dde44ffe16a33cf49f5f957487bbd5c
+  APPROVED_BASE_SHA: 4b8d7acfaaa69b5da39c2115c2ad8cb1005b7905
   TARGET_WORKFLOW: deploy-reg-ru.yml
 
 jobs:
@@ -50,8 +50,7 @@ jobs:
           allowed="$(
             printf '%s\n' \
               '.github/workflows/dispatch-reg-ru-prepare-once.yml' \
-              '.github/workflows/inspect-peerivo-callback-runtime.yml' \
-              'app/auth/callback/route.ts' \
+              'tests/deploy-reg-ru.test.ts' \
               | LC_ALL=C sort
           )"
           changed="$(git diff --name-only "${APPROVED_BASE_SHA}..${GITHUB_SHA}" | LC_ALL=C sort)"
