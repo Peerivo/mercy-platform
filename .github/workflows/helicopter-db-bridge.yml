@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
 
           key_body='AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW'
-          line='from="95.163.223.68",restrict,port-forwarding,permitopen="127.0.0.1:5432" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW helicopter-reg-ru1-to-beget'
+          line='from="95.163.223.68",restrict,port-forwarding,permitopen="127.0.0.1:5432",command="/bin/false" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW helicopter-reg-ru1-to-beget'
 
           umask 077
           mkdir -p "$HOME/.ssh"
