@@ -63,31 +63,31 @@ jobs:
         run: |
           set -euo pipefail
           remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"             'if [ "$(id -u)" -eq 0 ]; then exec bash -s; else exec sudo -n bash -s; fi' <<'REMOTE'
           set -euo pipefail
 
           key_body='AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW'
           line='from="95.163.223.68",restrict,port-forwarding,permitopen="127.0.0.1:5432" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW helicopter-reg-ru1-to-beget'
 
           umask 077
-          mkdir -p "$HOME/.ssh"
-          touch "$HOME/.ssh/authorized_keys"
-          chmod 700 "$HOME/.ssh"
-          chmod 600 "$HOME/.ssh/authorized_keys"
+          mkdir -p /root/.ssh
+          touch /root/.ssh/authorized_keys
+          chmod 700 /root/.ssh
+          chmod 600 /root/.ssh/authorized_keys
 
           tmp="$(mktemp)"
           trap 'rm -f "$tmp"' EXIT
-          grep -Fv "$key_body" "$HOME/.ssh/authorized_keys" > "$tmp" || true
+          grep -Fv "$key_body" /root/.ssh/authorized_keys > "$tmp" || true
           printf '%s\n' "$line" >> "$tmp"
-          cat "$tmp" > "$HOME/.ssh/authorized_keys"
-          chmod 600 "$HOME/.ssh/authorized_keys"
+          cat "$tmp" > /root/.ssh/authorized_keys
+          chmod 600 /root/.ssh/authorized_keys
 
-          test "$(grep -Fc "$key_body" "$HOME/.ssh/authorized_keys")" -eq 1
-          grep -Fx "$line" "$HOME/.ssh/authorized_keys" >/dev/null
+          test "$(grep -Fc "$key_body" /root/.ssh/authorized_keys)" -eq 1
+          grep -Fx "$line" /root/.ssh/authorized_keys >/dev/null
           REMOTE
 
       - name: Report
-        run: echo "Restricted Helicopter tunnel key installed on Beget."
+        run: echo "Restricted Helicopter tunnel key installed for root on Beget."
 
       - name: Remove SSH material
         if: always()
