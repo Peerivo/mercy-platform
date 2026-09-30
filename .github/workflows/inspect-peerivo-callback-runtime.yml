@@ -1,0 +1,122 @@
+name: Inspect Peerivo callback runtime
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && contains(github.event.head_commit.message, '[inspect-peerivo-callback]') }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate protected access
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_KNOWN_HOSTS REG_RU_SSH_KEY; do
+            test -n "${!name:-}" || {
+              echo "::error::Missing protected production access: ${name}"
+              exit 1
+            }
+          done
+
+      - name: Configure pinned SSH trust
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${REG_RU_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${REG_RU_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Inspect sanitized callback runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${remote}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          docker inspect mercy >/dev/null
+
+          env_lines="$(docker inspect mercy --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          value_of() {
+            local name="$1"
+            printf '%s\n' "${env_lines}" | sed -n "s/^${name}=//p" | tail -n1
+          }
+
+          local_secret="$(value_of PEERIVO_AUTH_LOCAL_PASSWORD_SECRET)"
+          auth_url="$(value_of PEERIVO_AUTH_URL)"
+          client_id="$(value_of PEERIVO_AUTH_CLIENT_ID)"
+          redirect_uri="$(value_of PEERIVO_AUTH_REDIRECT_URI)"
+          service_key="$(value_of SUPABASE_SERVICE_ROLE_KEY)"
+          public_url="$(value_of NEXT_PUBLIC_SUPABASE_URL)"
+
+          test "${#local_secret}" -ge 32 || { echo "CALLBACK_RUNTIME_CONFIG=local_secret_invalid"; exit 1; }
+          test "${auth_url}" = "https://auth.peerivo.net" || { echo "CALLBACK_RUNTIME_CONFIG=auth_url_invalid"; exit 1; }
+          test "${client_id}" = "mercy" || { echo "CALLBACK_RUNTIME_CONFIG=client_id_invalid"; exit 1; }
+          test "${redirect_uri}" = "https://mercy.peerivo.net/auth/callback" || { echo "CALLBACK_RUNTIME_CONFIG=redirect_uri_invalid"; exit 1; }
+          test -n "${service_key}" || { echo "CALLBACK_RUNTIME_CONFIG=service_role_missing"; exit 1; }
+          test "${public_url}" = "https://api.mercy.peerivo.net" || { echo "CALLBACK_RUNTIME_CONFIG=supabase_url_invalid"; exit 1; }
+          echo "CALLBACK_RUNTIME_CONFIG=ok"
+
+          docker exec mercy node -e '
+            Promise.all([
+              fetch("https://auth.peerivo.net/api/health").then(r => ["web", r.status]),
+              fetch("https://api.auth.peerivo.net/auth/v1/health").then(r => ["api", r.status])
+            ]).then(items => {
+              for (const [name, status] of items) console.log("CALLBACK_OUTBOUND_" + name.toUpperCase() + "=" + status);
+              if (items.some(([, status]) => status < 200 || status >= 500)) process.exit(1);
+            }).catch(() => {
+              console.log("CALLBACK_OUTBOUND=fetch_failed");
+              process.exit(1);
+            });
+          '
+
+          logs="$(docker logs --since 2h mercy 2>&1 || true)"
+          count="$(printf '%s\n' "${logs}" | grep -c 'PEERIVO_AUTH_CALLBACK:' || true)"
+          echo "CALLBACK_ERROR_COUNT=${count}"
+
+          category="none"
+          if printf '%s\n' "${logs}" | grep -q 'Peerivo Auth verify-code failed: 401'; then
+            category="verify_code_401"
+          elif printf '%s\n' "${logs}" | grep -q 'Peerivo Auth verify-code failed:'; then
+            category="verify_code_http"
+          elif printf '%s\n' "${logs}" | grep -q 'Peerivo Auth returned invalid identity payload'; then
+            category="verify_payload"
+          elif printf '%s\n' "${logs}" | grep -q 'PEERIVO_AUTH_LOCAL_PASSWORD_SECRET'; then
+            category="local_password_secret"
+          elif printf '%s\n' "${logs}" | grep -qi 'Invalid login credentials'; then
+            category="local_sign_in"
+          elif printf '%s\n' "${logs}" | grep -qi 'fetch failed'; then
+            category="outbound_fetch"
+          elif printf '%s\n' "${logs}" | grep -Eqi 'already registered|duplicate key|Database error'; then
+            category="local_user_write"
+          elif [ "${count}" -gt 0 ]; then
+            category="other_callback_exception"
+          fi
+
+          echo "CALLBACK_ERROR_CATEGORY=${category}"
+          REMOTE
+
+      - name: Remove SSH credentials
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
