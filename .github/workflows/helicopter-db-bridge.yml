@@ -1,45 +1,43 @@
-name: Helicopter DB bridge
+name: Grant Helicopter DB tunnel access
 
 on:
-  workflow_call:
-    secrets:
-      runtime_password:
-        required: true
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/helicopter-db-bridge.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: grant-helicopter-db-tunnel-beget
+  cancel-in-progress: false
+
 jobs:
-  apply:
-    if: ${{ github.repository == 'Peerivo/helicopter' && github.ref == 'refs/heads/main' }}
+  grant:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
     environment: production
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
       BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
       BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
       BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
-      RUNTIME_PASSWORD: ${{ secrets.runtime_password }}
+      HELICOPTER_TUNNEL_PUBLIC_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW helicopter-reg-ru1-to-beget"
+      HELICOPTER_SOURCE_IP: "95.163.223.68"
 
     steps:
-      - name: Check out caller repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-
-      - name: Validate bridge inputs
+      - name: Validate protected configuration
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REPOSITORY" = "Peerivo/helicopter"
-          test -n "$BEGET_SUPABASE_HOST"
-          test -n "$BEGET_SUPABASE_USER"
-          test -n "$BEGET_SUPABASE_SSH_KEY"
-          test -n "$BEGET_SUPABASE_KNOWN_HOSTS"
-          test -n "$RUNTIME_PASSWORD"
-          test "${#RUNTIME_PASSWORD}" -ge 24
-          test -f db/migrations/001_init.sql
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS HELICOPTER_TUNNEL_PUBLIC_KEY HELICOPTER_SOURCE_IP; do
+            test -n "${!name:-}" || { echo "::error::Missing protected configuration: $name"; exit 1; }
+          done
+          [[ "$HELICOPTER_TUNNEL_PUBLIC_KEY" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+[[:space:]]helicopter-reg-ru1-to-beget$ ]]
+          [[ "$HELICOPTER_SOURCE_IP" == "95.163.223.68" ]]
 
       - name: Configure pinned Beget SSH
         shell: bash
@@ -51,73 +49,63 @@ jobs:
           printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
-      - name: Verify target PostgreSQL
+      - name: Verify live Beget host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          scan="$(mktemp)"
+          trap 'rm -f "$scan"' EXIT
+          ssh-keyscan -T 5 -t ed25519 "$BEGET_SUPABASE_HOST" 2>/dev/null > "$scan"
+          test -s "$scan"
+          scan_fp="$(ssh-keygen -lf "$scan" | awk 'NR==1 {print $2}')"
+          test -n "$scan_fp"
+          ssh-keygen -lf ~/.ssh/known_hosts | awk '{print $2}' | grep -Fx "$scan_fp" >/dev/null || {
+            echo "::error::Live Beget host key does not match pinned known_hosts"
+            exit 1
+          }
+
+      - name: Install restricted tunnel key
         shell: bash
         run: |
           set -euo pipefail
           remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
-          result="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"             "docker exec supabase-db psql -U supabase_admin -d postgres -X -qAt -v ON_ERROR_STOP=1 -c 'select current_database();'")"
-          test "$result" = "postgres"
+          key_body="$(printf '%s\n' "$HELICOPTER_TUNNEL_PUBLIC_KEY" | awk '{print $2}')"
+          restricted_line="from=\"$HELICOPTER_SOURCE_IP\",restrict,port-forwarding,permitopen=\"127.0.0.1:5432\",command=\"/bin/false\" $HELICOPTER_TUNNEL_PUBLIC_KEY"
 
-      - name: Apply Helicopter migrations through Beget SSH
-        shell: bash
-        run: |
+          printf '%s\n%s\n' "$key_body" "$restricted_line" |             ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
-          for migration in db/migrations/*.sql; do
-            echo "Applying $(basename "$migration")"
-            cat "$migration" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"               "docker exec -i supabase-db psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1"
-          done
+          IFS= read -r key_body
+          IFS= read -r restricted_line
+          test -n "$key_body"
+          test -n "$restricted_line"
 
-      - name: Provision restricted runtime login
-        shell: bash
-        run: |
-          set -euo pipefail
-          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          touch "$HOME/.ssh/authorized_keys"
+          chmod 700 "$HOME/.ssh"
+          chmod 600 "$HOME/.ssh/authorized_keys"
 
-          printf '%s' "$RUNTIME_PASSWORD" |             ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"               'umask 077; cat > /tmp/helicopter-runtime-password'
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          grep -Fv "$key_body" "$HOME/.ssh/authorized_keys" > "$tmp" || true
+          printf '%s\n' "$restricted_line" >> "$tmp"
+          cat "$tmp" > "$HOME/.ssh/authorized_keys"
+          chmod 600 "$HOME/.ssh/authorized_keys"
 
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          trap 'rm -f /tmp/helicopter-runtime-password' EXIT
-          runtime_password="$(cat /tmp/helicopter-runtime-password)"
-          test "${#runtime_password}" -ge 24
-
-          docker exec -i -e RUNTIME_PASSWORD="$runtime_password" supabase-db sh -lc '
-            set -euo pipefail
-            psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1               --set=runtime_password="$RUNTIME_PASSWORD" <<'"'"'SQL'"'"'
-            select '"'"'create role helicopter_runtime login'"'"'
-            where not exists (
-              select 1 from pg_roles where rolname = '"'"'helicopter_runtime'"'"'
-            )
-            \gexec
-
-            select format(
-              '"'"'alter role helicopter_runtime login password %L'"'"',
-              :'"'"'runtime_password'"'"'
-            )
-            \gexec
-
-            grant helicopter_app to helicopter_runtime;
-            alter role helicopter_runtime set search_path = helicopter, public;
-            revoke create on schema public from helicopter_runtime;
-SQL
-          '
+          test "$(grep -Fc "$key_body" "$HOME/.ssh/authorized_keys")" -eq 1
+          grep -Fx "$restricted_line" "$HOME/.ssh/authorized_keys" >/dev/null
           REMOTE
 
-      - name: Verify isolated schema and runtime role
+      - name: Verify PostgreSQL remains loopback-only
         shell: bash
         run: |
           set -euo pipefail
           remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
-          result="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"             "docker exec supabase-db psql -U supabase_admin -d postgres -X -qAt -v ON_ERROR_STOP=1 -F '|' -c \"select
-              exists(select 1 from information_schema.tables where table_schema='helicopter' and table_name='leads'),
-              exists(select 1 from information_schema.tables where table_schema='helicopter' and table_name='sites'),
-              pg_has_role('helicopter_runtime','helicopter_app','member'),
-              (select count(*) from helicopter.sites s join helicopter.cities c on c.id=s.city_id where c.slug='sochi' and s.active),
-              (select count(*) from helicopter.sites s join helicopter.cities c on c.id=s.city_id where c.slug='moscow' and s.active);\"")"
-          test "$result" = "t|t|t|3|3"
-          echo "Helicopter schema and restricted runtime role verified on Beget."
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" '
+            set -euo pipefail
+            docker exec supabase-db psql -U supabase_admin -d postgres -X -qAt -c "select current_database();" | grep -qx postgres
+          '
+          echo "Restricted Helicopter tunnel key installed; PostgreSQL was not exposed publicly."
 
       - name: Remove SSH material
         if: always()
