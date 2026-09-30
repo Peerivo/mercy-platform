@@ -66,6 +66,21 @@ jobs:
             echo "HELICOPTER_TUNNEL_PUBLIC=$(ssh-keygen -y -f /root/.ssh/helicopter-db-tunnel)"
           fi
 
+          echo "SSH_KEY_CANDIDATES_BEGIN"
+          for key in /root/.ssh/*; do
+            test -f "$key" || continue
+            case "$key" in
+              *.pub|*/authorized_keys|*/known_hosts|*/config) continue ;;
+            esac
+            if ssh-keygen -y -f "$key" >/tmp/helicopter-key.pub 2>/dev/null; then
+              pub="$(cat /tmp/helicopter-key.pub)"
+              fp="$(ssh-keygen -lf /tmp/helicopter-key.pub | awk '{print $2}')"
+              printf 'KEY_CANDIDATE path=%s fingerprint=%s public=%s\n' "$key" "$fp" "$pub"
+            fi
+          done
+          rm -f /tmp/helicopter-key.pub
+          echo "SSH_KEY_CANDIDATES_END"
+
           if test -d /opt/peerivo/helicopter; then
             echo "HELICOPTER_RELEASE_COUNT=$(find /opt/peerivo/helicopter/releases -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
             if test -e /opt/peerivo/helicopter/current; then
