@@ -1,0 +1,174 @@
+name: Bootstrap Helicopter DB tunnel
+
+on:
+  push:
+    branches:
+      - ops/helicopter-tunnel-bootstrap
+    paths:
+      - ".peerivo/helicopter-tunnel-bootstrap.once"
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: production
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate production transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_KNOWN_HOSTS BEGET_SUPABASE_HOST BEGET_SUPABASE_USER REG_RU_SSH_KEY BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || { echo "::error::Missing protected configuration: $name"; exit 1; }
+          done
+          test "$REG_RU_HOST" = "95.163.223.68"
+          test "$BEGET_SUPABASE_HOST" = "45.144.176.213"
+
+      - name: Configure pinned SSH credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$REG_RU_SSH_KEY" > ~/.ssh/reg_ru
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/beget
+          printf '%s\n' "$REG_RU_KNOWN_HOSTS" > ~/.ssh/reg_known_hosts
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/beget_known_hosts
+          chmod 600 ~/.ssh/reg_ru ~/.ssh/beget ~/.ssh/reg_known_hosts ~/.ssh/beget_known_hosts
+
+      - name: Generate dedicated tunnel key on REG.RU
+        id: tunnel
+        shell: bash
+        run: |
+          set -euo pipefail
+          reg_opts=(-i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+          pub="$(ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          key=/root/.ssh/helicopter-db-tunnel
+          if [ ! -s "$key" ]; then
+            ssh-keygen -t ed25519 -a 100 -f "$key" -C helicopter-reg-ru1-to-beget-v2 -N '' >/dev/null
+          fi
+          chmod 600 "$key"
+          chmod 644 "$key.pub"
+          ssh-keygen -y -f "$key"
+          REMOTE
+          )"
+          [[ "$pub" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+$ ]]
+          printf 'TUNNEL_PUBLIC_KEY=%s\n' "$pub" >> "$GITHUB_OUTPUT"
+          echo "Tunnel public key generated on REG.RU."
+
+      - name: Authorize forwarding-only key on Beget
+        shell: bash
+        env:
+          TUNNEL_PUBLIC_KEY: ${{ steps.tunnel.outputs.TUNNEL_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          beget_opts=(-i ~/.ssh/beget -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/beget_known_hosts -o ConnectTimeout=10)
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          printf '%s\n' "$TUNNEL_PUBLIC_KEY" | ssh "${beget_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          IFS= read -r key
+          [[ "$key" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+$ ]]
+          key_body="$(printf '%s\n' "$key" | awk '{print $2}')"
+          line="from=\"95.163.223.68\",restrict,port-forwarding,permitopen=\"127.0.0.1:5432\",command=\"/bin/false\" $key helicopter-reg-ru1-to-beget-v2"
+
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          touch "$HOME/.ssh/authorized_keys"
+          chmod 700 "$HOME/.ssh"
+          chmod 600 "$HOME/.ssh/authorized_keys"
+
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          grep -Fv "helicopter-reg-ru1-to-beget-v2" "$HOME/.ssh/authorized_keys" | grep -Fv "$key_body" > "$tmp" || true
+          printf '%s\n' "$line" >> "$tmp"
+          cat "$tmp" > "$HOME/.ssh/authorized_keys"
+          chmod 600 "$HOME/.ssh/authorized_keys"
+          grep -Fx "$line" "$HOME/.ssh/authorized_keys" >/dev/null
+          echo "Forwarding-only key authorized."
+          REMOTE
+
+      - name: Install pinned Beget trust and tunnel service on REG.RU
+        shell: bash
+        run: |
+          set -euo pipefail
+          reg_opts=(-i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+
+          scp "${reg_opts[@]}" -q ~/.ssh/beget_known_hosts "$remote:/root/.ssh/helicopter-beget-known_hosts"
+
+          ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          chmod 600 /root/.ssh/helicopter-beget-known_hosts /root/.ssh/helicopter-db-tunnel
+
+          gateway="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')"
+          [[ "$gateway" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$gateway" != "0.0.0.0"
+          test "$gateway" != "127.0.0.1"
+
+          if ss -ltnH '( sport = :55432 )' | grep -q .; then
+            existing="$(ss -ltnH '( sport = :55432 )' | awk '{print $4}')"
+            test "$existing" = "$gateway:55432" || {
+              echo "Port 55432 is occupied by unexpected listener: $existing" >&2
+              exit 1
+            }
+          fi
+
+          cat > /etc/systemd/system/peerivo-helicopter-db-tunnel.service <<UNIT
+          [Unit]
+          Description=Peerivo Helicopter PostgreSQL tunnel to Beget
+          After=network-online.target docker.service
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/bin/ssh -NT -F /dev/null -i /root/.ssh/helicopter-db-tunnel -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/helicopter-beget-known_hosts -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L $gateway:55432:127.0.0.1:5432 root@45.144.176.213
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          sed -i 's/^          //' /etc/systemd/system/peerivo-helicopter-db-tunnel.service
+
+          systemctl daemon-reload
+          systemctl enable --now peerivo-helicopter-db-tunnel.service
+
+          ok=0
+          for _ in $(seq 1 15); do
+            if systemctl is-active --quiet peerivo-helicopter-db-tunnel.service && ss -ltnH '( sport = :55432 )' | awk '{print $4}' | grep -Fx "$gateway:55432" >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ok" = "1"
+
+          docker run --rm --add-host=host.docker.internal:host-gateway postgres:17-alpine \
+            pg_isready -h host.docker.internal -p 55432 -d postgres >/dev/null
+
+          public_listener="$(ss -ltnH '( sport = :55432 )' | awk '{print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|95\.163\.223\.68):55432$' || true)"
+          test -z "$public_listener"
+
+          echo "HELICOPTER_DB_TUNNEL=ok"
+          echo "HELICOPTER_DB_TUNNEL_BIND=$gateway:55432"
+          REMOTE
+
+      - name: Cleanup runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/reg_ru ~/.ssh/beget ~/.ssh/reg_known_hosts ~/.ssh/beget_known_hosts
