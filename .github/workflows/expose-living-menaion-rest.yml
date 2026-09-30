@@ -117,15 +117,85 @@ jobs:
             exit 1
           fi
 
-          # Persist the same route in the mounted Caddyfile for the next controlled recreate.
-          docker exec "$caddy_name" cat /etc/caddy/Caddyfile > "$caddyfile_candidate"
+          # Persist the route into the exact Caddyfile bind-mounted by the live
+          # front door. Write through the running container as root so host-side
+          # permissions cannot leave the source file unchanged.
+          caddyfile_backup="$(mktemp "$HOME/.living-menaion/Caddyfile.backup.XXXXXX")"
+          docker exec "$caddy_name" cat /etc/caddy/Caddyfile > "$caddyfile_backup"
+          cp "$caddyfile_backup" "$caddyfile_candidate"
+
           if ! grep -q 'handle_path /menaion/rest/v1/\*' "$caddyfile_candidate"; then
             python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    handle @supabase_api {"; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API handle not found; refusing persistence")); p.write_text(t.replace(n,b+n,1))' "$caddyfile_candidate"
-            docker run --rm -i --entrypoint sh               -v /opt/beget/supabase/volumes/proxy/caddy:/work               caddy:2 -c 'cat > /work/Caddyfile' < "$caddyfile_candidate"
           fi
 
-          echo "Living Menaion HTTPS REST route verified; Mercy Auth baseline preserved."
+          persist_rollback() {
+            docker exec -u 0 -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile' < "$caddyfile_backup" || true
+            docker exec "$caddy_name" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+            rollback || true
+          }
+
+          docker exec -u 0 -i "$caddy_name" sh -c 'cat > /etc/caddy/Caddyfile.menaion-next' < "$caddyfile_candidate"
+          if ! docker exec "$caddy_name" caddy validate --config /etc/caddy/Caddyfile.menaion-next --adapter caddyfile >/dev/null; then
+            persist_rollback
+            echo "Persistent Caddyfile candidate is invalid; rollback completed." >&2
+            exit 1
+          fi
+
+          docker exec -u 0 "$caddy_name" sh -c 'mv /etc/caddy/Caddyfile.menaion-next /etc/caddy/Caddyfile'
+          if ! docker exec "$caddy_name" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null; then
+            persist_rollback
+            echo "Caddy reload from persistent Menaion route failed; rollback completed." >&2
+            exit 1
+          fi
+
+          if ! docker exec "$caddy_name" grep -q 'handle_path /menaion/rest/v1/\*' /etc/caddy/Caddyfile; then
+            persist_rollback
+            echo "Persistent Menaion route was not written to the mounted Caddyfile." >&2
+            exit 1
+          fi
+
+          # Verify through public DNS after reload, not only through 127.0.0.1.
+          public_ok=0
+          for _ in $(seq 1 15); do
+            auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 https://api.mercy.peerivo.net/auth/v1/health || true)"
+            body="$(curl --silent --show-error --max-time 5 \
+              -H "Authorization: Bearer $service_key" \
+              -H "apikey: $service_key" \
+              -H "Accept-Profile: living_menaion" \
+              "https://api.mercy.peerivo.net/menaion/rest/v1/liturgical_day_editions?select=id&limit=1" || true)"
+            if [ "$auth_code" = "$baseline_auth_code" ] && [[ "$body" == \[*\] ]]; then
+              public_ok=1
+              break
+            fi
+            sleep 1
+          done
+
+          echo "phase=public-smoke-result ok=$public_ok auth_baseline=$baseline_auth_code"
+          if [ "$public_ok" -ne 1 ]; then
+            persist_rollback
+            echo "Public Menaion REST verification failed; persistent and live routes rolled back." >&2
+            exit 1
+          fi
+
+          rm -f "$caddyfile_backup"
+          echo "Living Menaion HTTPS REST route persisted and verified through public DNS; Mercy Auth baseline preserved."
           REMOTE
+
+      - name: Verify public Menaion path bypasses Studio Basic auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          trap 'rm -f "$headers" "$body"' EXIT
+          code="$(curl --silent --show-error --max-time 10 -D "$headers" -o "$body" -w '%{http_code}' \
+            'https://api.mercy.peerivo.net/menaion/rest/v1/liturgical_day_editions?select=id&limit=1' || true)"
+          test "$code" != "000"
+          if grep -qi '^www-authenticate: Basic' "$headers"; then
+            echo "::error::Public Menaion REST path still falls through to Studio Basic auth."
+            exit 1
+          fi
+          echo "Public Menaion REST route bypasses Studio Basic auth (HTTP $code)."
 
       - name: Remove runner SSH material
         if: always()
