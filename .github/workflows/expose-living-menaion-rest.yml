@@ -36,7 +36,7 @@ jobs:
           printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
-      - name: Add isolated Menaion route with rollback
+      - name: Persist and expose isolated Menaion route with rollback
         shell: bash
         run: |
           set -euo pipefail
@@ -46,6 +46,7 @@ jobs:
           set -euo pipefail
 
           caddy_name=supabase-caddy
+          caddy_host_dir=/opt/beget/supabase/volumes/proxy/caddy
           test "$(docker inspect -f '{{.State.Running}}' "$caddy_name")" = "true"
           test "$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{if eq $name "supabase_default"}}yes{{end}}{{end}}' "$caddy_name")" = "yes"
           test "$(docker inspect -f '{{range $name,$cfg := .NetworkSettings.Networks}}{{if eq $name "supabase_default"}}yes{{end}}{{end}}' living-menaion-rest)" = "yes"
@@ -58,73 +59,91 @@ jobs:
             awk -F= '$1 == "SUPABASE_SERVICE_KEY" || $1 == "SERVICE_ROLE_KEY" {sub(/^[^=]*=/, ""); print; exit}')"
           test -n "$service_key"
 
-          baseline_auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5             --resolve api.mercy.peerivo.net:443:127.0.0.1             https://api.mercy.peerivo.net/auth/v1/health || true)"
+          baseline_auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5             https://api.mercy.peerivo.net/auth/v1/health || true)"
           test -n "$baseline_auth_code"
           test "$baseline_auth_code" != "000"
-          echo "phase=baseline-ok"
 
           install -d -m 700 "$HOME/.living-menaion"
-          routes_backup="$(mktemp "$HOME/.living-menaion/caddy-routes.backup.XXXXXX")"
-          routes_candidate="$(mktemp "$HOME/.living-menaion/caddy-routes.candidate.XXXXXX")"
+          caddyfile_backup="$(mktemp "$HOME/.living-menaion/Caddyfile.backup.XXXXXX")"
           caddyfile_candidate="$(mktemp "$HOME/.living-menaion/Caddyfile.candidate.XXXXXX")"
-          cleanup() { rm -f "$routes_backup" "$routes_candidate" "$caddyfile_candidate"; unset service_key; }
-          trap cleanup EXIT
+          probe_body="$(mktemp "$HOME/.living-menaion/menaion-probe.XXXXXX")"
+          probe_headers="$(mktemp "$HOME/.living-menaion/menaion-headers.XXXXXX")"
+          applied=0
 
-          admin_curl() {
-            docker run --rm -i --network "container:$caddy_name" curlimages/curl:8.14.1 "$@"
+          write_caddyfile() {
+            docker run --rm -i --entrypoint sh               -v "$caddy_host_dir:/work"               caddy:2 -c 'cat > /work/Caddyfile' < "$1"
           }
-
-          echo "phase=read-live-config"
-          admin_curl -fsS http://127.0.0.1:2019/config/apps/http/servers/srv0/routes > "$routes_backup"
-          jq -e 'type == "array"' "$routes_backup" >/dev/null
-
-          if jq -e '.. | objects | select(.dial? == "living-menaion-rest:3000")' "$routes_backup" >/dev/null; then
-            cp "$routes_backup" "$routes_candidate"
-          else
-            route_json="$(printf '%s\n' ':9999 {' '  handle_path /menaion/rest/v1/* {' '    reverse_proxy living-menaion-rest:3000' '  }' '}' |
-              docker run --rm -i caddy:2 caddy adapt --adapter caddyfile --config /dev/stdin |
-              jq -c '.apps.http.servers.srv0.routes[0]')"
-            test -n "$route_json"
-            jq --argjson route "$route_json" '[$route] + .' "$routes_backup" > "$routes_candidate"
-          fi
 
           rollback() {
-            admin_curl -fsS -X PUT               -H 'Content-Type: application/json'               --data-binary @-               http://127.0.0.1:2019/config/apps/http/servers/srv0/routes < "$routes_backup" >/dev/null
+            if [ "$applied" -eq 1 ]; then
+              write_caddyfile "$caddyfile_backup" || true
+              docker exec "$caddy_name" caddy reload                 --config /etc/caddy/Caddyfile                 --adapter caddyfile >/dev/null 2>&1 || true
+            fi
           }
 
-          echo "phase=apply-live-config"
-          if ! admin_curl -fsS -X PUT             -H 'Content-Type: application/json'             --data-binary @-             http://127.0.0.1:2019/config/apps/http/servers/srv0/routes < "$routes_candidate" >/dev/null; then
-            rollback || true
-            echo "Caddy admin API rejected Menaion route." >&2
-            exit 1
+          finish() {
+            rc=$?
+            trap - EXIT
+            if [ "$rc" -ne 0 ]; then rollback; fi
+            rm -f "$caddyfile_backup" "$caddyfile_candidate" "$probe_body" "$probe_headers"
+            unset service_key
+            exit "$rc"
+          }
+          trap finish EXIT
+
+          docker exec "$caddy_name" cat /etc/caddy/Caddyfile > "$caddyfile_backup"
+          cp "$caddyfile_backup" "$caddyfile_candidate"
+
+          if ! grep -q 'handle_path /menaion/rest/v1/\*' "$caddyfile_candidate"; then
+            python3 - "$caddyfile_candidate" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "    @supabase_api path /auth/v1/* /rest/v1/* /graphql/v1 /realtime/v1/* /storage/v1/* /functions/v1/* /mcp /sso/*"
+block = """    # Living Menaion isolated REST API
+    handle_path /menaion/rest/v1/* {
+        reverse_proxy living-menaion-rest:3000
+    }
+
+"""
+if needle not in text:
+    raise SystemExit("Supabase API matcher not found; refusing Caddy mutation")
+path.write_text(text.replace(needle, block + needle, 1))
+PY
           fi
 
+          docker exec -i "$caddy_name" caddy adapt             --adapter caddyfile             --config /dev/stdin >/dev/null < "$caddyfile_candidate"
+
+          write_caddyfile "$caddyfile_candidate"
+          applied=1
+
+          docker exec "$caddy_name" caddy reload             --config /etc/caddy/Caddyfile             --adapter caddyfile >/dev/null
+
           ok=0
-          for _ in $(seq 1 15); do
-            auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5               --resolve api.mercy.peerivo.net:443:127.0.0.1               https://api.mercy.peerivo.net/auth/v1/health || true)"
-            body="$(curl --silent --show-error --max-time 5               --resolve api.mercy.peerivo.net:443:127.0.0.1               -H "Authorization: Bearer $service_key"               -H "apikey: $service_key"               -H "Accept-Profile: living_menaion"               "https://api.mercy.peerivo.net/menaion/rest/v1/liturgical_day_editions?select=id&limit=1" || true)"
-            if [ "$auth_code" = "$baseline_auth_code" ] && [[ "$body" == \[*\] ]]; then
+          for _ in $(seq 1 20); do
+            : > "$probe_body"
+            : > "$probe_headers"
+            menaion_code="$(curl -sS               -D "$probe_headers"               -o "$probe_body"               -w '%{http_code}'               --max-time 5               -H "Authorization: Bearer $service_key"               -H "apikey: $service_key"               -H "Accept-Profile: living_menaion"               "https://api.mercy.peerivo.net/menaion/rest/v1/liturgical_day_editions?select=id&limit=1" || true)"
+            auth_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5               https://api.mercy.peerivo.net/auth/v1/health || true)"
+
+            if [ "$menaion_code" = "200" ]               && [ "$auth_code" = "$baseline_auth_code" ]               && grep -Eq '^\[' "$probe_body"               && ! grep -Eqi '^www-authenticate:[[:space:]]*Basic' "$probe_headers"; then
               ok=1
               break
             fi
             sleep 1
           done
 
-          echo "phase=smoke-result ok=$ok auth_baseline=$baseline_auth_code"
           if [ "$ok" -ne 1 ]; then
-            rollback
-            echo "Front-door verification failed; live Caddy routes rolled back." >&2
+            echo "Public Menaion REST verification failed; restoring previous Caddyfile." >&2
             exit 1
           fi
 
-          # Persist the same route in the mounted Caddyfile for the next controlled recreate.
-          docker exec "$caddy_name" cat /etc/caddy/Caddyfile > "$caddyfile_candidate"
-          if ! grep -q 'handle_path /menaion/rest/v1/\*' "$caddyfile_candidate"; then
-            python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); t=p.read_text(); n="    handle @supabase_api {"; b="    # Living Menaion isolated REST API\\n    handle_path /menaion/rest/v1/* {\\n        reverse_proxy living-menaion-rest:3000\\n    }\\n\\n"; n in t or (_ for _ in ()).throw(SystemExit("Supabase API handle not found; refusing persistence")); p.write_text(t.replace(n,b+n,1))' "$caddyfile_candidate"
-            docker run --rm -i --entrypoint sh               -v /opt/beget/supabase/volumes/proxy/caddy:/work               caddy:2 -c 'cat > /work/Caddyfile' < "$caddyfile_candidate"
-          fi
+          docker exec "$caddy_name" cat /etc/caddy/Caddyfile             | grep -q 'handle_path /menaion/rest/v1/\*'
 
-          echo "Living Menaion HTTPS REST route verified; Mercy Auth baseline preserved."
+          applied=0
+          echo "Living Menaion public REST route persisted and verified through public DNS."
           REMOTE
 
       - name: Remove runner SSH material
