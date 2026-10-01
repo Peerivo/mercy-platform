@@ -31,7 +31,7 @@ Reassignment must revoke the previous coordinator's RLS/Realtime access and gran
 
 Catalog tests publish only verified organization+point records; pending rows stay hidden. Known coordinates verify ordering/distance, radius and pagination. Confidential locations never expose protected addresses.
 
-At mobile width and keyboard-only, labels, focus, loading/error/empty states and horizontal overflow remain usable. Quick Exit must not wait for network and must prevent private content/session recovery through Back/BFCache behavior.
+At mobile width and keyboard-only, labels, focus, loading/error/empty states and horizontal overflow remain usable. Single-value selects use one custom chevron positioned 14px from the right and vertically centered, reserve 42px on desktop and 40px in compact mobile form/filter overrides, and restore the native indicator in forced-colors mode. Quick Exit must not wait for network and must prevent private content/session recovery through Back/BFCache behavior.
 
 ## Volunteer offer MVP
 A user creates an offer only through the atomic RPC: owner identity comes from JWT, bounded payload/rate limits are checked, and consent is recorded. Direct INSERT is revoked. RLS exposes a row only to its owner and ADMIN; creating an offer never grants staff privileges. ADMIN moderation requires a reason and writes audit data without copying private contact/description into the audit log.
