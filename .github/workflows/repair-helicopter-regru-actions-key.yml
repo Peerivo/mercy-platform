@@ -47,29 +47,17 @@ jobs:
           printf '%s\n' "$REG_RU_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
-      - name: Dedicated key exists and is valid
-        shell: bash
-        run: |
-          set -euo pipefail
-          remote="$REG_RU_USER@$REG_RU_HOST"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" '
-            set -euo pipefail
-            test -s /root/.ssh/helicopter_github_actions
-            chmod 600 /root/.ssh/helicopter_github_actions
-            ssh-keygen -y -f /root/.ssh/helicopter_github_actions >/dev/null
-          '
-
-      - name: Dedicated key is authorized exactly once
+      - name: Authorize exact Helicopter Actions public key
         shell: bash
         run: |
           set -euo pipefail
           remote="$REG_RU_USER@$REG_RU_HOST"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          key=/root/.ssh/helicopter_github_actions
+
+          key_body='AAAAC3NzaC1lZDI1NTE5AAAAIGZeCJkZf/f1WiT4/vEqTBBKHC18F4rSCB78Kim8bl8U'
+          line='no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGZeCJkZf/f1WiT4/vEqTBBKHC18F4rSCB78Kim8bl8U peerivo-helicopter-github-actions'
           auth=/root/.ssh/authorized_keys
-          derived="$(ssh-keygen -y -f "$key")"
-          body="$(printf '%s\n' "$derived" | awk '{print $2}')"
 
           umask 077
           mkdir -p /root/.ssh
@@ -79,15 +67,17 @@ jobs:
 
           tmp="$(mktemp)"
           trap 'rm -f "$tmp"' EXIT
-          grep -Fv "$body" "$auth" > "$tmp" || true
-          printf '%s peerivo-helicopter-github-actions\n' "$derived" >> "$tmp"
+          grep -Fv "$key_body" "$auth" > "$tmp" || true
+          printf '%s\n' "$line" >> "$tmp"
           cat "$tmp" > "$auth"
           chmod 600 "$auth"
 
-          test "$(grep -Fc "$body" "$auth")" -eq 1
+          test "$(grep -Fc "$key_body" "$auth")" -eq 1
+          grep -Fx "$line" "$auth" >/dev/null
+          echo "HELICOPTER_ACTIONS_KEY=authorized"
           REMOTE
 
-      - name: sshd accepts root public-key login
+      - name: Verify sshd public-key policy
         shell: bash
         run: |
           set -euo pipefail
@@ -101,26 +91,6 @@ jobs:
             test "$pubkey" = "yes"
             test "$root_login" != "no"
           '
-
-      - name: Dedicated key authenticates locally
-        shell: bash
-        run: |
-          set -euo pipefail
-          remote="$REG_RU_USER@$REG_RU_HOST"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" '
-            set -euo pipefail
-            ssh               -i /root/.ssh/helicopter_github_actions               -o IdentitiesOnly=yes               -o BatchMode=yes               -o StrictHostKeyChecking=no               -o UserKnownHostsFile=/dev/null               -o ConnectTimeout=5               root@127.0.0.1               "printf HELICOPTER_LOCAL_KEY_OK"
-          ' | grep -qx HELICOPTER_LOCAL_KEY_OK
-
-      - name: Dedicated key authenticates through public REG.RU address
-        shell: bash
-        run: |
-          set -euo pipefail
-          remote="$REG_RU_USER@$REG_RU_HOST"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" '
-            set -euo pipefail
-            ssh               -i /root/.ssh/helicopter_github_actions               -o IdentitiesOnly=yes               -o BatchMode=yes               -o StrictHostKeyChecking=no               -o UserKnownHostsFile=/dev/null               -o ConnectTimeout=7               root@95.163.223.68               "printf HELICOPTER_PUBLIC_KEY_OK"
-          ' | grep -qx HELICOPTER_PUBLIC_KEY_OK
 
       - name: Remove runner SSH material
         if: always()
