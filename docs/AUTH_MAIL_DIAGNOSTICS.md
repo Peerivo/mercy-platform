@@ -41,7 +41,7 @@ Use **Inspect Beget Auth mail** from current `main`, with:
 - `confirm`: `INSPECT_AUTH_MAIL`;
 - `search_database`: `true` only for the explicitly requested read-only search.
 
-The workflow checks the latest push-triggered project CI on that exact main,
+The workflow verifies successful pull-request CI evidence whose recorded Git tree exactly matches current main,
 uses the existing production Environment and pinned Beget SSH host key, and
 serializes against the existing Auth URL repair. It needs the existing Beget
 SSH settings. `RESEND_API_KEY` is optional: absence remains explicit and never
