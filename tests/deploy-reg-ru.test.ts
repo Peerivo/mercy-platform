@@ -40,6 +40,14 @@ describe("REG.RU production deployment safety contract", () => {
     expect(workflow).not.toContain("SITE_URL: https://xn----htbcggcjkhwxk7j6bn.xn--p1ai");
   });
 
+  it("sources the Mercy admin key from live Beget instead of a stale repository secret", () => {
+    expect(workflow).toContain("Resolve live Beget service-role key for Mercy");
+    expect(workflow).toContain("BEGET_SUPABASE_SSH_KEY");
+    expect(workflow).toContain("LIVE_BEGET_SERVICE_ROLE_VERIFIED");
+    expect(workflow).toContain("/auth/v1/admin/users?page=1&per_page=1");
+    expect(workflow).not.toContain("SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.");
+  });
+
   it("arms rollback before removing an existing application container", () => {
     const safetyComment = workflow.indexOf("Arm rollback before the first destructive production-host action");
     const arm = workflow.indexOf("armed=1", safetyComment);
@@ -111,7 +119,7 @@ describe("REG.RU one-shot PREPARE dispatcher", () => {
     expect(dispatcher).toContain("[run-reg-ru-prepare]");
     expect(dispatcher).toContain("github.run_attempt == 1");
     expect(dispatcher).toContain(
-      "APPROVED_BASE_SHA: 4b8d7acfaaa69b5da39c2115c2ad8cb1005b7905",
+      "APPROVED_BASE_SHA: 44d6321ea486e6fa6568f589facbb6551d85769c",
     );
     expect(dispatcher).toContain('test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"');
     expect(dispatcher).toContain("One-shot dispatcher increment contains unexpected files.");
