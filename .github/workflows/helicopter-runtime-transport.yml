@@ -49,36 +49,55 @@ jobs:
           printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
-      - name: Install loopback-only Helicopter Notify bridge
+      - name: Install loopback-only bridge container
         shell: bash
         run: |
           set -euo pipefail
           remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
 
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"             "if [ \"\$(id -u)\" -eq 0 ]; then exec bash -s -- '$BEGET_SUPABASE_USER' '$HELICOPTER_TENANT_ID'; else exec sudo -n bash -s -- '$BEGET_SUPABASE_USER' '$HELICOPTER_TENANT_ID'; fi" <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" "bash -s -- '$HELICOPTER_TENANT_ID'" <<'REMOTE'
           set -euo pipefail
-          bridge_user="$1"
-          tenant_id="$2"
-
-          [[ "$bridge_user" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
+          tenant_id="$1"
           [[ "$tenant_id" =~ ^[0-9a-f-]{36}$ ]]
 
-          notify_env=/etc/peerivo-notify/notify.env
-          test -r "$notify_env"
-          grep -q '^NOTIFY_CORE_TOKEN=.' "$notify_env"
+          command -v docker >/dev/null
+          docker ps >/dev/null
 
-          cat > /usr/local/bin/peerivo-helicopter-notify-bridge.py <<'PY'
-          #!/usr/bin/env python3
+          home_dir="$HOME"
+          work_dir="$home_dir/.peerivo/helicopter-notify-bridge"
+          script="$work_dir/bridge.py"
+          auth="$home_dir/.ssh/authorized_keys"
+
+          umask 077
+          mkdir -p "$work_dir" "$home_dir/.ssh"
+          test -e /etc/peerivo-notify/notify.env
+
+          cat > "$script" <<'PY'
           import http.client
           import json
           import os
           import re
           from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-          TENANT_ID = os.environ["HELICOPTER_TENANT_ID"].strip()
-          CORE_TOKEN = os.environ["NOTIFY_CORE_TOKEN"].strip()
           BRIDGE_TOKEN = "helicopter-ssh-bridge-v1"
+          TENANT_ID = os.environ["HELICOPTER_TENANT_ID"].strip()
           MAX_BODY = 128 * 1024
+
+          def read_core_token():
+              env = {}
+              with open("/run/notify.env", "r", encoding="utf-8") as handle:
+                  for raw in handle:
+                      line = raw.strip()
+                      if not line or line.startswith("#") or "=" not in line:
+                          continue
+                      key, value = line.split("=", 1)
+                      env[key.strip()] = value.strip().strip('"').strip("'")
+              token = env.get("NOTIFY_CORE_TOKEN", "")
+              if len(token) < 32:
+                  raise RuntimeError("NOTIFY_CORE_TOKEN unavailable")
+              return token
+
+          CORE_TOKEN = read_core_token()
 
           def allowed(method, path):
               if method == "POST" and path in ("/v1/notify", "/v1/human-actions"):
@@ -145,55 +164,10 @@ jobs:
 
           ThreadingHTTPServer(("127.0.0.1", 3301), Handler).serve_forever()
           PY
+          chmod 600 "$script"
 
-          chmod 755 /usr/local/bin/peerivo-helicopter-notify-bridge.py
-          chown root:root /usr/local/bin/peerivo-helicopter-notify-bridge.py
-
-          install -d -m 700 /etc/peerivo-notify
-          cat > /etc/peerivo-notify/helicopter-bridge.env <<EOF
-          HELICOPTER_TENANT_ID=$tenant_id
-          EOF
-          sed -i 's/^          //' /etc/peerivo-notify/helicopter-bridge.env
-          chmod 600 /etc/peerivo-notify/helicopter-bridge.env
-
-          cat > /etc/systemd/system/peerivo-helicopter-notify-bridge.service <<'UNIT'
-          [Unit]
-          Description=Peerivo Helicopter tenant Notify bridge
-          After=network-online.target peerivo-notify.service
-          Wants=network-online.target
-          Requires=peerivo-notify.service
-
-          [Service]
-          Type=simple
-          User=peerivo-notify
-          Group=peerivo-notify
-          EnvironmentFile=/etc/peerivo-notify/notify.env
-          EnvironmentFile=/etc/peerivo-notify/helicopter-bridge.env
-          ExecStart=/usr/bin/python3 /usr/local/bin/peerivo-helicopter-notify-bridge.py
-          Restart=always
-          RestartSec=3
-          UMask=0077
-          NoNewPrivileges=true
-          PrivateTmp=true
-          ProtectSystem=strict
-          ProtectHome=true
-          RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-
-          [Install]
-          WantedBy=multi-user.target
-          UNIT
-          sed -i 's/^          //' /etc/systemd/system/peerivo-helicopter-notify-bridge.service
-
-          bridge_home="$(getent passwd "$bridge_user" | cut -d: -f6)"
-          bridge_group="$(id -gn "$bridge_user")"
-          test -n "$bridge_home"
-
-          auth="$bridge_home/.ssh/authorized_keys"
-          install -d -m 700 -o "$bridge_user" -g "$bridge_group" "$bridge_home/.ssh"
           touch "$auth"
-          chown "$bridge_user:$bridge_group" "$auth"
           chmod 600 "$auth"
-
           key_body='AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW'
           line='from="95.163.223.68",restrict,port-forwarding,permitopen="127.0.0.1:5432",permitopen="127.0.0.1:3301",command="/bin/false" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQgI40S1Fa2LCVhirCi9D47O2Rdl6ERuCTl+Zg0NPUW helicopter-reg-ru1-to-beget'
 
@@ -202,25 +176,28 @@ jobs:
           grep -Fv "$key_body" "$auth" > "$tmp" || true
           printf '%s\n' "$line" >> "$tmp"
           cat "$tmp" > "$auth"
-          chown "$bridge_user:$bridge_group" "$auth"
           chmod 600 "$auth"
           test "$(grep -Fc "$key_body" "$auth")" -eq 1
           grep -Fx "$line" "$auth" >/dev/null
 
-          systemctl daemon-reload
-          systemctl enable --now peerivo-helicopter-notify-bridge.service
+          docker rm -f peerivo-helicopter-notify-bridge >/dev/null 2>&1 || true
+          docker run -d             --name peerivo-helicopter-notify-bridge             --restart unless-stopped             --network host             --read-only             --cap-drop ALL             --security-opt no-new-privileges:true             --tmpfs /tmp:rw,noexec,nosuid,size=16m             -e "HELICOPTER_TENANT_ID=$tenant_id"             -v /etc/peerivo-notify/notify.env:/run/notify.env:ro             -v "$script":/app/bridge.py:ro             python:3.13-alpine             python /app/bridge.py >/dev/null
 
           ok=0
-          for _ in $(seq 1 20); do
-            if systemctl is-active --quiet peerivo-helicopter-notify-bridge.service               && ss -ltnH '( sport = :3301 )' | awk '{print $4}' | grep -Fx '127.0.0.1:3301' >/dev/null; then
+          for _ in $(seq 1 30); do
+            if docker ps --filter name=^/peerivo-helicopter-notify-bridge$ --format '{{.Status}}' | grep -q '^Up '               && ss -ltnH '( sport = :3301 )' | awk '{print $4}' | grep -Fx '127.0.0.1:3301' >/dev/null; then
               ok=1
               break
             fi
             sleep 1
           done
-          test "$ok" = "1"
 
-          status="$(curl -sS -o /dev/null -w '%{http_code}'             -H 'Authorization: Bearer wrong'             http://127.0.0.1:3301/v1/human-actions/not-a-real-id)"
+          if [ "$ok" != "1" ]; then
+            docker logs --tail=100 peerivo-helicopter-notify-bridge || true
+            exit 1
+          fi
+
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong' http://127.0.0.1:3301/v1/human-actions/not-a-real-id)"
           test "$status" = "401"
 
           echo "HELICOPTER_NOTIFY_BEGET_BRIDGE=ready"
