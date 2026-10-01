@@ -1,0 +1,211 @@
+name: Enable Helicopter Notify
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".peerivo/enable-helicopter-notify.once"
+      - ".github/workflows/enable-helicopter-notify.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enable-helicopter-notify
+  cancel-in-progress: false
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+      HELICOPTER_TENANT_ID: c21db6b6-c544-4ae7-b00a-8ba416b85a92
+
+    steps:
+      - name: Validate production transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_KNOWN_HOSTS BEGET_SUPABASE_HOST BEGET_SUPABASE_USER REG_RU_SSH_KEY BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS HELICOPTER_TENANT_ID; do
+            test -n "${!name:-}" || { echo "::error::Missing protected configuration: $name"; exit 1; }
+          done
+          test "$REG_RU_HOST" = "95.163.223.68"
+          test "$BEGET_SUPABASE_HOST" = "45.144.176.213"
+
+      - name: Configure pinned SSH credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$REG_RU_SSH_KEY" > ~/.ssh/reg_ru
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/beget
+          printf '%s\n' "$REG_RU_KNOWN_HOSTS" > ~/.ssh/reg_known_hosts
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/beget_known_hosts
+          chmod 600 ~/.ssh/reg_ru ~/.ssh/beget ~/.ssh/reg_known_hosts ~/.ssh/beget_known_hosts
+
+      - name: Read Notify core credential without logging it
+        id: notify
+        shell: bash
+        run: |
+          set -euo pipefail
+          beget_opts=(-i ~/.ssh/beget -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/beget_known_hosts -o ConnectTimeout=10)
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+
+          token="$(ssh "${beget_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          test -r /etc/peerivo-notify/notify.env
+          set -a
+          . /etc/peerivo-notify/notify.env
+          set +a
+          test "${#NOTIFY_CORE_TOKEN}" -ge 32
+          printf '%s' "$NOTIFY_CORE_TOKEN"
+          REMOTE
+          )"
+
+          test "${#token}" -ge 32
+          echo "::add-mask::$token"
+          umask 077
+          printf '%s' "$token" > "$RUNNER_TEMP/helicopter-notify-token"
+          unset token
+
+      - name: Enable Notify in Helicopter runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          reg_opts=(-i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+
+          scp "${reg_opts[@]}" -q "$RUNNER_TEMP/helicopter-notify-token" "$remote:/tmp/helicopter-notify-token"
+
+          ssh "${reg_opts[@]}" "$remote" "bash -s -- '$HELICOPTER_TENANT_ID'" <<'REMOTE'
+          set -euo pipefail
+          tenant_id="$1"
+          env_file=/etc/peerivo/helicopter.env
+          token_file=/tmp/helicopter-notify-token
+
+          cleanup() { rm -f "$token_file"; }
+          trap cleanup EXIT
+
+          test -s "$env_file"
+          test -s "$token_file"
+          token="$(cat "$token_file")"
+          test "${#token}" -ge 32
+
+          python3 - "$env_file" "$tenant_id" "$token" <<'PY'
+          from pathlib import Path
+          import os
+          import sys
+
+          path = Path(sys.argv[1])
+          tenant = sys.argv[2]
+          token = sys.argv[3]
+
+          updates = {
+              "OUTBOUND_INTEGRATIONS_ENABLED": "true",
+              "BITRIX_SYNC_ENABLED": "false",
+              "NOTIFY_API_URL": "https://notify-api.peerivo.net",
+              "NOTIFY_API_TOKEN": token,
+              "NOTIFY_TENANT_ID": tenant,
+              "NOTIFY_ACTION_POLL_MS": "2500",
+          }
+
+          existing = path.read_text().splitlines()
+          out = []
+          seen = set()
+          for line in existing:
+              if "=" in line and not line.lstrip().startswith("#"):
+                  key = line.split("=", 1)[0].strip()
+                  if key in updates:
+                      if key not in seen:
+                          out.append(f"{key}={updates[key]}")
+                          seen.add(key)
+                      continue
+              out.append(line)
+
+          for key, value in updates.items():
+              if key not in seen:
+                  out.append(f"{key}={value}")
+
+          tmp = path.with_suffix(".env.notify.tmp")
+          tmp.write_text("\n".join(out).rstrip() + "\n")
+          os.chmod(tmp, 0o600)
+          tmp.replace(path)
+          os.chmod(path, 0o600)
+          PY
+
+          unset token
+          cd /opt/peerivo/helicopter/current
+          HELICOPTER_HOST_PORT=3300 docker compose -p peerivo-helicopter -f deploy/docker-compose.production.yml up -d --force-recreate helicopter
+
+          ready=0
+          for _ in {1..30}; do
+            if payload="$(curl -fsS --max-time 3 http://127.0.0.1:3300/healthz 2>/dev/null)"; then
+              if python3 -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("databaseConfigured") and d.get("outboundIntegrationsEnabled") and d.get("notifyActionsConfigured") and not d.get("bitrixSyncEnabled") else 1)' <<<"$payload"; then
+                ready=1
+                break
+              fi
+            fi
+            sleep 2
+          done
+          test "$ready" = "1"
+          echo "HELICOPTER_NOTIFY_RUNTIME=enabled"
+          REMOTE
+
+      - name: Verify Telegram delivery through Helicopter runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          reg_opts=(-i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+
+          ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          container="$(docker ps --filter label=com.docker.compose.project=peerivo-helicopter --filter label=com.docker.compose.service=helicopter --format '{{.ID}}' | head -n1)"
+          test -n "$container"
+
+          docker exec "$container" node --input-type=module - <<'NODE'
+          const api = String(process.env.NOTIFY_API_URL || "").replace(/\/+$/, "");
+          const token = String(process.env.NOTIFY_API_TOKEN || "");
+          const tenant = String(process.env.NOTIFY_TENANT_ID || "");
+
+          if (!api || token.length < 32 || !tenant) process.exit(2);
+
+          const response = await fetch(api + "/v1/notify", {
+            method: "POST",
+            headers: {
+              authorization: "Bearer " + token,
+              "x-notify-tenant-id": tenant,
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              title: "Helicopter · уведомления включены",
+              body: "Заявки с сайтов теперь отправляются в Telegram через Peerivo Notify."
+            }),
+            signal: AbortSignal.timeout(10000)
+          });
+
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || payload?.ok === false || !Array.isArray(payload?.delivered) || payload.delivered.length < 1) {
+            console.error("NOTIFY_DELIVERY_FAILED", response.status);
+            process.exit(3);
+          }
+
+          console.log("HELICOPTER_TELEGRAM_DELIVERY=ok");
+          NODE
+          REMOTE
+
+      - name: Cleanup runner material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/reg_ru ~/.ssh/beget ~/.ssh/reg_known_hosts ~/.ssh/beget_known_hosts "$RUNNER_TEMP/helicopter-notify-token"
