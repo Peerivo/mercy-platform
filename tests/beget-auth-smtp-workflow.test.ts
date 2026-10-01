@@ -37,7 +37,8 @@ describe("Beget Auth SMTP repair workflow", () => {
     expect(workflow).toContain("git rev-parse HEAD^^^");
     expect(workflow).toContain("actions/runs/${FAILED_REPAIR_RUN_ID}");
     expect(workflow).toContain("Run 3 requires fresh scoped production approval");
-    expect(workflow).toContain("event=push");
+    expect(workflow).toContain('bash scripts/verify-current-main-ci-evidence.sh "${EXPECTED_SHA}"');
+    expect(workflow).not.toContain("actions/workflows/ci.yml/runs?");
     expect(workflow).toContain("REPAIR_AUTH_SMTP");
   });
 
@@ -220,8 +221,8 @@ describe("Beget Auth SMTP sender repair workflow", () => {
     expect(senderWorkflow).toContain("github.run_attempt == 1");
     expect(senderWorkflow).toContain("REPAIR_AUTH_SMTP_SENDER");
     expect(senderWorkflow).toContain("inputs.expected_sha || github.sha");
-    expect(senderWorkflow).toContain("for _ in $(seq 1 90)");
-    expect(senderWorkflow).toContain("Timed out waiting for successful exact-main CI.");
+    expect(senderWorkflow).toContain('bash scripts/verify-current-main-ci-evidence.sh "${EXPECTED_SHA}"');
+    expect(senderWorkflow).not.toContain("actions/workflows/ci.yml/runs?");
     expect(senderWorkflow).toContain(
       "APPROVED_BASE_SHA: 62ded1e8e89bb425279e5a23b7f8333e0346c140",
     );
