@@ -47,10 +47,12 @@ jobs:
       REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
       REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
       REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ vars.BEGET_SUPABASE_KNOWN_HOSTS || secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
       NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.MERCY_SUPABASE_SERVICE_ROLE_KEY }}
       PEERIVO_AUTH_LOCAL_PASSWORD_SECRET: ${{ secrets.PEERIVO_AUTH_LOCAL_PASSWORD_SECRET }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL || secrets.RESEND_FROM_EMAIL }}
@@ -85,10 +87,11 @@ jobs:
         shell: bash
         env:
           REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
         run: |
           set -euo pipefail
           missing=0
-          for name in REG_RU_HOST REG_RU_USER REG_RU_SSH_KEY REG_RU_KNOWN_HOSTS NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY PEERIVO_AUTH_LOCAL_PASSWORD_SECRET PEERIVO_AUTH_URL PEERIVO_AUTH_CLIENT_ID PEERIVO_AUTH_REDIRECT_URI RESEND_API_KEY RESEND_FROM_EMAIL FEEDBACK_TO_EMAIL; do
+          for name in REG_RU_HOST REG_RU_USER REG_RU_SSH_KEY REG_RU_KNOWN_HOSTS BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS NEXT_PUBLIC_SUPABASE_URL PEERIVO_AUTH_LOCAL_PASSWORD_SECRET PEERIVO_AUTH_URL PEERIVO_AUTH_CLIENT_ID PEERIVO_AUTH_REDIRECT_URI RESEND_API_KEY RESEND_FROM_EMAIL FEEDBACK_TO_EMAIL; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing protected production configuration: ${name}"
               missing=1
@@ -103,6 +106,101 @@ jobs:
             missing=1
           }
           test "${missing}" -eq 0
+
+      - name: Resolve live Beget service-role key for Mercy
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          key_file=/tmp/mercy-beget-ssh-key
+          known_hosts=/tmp/mercy-beget-known-hosts
+          umask 077
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > "${key_file}"
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > "${known_hosts}"
+          chmod 600 "${key_file}" "${known_hosts}"
+
+          remote="${BEGET_SUPABASE_USER}@${BEGET_SUPABASE_HOST}"
+          service_key="$(
+            ssh \
+              -i "${key_file}" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="${known_hosts}" \
+              "${remote}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
+          test -n "${project}"
+          kong="$(
+            docker ps -q \
+              --filter "label=com.docker.compose.project=${project}" \
+              --filter "label=com.docker.compose.service=kong"
+          )"
+          test -n "${kong}"
+
+          live_kong_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${kong}")"
+          candidates="$(
+            {
+              printf '%s\n' "${live_kong_env}" \
+                | sed -n \
+                    -e 's/^SUPABASE_SECRET_KEY=//p' \
+                    -e 's/^SUPABASE_SERVICE_KEY=//p' \
+                    -e 's/^SERVICE_ROLE_KEY=//p'
+              sed -n \
+                -e 's/^SUPABASE_SECRET_KEY=//p' \
+                -e 's/^SUPABASE_SERVICE_KEY=//p' \
+                -e 's/^SERVICE_ROLE_KEY=//p' \
+                /opt/beget/supabase/.env 2>/dev/null || true
+            } | awk 'NF && !seen[$0]++'
+          )"
+
+          while IFS= read -r candidate; do
+            [ -n "${candidate}" ] || continue
+            status="$(
+              curl --silent --show-error \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                --max-time 10 \
+                'https://api.mercy.peerivo.net/auth/v1/admin/users?page=1&per_page=1' \
+                -H "apikey: ${candidate}" \
+                -H "Authorization: Bearer ${candidate}" \
+                || true
+            )"
+            if [ "${status}" = "200" ]; then
+              printf '%s' "${candidate}"
+              exit 0
+            fi
+          done <<< "${candidates}"
+
+          echo "No live Beget service-role candidate is accepted by Mercy GoTrue Admin." >&2
+          exit 1
+          REMOTE
+          )"
+
+          test -n "${service_key}"
+          echo "::add-mask::${service_key}"
+
+          admin_status="$(
+            curl --silent --show-error \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --max-time 10 \
+              "${EXPECTED_SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=1" \
+              -H "apikey: ${service_key}" \
+              -H "Authorization: Bearer ${service_key}" \
+              || true
+          )"
+          test "${admin_status}" = "200" || {
+            echo "::error::Live Beget service-role key failed the runner-side GoTrue Admin verification."
+            exit 1
+          }
+
+          printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "${service_key}" >> "${GITHUB_ENV}"
+          unset service_key
+          echo "LIVE_BEGET_SERVICE_ROLE_VERIFIED"
 
       - name: Verify configured public key against Beget before SSH
         shell: bash
@@ -365,7 +463,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts /tmp/mercy.env /tmp/deploy-mercy.sh /tmp/mercy-image.tar.gz
+          rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts /tmp/mercy-beget-ssh-key /tmp/mercy-beget-known-hosts /tmp/mercy.env /tmp/deploy-mercy.sh /tmp/mercy-image.tar.gz
 
   verify:
     if: ${{ inputs.operation == 'VERIFY' && inputs.confirm == 'VERIFY' && github.ref == 'refs/heads/main' }}
