@@ -183,21 +183,10 @@ jobs:
           test -n "${service_key}"
           echo "::add-mask::${service_key}"
 
-          admin_status="$(
-            curl --silent --show-error \
-              --output /dev/null \
-              --write-out '%{http_code}' \
-              --max-time 10 \
-              "${EXPECTED_SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=1" \
-              -H "apikey: ${service_key}" \
-              -H "Authorization: Bearer ${service_key}" \
-              || true
-          )"
-          test "${admin_status}" = "200" || {
-            echo "::error::Live Beget service-role key failed the runner-side GoTrue Admin verification."
-            exit 1
-          }
-
+          # The live key was already verified against the public GoTrue Admin
+          # endpoint from the canonical Beget host. Do not repeat that probe
+          # from a GitHub-hosted runner: provider/network policy can reject
+          # runner egress even when the credential itself is valid.
           printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "${service_key}" >> "${GITHUB_ENV}"
           unset service_key
           echo "LIVE_BEGET_SERVICE_ROLE_VERIFIED"
