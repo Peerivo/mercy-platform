@@ -89,9 +89,9 @@ image solely because mail fails. Do not change DB data/schema, DNS, JWT secrets,
 rulesets or unrelated settings. Production-released Mercy must follow the repository's current canonical Global
 Contract binding and branch-protection requirements. This diagnostic does not
 waive or reinterpret any required project CI or production authorization gate.
-The repository binding is synchronized to Global 1.9.0, whose update-resolution
-policy applies canonical Global merges automatically to registered consumers and
-does not require per-consumer acknowledgement. Reviewer runtime is resolved
+The repository binding is synchronized to current Global 1.10.0. Since Global 1.9,
+update-resolution applies canonical Global merges automatically to registered
+consumers and does not require per-consumer acknowledgement. Reviewer runtime is resolved
 separately from `Peerivo/global/contracts/reviewer-runtime.v1.json`; at this
 binding sync the canonical runtime policy marks automatic Reviewer code review
 as suspended and `requiredForMerge: false`. A later canonical runtime-policy
