@@ -15,6 +15,6 @@ test("project donation page uses the verified CloudTips recipient", async ({ pag
   );
   await expect(donate).toHaveAttribute("target", "_blank");
   await expect(
-    page.getByText(/Mercy не получает\s+и не хранит данные вашей банковской карты/),
+    page.getByText(/"Язык милосердия" не получает\s+и не хранит данные вашей банковской карты/),
   ).toBeVisible();
 });

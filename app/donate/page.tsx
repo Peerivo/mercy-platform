@@ -53,7 +53,7 @@ export default function DonatePage() {
 
           {provider.isConfigured ? (
             <p className={styles.providerNote}>
-              Перевод оформляется на стороне {provider.name}. Mercy не получает
+              Перевод оформляется на стороне {provider.name}. &quot;Язык милосердия&quot; не получает
               и не хранит данные вашей банковской карты.
             </p>
           ) : (
@@ -72,7 +72,7 @@ export default function DonatePage() {
           </p>
           <p>
             Если вы хотите помочь конкретному человеку, используйте механизм
-            отклика на его просьбу. Mercy не смешивает средства проекта и
+            отклика на его просьбу. &quot;Язык милосердия&quot; не смешивает средства проекта и
             адресную помощь.
           </p>
           <p className="muted">

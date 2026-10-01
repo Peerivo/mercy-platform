@@ -20,19 +20,19 @@ describe("request consent", () => {
     ).toBe("ge");
   });
 
-  it("uses Georgia consent v2", () => {
+  it("uses Georgia consent v3", () => {
     expect(
       getRequestConsentVersion("Грузия")
-    ).toBe("request-ge-v2");
+    ).toBe("request-ge-v3");
   });
 
-  it("uses Russia consent v2 by default", () => {
+  it("uses Russia consent v3 by default", () => {
     expect(
       getRequestConsentVersion("Россия")
-    ).toBe("request-ru-v2");
+    ).toBe("request-ru-v3");
 
     expect(
       getRequestConsentVersion("")
-    ).toBe("request-ru-v2");
+    ).toBe("request-ru-v3");
   });
 });

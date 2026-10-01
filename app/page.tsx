@@ -22,7 +22,7 @@ const areas = [
 export default function Home(){return <><section className="hero"><div className="page-shell"><p>Люди помогают людям</p><h1>Вы не обязаны справляться в одиночку</h1><p className="muted">
   Расскажите, какая помощь нужна, или найдите
   просьбу, на которую можете откликнуться.
-  Mercy помогает людям находить друг друга
+  &quot;Язык милосердия&quot; помогает людям находить друг друга
   для добровольной и практической помощи.
 </p><div className="nav">
     <Link className="btn" href="/help">Нужна помощь</Link>
