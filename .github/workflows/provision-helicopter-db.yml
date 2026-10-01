@@ -1,0 +1,182 @@
+name: Provision Helicopter database access
+
+on:
+  workflow_dispatch:
+    inputs:
+      helicopter_sha:
+        description: "Exact 40-char Peerivo/helicopter main SHA to authorize for migration"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helicopter-database-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+      HELICOPTER_RUNTIME_DB_PASSWORD: ${{ secrets.HELICOPTER_RUNTIME_DB_PASSWORD }}
+      HELICOPTER_SHA: ${{ inputs.helicopter_sha }}
+
+    steps:
+      - name: Validate protected configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in             BEGET_SUPABASE_HOST             BEGET_SUPABASE_USER             BEGET_SUPABASE_SSH_KEY             BEGET_SUPABASE_KNOWN_HOSTS             HELICOPTER_RUNTIME_DB_PASSWORD             HELICOPTER_SHA
+          do
+            test -n "${!name:-}" || { echo "::error::Missing protected configuration: $name"; exit 1; }
+          done
+
+          [[ "$HELICOPTER_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::helicopter_sha must be a full commit SHA"
+            exit 1
+          }
+
+          [[ "$HELICOPTER_RUNTIME_DB_PASSWORD" =~ ^[A-Za-z0-9+/=]{40,}$ ]] || {
+            echo "::error::HELICOPTER_RUNTIME_DB_PASSWORD must be the generated base64 password"
+            exit 1
+          }
+
+      - name: Configure pinned Beget SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Verify target PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          docker exec supabase-db             psql -U supabase_admin -d postgres -X -qAt -v ON_ERROR_STOP=1             -c 'select current_database();' | grep -qx postgres
+
+          ss -ltn | awk '{print $4}' | grep -qx '127.0.0.1:5432'
+          ! ss -ltn | awk '{print $4}' | grep -Eq '^(0\.0\.0\.0|\[::\]):5432$'
+          REMOTE
+
+      - name: Stage runtime password without argv exposure
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          printf '%s' "$HELICOPTER_RUNTIME_DB_PASSWORD" |             ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"               'umask 077; cat > /tmp/helicopter-runtime-db-password'
+
+      - name: Provision isolated roles and migration window
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote"             "bash -s -- '$HELICOPTER_SHA'" <<'REMOTE'
+          set -euo pipefail
+          sha="$1"
+          secret_file=/tmp/helicopter-runtime-db-password
+
+          cleanup() {
+            rm -f "$secret_file"
+          }
+          trap cleanup EXIT
+
+          runtime_password="$(cat "$secret_file")"
+          [[ "$runtime_password" =~ ^[A-Za-z0-9+/=]{40,}$ ]]
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+
+          deploy_password="$(
+            printf '%s\0%s' "$runtime_password" "$sha" |
+              sha256sum |
+              awk '{print $1}'
+          )"
+
+          {
+            printf "\\set runtime_password '%s'\n" "$runtime_password"
+            printf "\\set deploy_password '%s'\n" "$deploy_password"
+            cat <<'SQL'
+begin;
+
+select 'create role helicopter_owner nologin'
+where not exists (select 1 from pg_roles where rolname='helicopter_owner')
+\gexec
+
+select 'create role helicopter_app nologin'
+where not exists (select 1 from pg_roles where rolname='helicopter_app')
+\gexec
+
+select 'create role helicopter_runtime login'
+where not exists (select 1 from pg_roles where rolname='helicopter_runtime')
+\gexec
+
+select 'create role helicopter_deploy login'
+where not exists (select 1 from pg_roles where rolname='helicopter_deploy')
+\gexec
+
+alter role helicopter_owner
+  nologin nosuperuser nocreatedb nocreaterole noinherit noreplication;
+
+alter role helicopter_app
+  nologin nosuperuser nocreatedb nocreaterole inherit noreplication;
+
+select format(
+  'alter role helicopter_runtime login nosuperuser nocreatedb nocreaterole inherit noreplication password %L',
+  :'runtime_password'
+)
+\gexec
+
+select format(
+  'alter role helicopter_deploy login nosuperuser nocreatedb nocreaterole inherit noreplication password %L valid until %L',
+  :'deploy_password',
+  (now() + interval '30 minutes')::text
+)
+\gexec
+
+create schema if not exists helicopter authorization helicopter_owner;
+alter schema helicopter owner to helicopter_owner;
+revoke all on schema helicopter from public;
+
+grant connect on database postgres to helicopter_runtime, helicopter_deploy;
+grant helicopter_app to helicopter_runtime;
+grant helicopter_owner to helicopter_deploy;
+
+alter role helicopter_runtime set search_path = helicopter, public;
+alter role helicopter_deploy set search_path = helicopter, public;
+
+revoke create on schema public from helicopter_runtime, helicopter_deploy;
+
+commit;
+SQL
+          } | docker exec -i supabase-db                 psql -U supabase_admin -d postgres -X -q -v ON_ERROR_STOP=1
+
+          verify="$(
+            docker exec supabase-db               psql -U supabase_admin -d postgres -X -qAt -F '|' -v ON_ERROR_STOP=1               -c "select
+                    pg_has_role('helicopter_runtime','helicopter_app','member'),
+                    pg_has_role('helicopter_deploy','helicopter_owner','member'),
+                    has_database_privilege('helicopter_runtime','postgres','CONNECT'),
+                    has_database_privilege('helicopter_deploy','postgres','CONNECT'),
+                    pg_get_userbyid((select nspowner from pg_namespace where nspname='helicopter'));"
+          )"
+
+          test "$verify" = "t|t|t|t|helicopter_owner"
+          echo "Helicopter runtime role and 30-minute migration role verified."
+          REMOTE
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
