@@ -20,6 +20,7 @@ on:
         type: string
 
 permissions:
+  pull-requests: read
   contents: read
   actions: read
   statuses: write
@@ -67,28 +68,7 @@ jobs:
           git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git rev-parse refs/remotes/origin/main)" = "${EXPECTED_SHA}"
 
-          ci_ok=0
-          for _ in $(seq 1 90); do
-            ci="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${EXPECTED_SHA}&event=push&per_page=1")"
-            status="$(printf '%s' "${ci}" | jq -r '.workflow_runs[0].status // "missing"')"
-            conclusion="$(printf '%s' "${ci}" | jq -r '.workflow_runs[0].conclusion // ""')"
-            head_sha="$(printf '%s' "${ci}" | jq -r '.workflow_runs[0].head_sha // ""')"
-            head_branch="$(printf '%s' "${ci}" | jq -r '.workflow_runs[0].head_branch // ""')"
-            unset ci
-            if [[ "${head_sha}" == "${EXPECTED_SHA}" && "${head_branch}" == "main" && "${status}" == "completed" ]]; then
-              [[ "${conclusion}" == "success" ]] || {
-                echo "::error::Exact-main CI completed without success."
-                exit 1
-              }
-              ci_ok=1
-              break
-            fi
-            sleep 10
-          done
-          [[ "${ci_ok}" == "1" ]] || {
-            echo "::error::Timed out waiting for successful exact-main CI."
-            exit 1
-          }
+          bash scripts/verify-current-main-ci-evidence.sh "${EXPECTED_SHA}"
 
       - name: Configure existing pinned SSH access
         env:
