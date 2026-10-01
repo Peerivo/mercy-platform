@@ -79,8 +79,8 @@ Auth callback redirects are built from canonical `siteUrl()` rather than `Reques
 Before promoting a new Mercy application image on REG.RU, the protected PREPARE workflow now probes the candidate at `127.0.0.1:3100/auth/callback` and requires a 307/308 redirect to `https://mercy.peerivo.net/auth?error=callback`. A mismatch fails while rollback is armed, before the candidate is promoted. VERIFY repeats the same canonical callback assertion against the public site after deployment.
 
 
-## GLOBAL CONTRACT 1.8.0 ADOPTION — 2026-09-27
-Mercy adopts the cumulative Peerivo Global Contract path 1.6.0 → 1.7.0 → 1.8.0 under the user's explicit acknowledgement in the active Mercy conversation. The binding is pinned to Global 1.8.0 digest `sha256:0bea3d062a1105b16baf0512f5a16daccbabdf7881435f6948feb8bd1819cfed` at contract commit `223d57cd47ef176272cd9ebfd12ee7c52f887756`.
+## GLOBAL CONTRACT CURRENT BINDING — 2026-10-01
+Mercy's local snapshot is synchronized to canonical Global Contract 1.10.0 digest `sha256:90b04165dc60a5ce3c2fa5aaeef329515dc85ae6d2d02a29b56d5dbe5cf037f9` at contract commit `7ef6771ec51fdd8359d30aad25a12d1deb130835`. Since Global 1.9, canonical Global merges are adopted organization-wide by registered consumers without per-repository acknowledgement; the local snapshot is audit/synchronization evidence, not authority to retain an older Global policy.
 
 The 1.7 migration is security-only policy adoption: security-critical allow/authorization/activation/high-impact gates must reject malformed or ambiguous allow-relevant input, must not authorize via implicit coercion or permissive fallback from explicit invalid policy, and P0/P1 fail-open defects become permanent blocking regressions in project CI.
 
