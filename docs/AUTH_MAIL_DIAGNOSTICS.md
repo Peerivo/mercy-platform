@@ -86,14 +86,13 @@ This increment adds inspection only. Diagnose the concrete discrepancy before
 preparing a targeted configuration repair with backup, rollback and unchanged
 non-Auth services. Do not repeat the old URL repair or deploy an application
 image solely because mail fails. Do not change DB data/schema, DNS, JWT secrets,
-rulesets or unrelated settings. Production-released Mercy must follow the repository's currently bound Global
+rulesets or unrelated settings. Production-released Mercy must follow the current canonical Global
 Contract and branch-protection requirements. This diagnostic does not waive or
-reinterpret any required review or approval gate.
-Canonical Global 1.9 `spec` update-resolution rules explicitly make canonical
-merge apply to registered consumers and treat stale bindings as synchronization
-debt, not an adoption gate (`staleBindingCannotRetainOlderGlobalPolicy`). The
-local 1.8 binding does not override that canonical resolution. Reviewer runtime
-is resolved separately from `Peerivo/global/contracts/reviewer-runtime.v1.json`.
+reinterpret any high-impact runtime authorization gate. The repository binding is
+synchronized to Global 1.10.0. Since Global 1.9, canonical Global merges apply
+automatically to registered consumers and stale local snapshots cannot retain
+older policy. Reviewer runtime is resolved separately from
+`Peerivo/global/contracts/reviewer-runtime.v1.json`.
 
 Sources: [Supabase self-hosted Auth configuration](https://supabase.com/docs/guides/self-hosting/auth/config),
 [Resend SMTP](https://resend.com/docs/send-with-smtp).
