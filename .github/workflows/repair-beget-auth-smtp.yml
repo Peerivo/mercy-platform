@@ -13,6 +13,7 @@ on:
         type: string
 
 permissions:
+  pull-requests: read
   contents: read
   actions: read
 
@@ -89,14 +90,7 @@ jobs:
                 .conclusion == "failure"
               ' >/dev/null
 
-          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${EXPECTED_SHA}&event=push&per_page=1" \
-            | jq -e --arg sha "${EXPECTED_SHA}" '
-                .workflow_runs[0] |
-                .head_sha == $sha and
-                .head_branch == "main" and
-                .status == "completed" and
-                .conclusion == "success"
-              ' >/dev/null
+          bash scripts/verify-current-main-ci-evidence.sh "${EXPECTED_SHA}"
 
       - name: Validate protected production configuration
         env:
