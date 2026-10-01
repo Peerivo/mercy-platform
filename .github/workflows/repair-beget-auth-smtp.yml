@@ -50,7 +50,7 @@ jobs:
         with:
           fetch-depth: 4
 
-      - name: Require exact authorized repair increment and successful CI
+      - name: Require exact authorized repair increment and PR-tested tree evidence
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
