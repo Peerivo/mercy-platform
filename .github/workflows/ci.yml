@@ -1,8 +1,7 @@
 name: CI
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: mercy-ci-${{ github.event.pull_request.number || github.run_id }}
@@ -17,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Validate production Auth repair shell syntax
-        run: bash -n scripts/repair-beget-auth-urls-remote.sh scripts/repair-beget-auth-smtp-remote.sh scripts/repair-beget-auth-session-remote.sh scripts/verify-auth-callback-surface.sh
+        run: bash -n scripts/repair-beget-auth-urls-remote.sh scripts/repair-beget-auth-smtp-remote.sh scripts/repair-beget-auth-session-remote.sh scripts/verify-auth-callback-surface.sh scripts/verify-current-main-ci-evidence.sh
       - name: Test read-only Auth mail diagnostic safety
         run: |
           python3 -m unittest discover -s tests -p 'test_inspect_beget_auth_mail.py'
@@ -105,3 +104,31 @@ jobs:
       - name: Stop disposable Supabase
         if: always()
         run: supabase stop --no-backup || true
+
+  tested-tree-evidence:
+    needs: [app, supabase-integration]
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the exact merge revision tested by this PR run
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Compute tested Git tree
+        id: tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          [[ "${tree}" =~ ^[0-9a-f]{40}$ ]]
+          printf '%s\n' "${tree}" > tested-tree.txt
+          echo "sha=${tree}" >> "$GITHUB_OUTPUT"
+      - name: Publish immutable tested-tree evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mercy-tested-tree-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ steps.tree.outputs.sha }}
+          path: tested-tree.txt
+          if-no-files-found: error
+          retention-days: 14
