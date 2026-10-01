@@ -30,7 +30,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require one-shot approved increment and green exact-main CI
+      - name: Require one-shot approved increment and green PR-tested tree evidence
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
