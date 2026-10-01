@@ -1,0 +1,108 @@
+name: Repair Helicopter REG.RU Actions key
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/repair-helicopter-regru-actions-key.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate protected configuration
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_KNOWN_HOSTS REG_RU_SSH_KEY; do
+            test -n "${!name:-}" || { echo "::error::Missing production configuration: $name"; exit 1; }
+          done
+          test "$REG_RU_HOST" = "95.163.223.68"
+          test "$REG_RU_USER" = "root"
+
+      - name: Configure pinned REG.RU SSH
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$REG_RU_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$REG_RU_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Repair dedicated Helicopter Actions key authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$REG_RU_USER@$REG_RU_HOST"
+
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          key=/root/.ssh/helicopter_github_actions
+          pub=/root/.ssh/helicopter_github_actions.pub
+          auth=/root/.ssh/authorized_keys
+
+          test -s "$key"
+          chmod 600 "$key"
+
+          derived="$(ssh-keygen -y -f "$key")"
+          test -n "$derived"
+
+          if [ -s "$pub" ]; then
+            file_pub="$(awk '{print $1 " " $2}' "$pub")"
+            test "$file_pub" = "$derived"
+          else
+            printf '%s peerivo-helicopter-github-actions\n' "$derived" > "$pub"
+          fi
+
+          umask 077
+          mkdir -p /root/.ssh
+          touch "$auth"
+          chmod 700 /root/.ssh
+          chmod 600 "$auth"
+          chmod 644 "$pub"
+
+          body="$(printf '%s\n' "$derived" | awk '{print $2}')"
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+
+          grep -Fv "$body" "$auth" > "$tmp" || true
+          printf '%s peerivo-helicopter-github-actions\n' "$derived" >> "$tmp"
+          cat "$tmp" > "$auth"
+          chmod 600 "$auth"
+
+          test "$(grep -Fc "$body" "$auth")" -eq 1
+
+          pubkey_auth="$(sshd -T | awk '$1=="pubkeyauthentication"{print $2; exit}')"
+          permit_root="$(sshd -T | awk '$1=="permitrootlogin"{print $2; exit}')"
+
+          test "$pubkey_auth" = "yes"
+          test "$permit_root" != "no"
+
+          echo "HELICOPTER_ACTIONS_KEY=authorized"
+          echo "PUBKEY_AUTH=yes"
+          echo "PERMIT_ROOT_LOGIN=$permit_root"
+          REMOTE
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
