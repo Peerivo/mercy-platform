@@ -117,10 +117,9 @@ describe("REG.RU one-shot PREPARE dispatcher", () => {
     expect(dispatcher).toContain("One-shot dispatcher increment contains unexpected files.");
   });
 
-  it("waits for green exact-main CI before dispatching PREPARE", () => {
-    expect(dispatcher).toContain("actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&event=push");
-    expect(dispatcher).toContain("Exact-main CI completed without success.");
-    expect(dispatcher).toContain("Timed out waiting for successful exact-main CI.");
+  it("requires successful PR-tested tree evidence before dispatching PREPARE", () => {
+    expect(dispatcher).toContain('bash scripts/verify-current-main-ci-evidence.sh "${GITHUB_SHA}"');
+    expect(dispatcher).not.toContain("actions/workflows/ci.yml/runs?");
     expect(dispatcher).toContain("actions/workflows/${TARGET_WORKFLOW}/dispatches");
     expect(dispatcher).toContain('operation: "PREPARE"');
     expect(dispatcher).toContain('expected_sha: $sha');
