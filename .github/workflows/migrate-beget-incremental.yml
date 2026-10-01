@@ -1,0 +1,116 @@
+name: Apply incremental Mercy migrations to Beget
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact reviewed current main SHA"
+        required: true
+        type: string
+      confirm:
+        description: "Type APPLY_BEGET_MIGRATIONS"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mercy-beget-incremental-migrations
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'APPLY_BEGET_MIGRATIONS' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      TARGET_SUPABASE_URL: https://api.mercy.peerivo.net
+      TARGET_PUBLIC_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+
+      - name: Require exact current main and successful exact-main CI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "${EXPECTED_SHA}" = "${GITHUB_SHA}"
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "${GITHUB_SHA}"
+
+          for _ in $(seq 1 60); do
+            conclusion="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${EXPECTED_SHA}&event=push&per_page=1" \
+                --jq '.workflow_runs[0].conclusion // empty'
+            )"
+            if [ "${conclusion}" = "success" ]; then
+              exit 0
+            fi
+            if [ -n "${conclusion}" ] && [ "${conclusion}" != "success" ]; then
+              echo "::error::Exact-main CI concluded ${conclusion}."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::Timed out waiting for successful exact-main CI."
+          exit 1
+
+      - name: Validate protected Beget configuration
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS TARGET_PUBLIC_KEY; do
+            test -n "${!name:-}" || {
+              echo "::error::Missing production configuration: ${name}"
+              exit 1
+            }
+          done
+          [[ "${BEGET_SUPABASE_HOST}" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "${BEGET_SUPABASE_USER}" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
+
+      - name: Configure pinned SSH host key
+        shell: bash
+        env:
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "${BEGET_SUPABASE_SSH_KEY}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEGET_SUPABASE_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+
+      - name: Validate migration runner
+        shell: bash
+        run: bash -n scripts/migrate-beget-incremental.sh
+
+      - name: Apply only pending canonical migrations
+        shell: bash
+        run: bash scripts/migrate-beget-incremental.sh
+
+      - name: Verify public Beget services
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 15             -H "apikey: ${TARGET_PUBLIC_KEY}"             "${TARGET_SUPABASE_URL}/auth/v1/health" >/dev/null
+          curl --fail --silent --show-error --max-time 15             -H "apikey: ${TARGET_PUBLIC_KEY}"             -H "Authorization: Bearer ${TARGET_PUBLIC_KEY}"             "${TARGET_SUPABASE_URL}/rest/v1/" >/dev/null
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
