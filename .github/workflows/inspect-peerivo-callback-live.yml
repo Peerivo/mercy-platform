@@ -1,0 +1,158 @@
+name: Inspect live Peerivo callback channels
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[inspect-peerivo-callback-live]') }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate protected read-only access
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_KNOWN_HOSTS REG_RU_SSH_KEY; do
+            test -n "${!name:-}" || {
+              echo "::error::Missing protected production access: ${name}"
+              exit 1
+            }
+          done
+
+      - name: Configure pinned SSH trust
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${REG_RU_SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${REG_RU_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Probe live Mercy container without printing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${REG_RU_USER}@${REG_RU_HOST}"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "${remote}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          docker inspect mercy >/dev/null
+
+          env_lines="$(docker inspect mercy --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          value_of() {
+            local name="$1"
+            printf '%s\n' "${env_lines}" | sed -n "s/^${name}=//p" | tail -n1
+          }
+          classify_key() {
+            case "$1" in
+              sb_secret_*) printf 'secret' ;;
+              sb_publishable_*) printf 'publishable' ;;
+              eyJ*) printf 'legacy_jwt' ;;
+              '') printf 'missing' ;;
+              *) printf 'other' ;;
+            esac
+          }
+
+          service_key="$(value_of SUPABASE_SERVICE_ROLE_KEY)"
+          publishable_key="$(value_of NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)"
+          anon_key="$(value_of NEXT_PUBLIC_SUPABASE_ANON_KEY)"
+          public_key="${publishable_key:-${anon_key}}"
+          public_url="$(value_of NEXT_PUBLIC_SUPABASE_URL)"
+
+          echo "MERCY_SERVICE_KEY_CLASS=$(classify_key "${service_key}")"
+          echo "MERCY_PUBLIC_KEY_CLASS=$(classify_key "${public_key}")"
+          test "${public_url}" = "https://api.mercy.peerivo.net" || {
+            echo "MERCY_PUBLIC_URL=unexpected"
+            exit 1
+          }
+          echo "MERCY_PUBLIC_URL=ok"
+
+          docker exec mercy node - <<'NODE'
+          (async () => {
+            const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            const publicKey =
+              process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+              process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+            if (!url || !serviceKey || !publicKey) {
+              console.log("MERCY_CHANNEL_PROBE=config_missing");
+              process.exit(1);
+            }
+
+            const admin = await fetch(
+              new URL("/auth/v1/admin/users?page=1&per_page=1", url),
+              {
+                headers: {
+                  apikey: serviceKey,
+                  Authorization: `Bearer ${serviceKey}`,
+                },
+              },
+            );
+            console.log("MERCY_ADMIN_CHANNEL_STATUS=" + admin.status);
+
+            const settings = await fetch(new URL("/auth/v1/settings", url), {
+              headers: { apikey: publicKey },
+            });
+            console.log("MERCY_PUBLIC_CHANNEL_STATUS=" + settings.status);
+
+            if (admin.status !== 200 || settings.status !== 200) {
+              process.exit(2);
+            }
+          })().catch(() => {
+            console.log("MERCY_CHANNEL_PROBE=fetch_exception");
+            process.exit(1);
+          });
+          NODE
+
+          logs="$(docker logs --since 30m mercy 2>&1 || true)"
+          recent="$(printf '%s\n' "${logs}" | tail -n 2000)"
+
+          for stage in admin-list admin-create admin-update verify-code local-user local-sign-in; do
+            if printf '%s\n' "${recent}" | grep -Fq "PEERIVO_AUTH_CALLBACK_STAGE: ${stage}"; then
+              echo "CALLBACK_STAGE_${stage//-/_}=seen"
+            else
+              echo "CALLBACK_STAGE_${stage//-/_}=not_seen"
+            fi
+          done
+
+          if printf '%s\n' "${recent}" | grep -Eqi 'Invalid login credentials|Email not confirmed'; then
+            echo "CALLBACK_ERROR_CLASS=local_sign_in"
+          elif printf '%s\n' "${recent}" | grep -Eqi 'Invalid API key|invalid api key'; then
+            echo "CALLBACK_ERROR_CLASS=invalid_api_key"
+          elif printf '%s\n' "${recent}" | grep -Eqi 'AuthApiError.*401|status:[[:space:]]*401|statusCode:[[:space:]]*401'; then
+            echo "CALLBACK_ERROR_CLASS=auth_api_401"
+          elif printf '%s\n' "${recent}" | grep -Eqi 'AuthApiError.*403|status:[[:space:]]*403|statusCode:[[:space:]]*403'; then
+            echo "CALLBACK_ERROR_CLASS=auth_api_403"
+          elif printf '%s\n' "${recent}" | grep -Eqi 'already registered|duplicate key|Database error|error creating user|failed to create user'; then
+            echo "CALLBACK_ERROR_CLASS=local_user_write"
+          elif printf '%s\n' "${recent}" | grep -Fq 'PEERIVO_AUTH_CALLBACK:'; then
+            echo "CALLBACK_ERROR_CLASS=other"
+          else
+            echo "CALLBACK_ERROR_CLASS=none"
+          fi
+          REMOTE
+
+      - name: Remove SSH credentials
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
