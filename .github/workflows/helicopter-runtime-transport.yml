@@ -1,0 +1,502 @@
+name: Enable Helicopter runtime transport
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".peerivo/helicopter-runtime-transport.once"
+      - ".github/workflows/helicopter-runtime-transport.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helicopter-runtime-transport
+  cancel-in-progress: false
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+      HELICOPTER_TENANT_ID: c21db6b6-c544-4ae7-b00a-8ba416b85a92
+
+    steps:
+      - name: Validate production transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_KNOWN_HOSTS BEGET_SUPABASE_HOST BEGET_SUPABASE_USER REG_RU_SSH_KEY BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS HELICOPTER_TENANT_ID; do
+            test -n "${!name:-}" || { echo "::error::Missing production configuration: $name"; exit 1; }
+          done
+          test "$REG_RU_HOST" = "95.163.223.68"
+          test "$BEGET_SUPABASE_HOST" = "45.144.176.213"
+
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$REG_RU_SSH_KEY" > ~/.ssh/reg_ru
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/beget
+          printf '%s\n' "$REG_RU_KNOWN_HOSTS" > ~/.ssh/reg_known_hosts
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/beget_known_hosts
+          chmod 600 ~/.ssh/reg_ru ~/.ssh/beget ~/.ssh/reg_known_hosts ~/.ssh/beget_known_hosts
+
+      - name: Prepare dedicated REG.RU transport identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          reg_opts=(-i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+
+          result="$(ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          key=/root/.ssh/helicopter-notify-tunnel
+          token_file=/etc/peerivo/helicopter-notify-bridge.token
+
+          umask 077
+          mkdir -p /root/.ssh /etc/peerivo
+
+          if [ ! -s "$key" ]; then
+            ssh-keygen -t ed25519 -a 100 -f "$key" -C helicopter-notify-tunnel -N '' >/dev/null
+          fi
+          chmod 600 "$key"
+          chmod 644 "$key.pub"
+
+          if [ ! -s "$token_file" ]; then
+            python3 - <<'PY' > "$token_file"
+          import secrets
+          print(secrets.token_urlsafe(48))
+          PY
+          fi
+          chmod 600 "$token_file"
+
+          pub="$(ssh-keygen -y -f "$key" | awk '{print $1 " " $2}')"
+          hash="$(sha256sum "$token_file" | awk '{print $1}')"
+          printf 'PUB=%s\nHASH=%s\n' "$pub" "$hash"
+          REMOTE
+          )"
+
+          pub="$(printf '%s\n' "$result" | sed -n 's/^PUB=//p')"
+          hash="$(printf '%s\n' "$result" | sed -n 's/^HASH=//p')"
+          [[ "$pub" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+$ ]]
+          [[ "$hash" =~ ^[0-9a-f]{64}$ ]]
+          {
+            echo "public_key=$pub"
+            echo "token_hash=$hash"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install loopback-only tenant bridge on Beget
+        env:
+          TUNNEL_PUBLIC_KEY: ${{ steps.identity.outputs.public_key }}
+          BRIDGE_TOKEN_HASH: ${{ steps.identity.outputs.token_hash }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          beget_opts=(-i ~/.ssh/beget -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/beget_known_hosts -o ConnectTimeout=10)
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+
+          {
+            printf '%s\n' "$TUNNEL_PUBLIC_KEY"
+            printf '%s\n' "$BRIDGE_TOKEN_HASH"
+            printf '%s\n' "$HELICOPTER_TENANT_ID"
+          } | ssh "${beget_opts[@]}" "$remote" 'if [ "$(id -u)" -eq 0 ]; then exec bash -s; else exec sudo -n bash -s; fi' <<'REMOTE'
+          set -euo pipefail
+          IFS= read -r tunnel_pub
+          IFS= read -r token_hash
+          IFS= read -r tenant_id
+
+          [[ "$tunnel_pub" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+$ ]]
+          [[ "$token_hash" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$tenant_id" =~ ^[0-9a-f-]{36}$ ]]
+
+          notify_env=/etc/peerivo-notify/notify.env
+          test -r "$notify_env"
+          grep -q '^NOTIFY_CORE_TOKEN=.' "$notify_env"
+
+          cat > /usr/local/bin/peerivo-helicopter-notify-bridge.py <<'PY'
+          #!/usr/bin/env python3
+          import hashlib
+          import hmac
+          import http.client
+          import json
+          import os
+          import re
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+          EXPECTED_HASH = os.environ["HELICOPTER_BRIDGE_TOKEN_SHA256"].strip()
+          TENANT_ID = os.environ["HELICOPTER_TENANT_ID"].strip()
+          CORE_TOKEN = os.environ["NOTIFY_CORE_TOKEN"].strip()
+          MAX_BODY = 128 * 1024
+
+          def allowed(method, path):
+              if method == "POST" and path in ("/v1/notify", "/v1/human-actions"):
+                  return True
+              return method == "GET" and re.fullmatch(r"/v1/human-actions/[A-Za-z0-9_-]{10,64}", path) is not None
+
+          class Handler(BaseHTTPRequestHandler):
+              server_version = "peerivo-helicopter-notify-bridge/1"
+
+              def log_message(self, fmt, *args):
+                  return
+
+              def authenticate(self):
+                  header = self.headers.get("Authorization", "")
+                  match = re.fullmatch(r"Bearer\s+(.+)", header, flags=re.I)
+                  if not match:
+                      return False
+                  digest = hashlib.sha256(match.group(1).strip().encode()).hexdigest()
+                  return hmac.compare_digest(digest, EXPECTED_HASH)
+
+              def handle_request(self):
+                  path = self.path.split("?", 1)[0]
+                  if not self.authenticate():
+                      self.send_response(401)
+                      self.end_headers()
+                      return
+                  if not allowed(self.command, path):
+                      self.send_response(404)
+                      self.end_headers()
+                      return
+
+                  body = b""
+                  if self.command == "POST":
+                      try:
+                          size = int(self.headers.get("Content-Length", "0"))
+                      except ValueError:
+                          size = -1
+                      if size < 0 or size > MAX_BODY:
+                          self.send_response(413)
+                          self.end_headers()
+                          return
+                      body = self.rfile.read(size)
+
+                  conn = http.client.HTTPConnection("127.0.0.1", 3000, timeout=12)
+                  headers = {
+                      "Authorization": "Bearer " + CORE_TOKEN,
+                      "X-Notify-Tenant-Id": TENANT_ID,
+                      "Accept": "application/json",
+                  }
+                  if self.command == "POST":
+                      headers["Content-Type"] = "application/json"
+
+                  try:
+                      conn.request(self.command, path, body=body if self.command == "POST" else None, headers=headers)
+                      response = conn.getresponse()
+                      payload = response.read()
+                      self.send_response(response.status)
+                      self.send_header("Content-Type", response.getheader("Content-Type") or "application/json")
+                      self.send_header("Cache-Control", "no-store")
+                      self.end_headers()
+                      self.wfile.write(payload)
+                  except Exception:
+                      self.send_response(502)
+                      self.send_header("Content-Type", "application/json")
+                      self.end_headers()
+                      self.wfile.write(json.dumps({"ok": False, "error": "notify_bridge_upstream_failed"}).encode())
+                  finally:
+                      conn.close()
+
+              do_GET = handle_request
+              do_POST = handle_request
+
+          ThreadingHTTPServer(("127.0.0.1", 3301), Handler).serve_forever()
+          PY
+          chmod 755 /usr/local/bin/peerivo-helicopter-notify-bridge.py
+          chown root:root /usr/local/bin/peerivo-helicopter-notify-bridge.py
+
+          install -d -m 700 /etc/peerivo-notify
+          cat > /etc/peerivo-notify/helicopter-bridge.env <<EOF
+          HELICOPTER_BRIDGE_TOKEN_SHA256=$token_hash
+          HELICOPTER_TENANT_ID=$tenant_id
+          EOF
+          chmod 600 /etc/peerivo-notify/helicopter-bridge.env
+
+          cat > /etc/systemd/system/peerivo-helicopter-notify-bridge.service <<'UNIT'
+          [Unit]
+          Description=Peerivo Helicopter tenant Notify bridge
+          After=network-online.target peerivo-notify.service
+          Wants=network-online.target
+          Requires=peerivo-notify.service
+
+          [Service]
+          Type=simple
+          User=peerivo-notify
+          Group=peerivo-notify
+          EnvironmentFile=/etc/peerivo-notify/notify.env
+          EnvironmentFile=/etc/peerivo-notify/helicopter-bridge.env
+          ExecStart=/usr/bin/python3 /usr/local/bin/peerivo-helicopter-notify-bridge.py
+          Restart=always
+          RestartSec=3
+          UMask=0077
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ProtectHome=true
+          RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          sed -i 's/^          //' /etc/systemd/system/peerivo-helicopter-notify-bridge.service
+
+          bridge_user="$(id -un)"
+          bridge_home="$(getent passwd "$bridge_user" | cut -d: -f6)"
+          auth="$bridge_home/.ssh/authorized_keys"
+          install -d -m 700 "$bridge_home/.ssh"
+          touch "$auth"
+          chmod 600 "$auth"
+
+          key_body="$(printf '%s\n' "$tunnel_pub" | awk '{print $2}')"
+          line="from=\"95.163.223.68\",restrict,port-forwarding,permitopen=\"127.0.0.1:3301\",command=\"/bin/false\" $tunnel_pub helicopter-notify-tunnel"
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          grep -Fv "helicopter-notify-tunnel" "$auth" | grep -Fv "$key_body" > "$tmp" || true
+          printf '%s\n' "$line" >> "$tmp"
+          cat "$tmp" > "$auth"
+          chmod 600 "$auth"
+
+          systemctl daemon-reload
+          systemctl enable --now peerivo-helicopter-notify-bridge.service
+
+          for _ in $(seq 1 20); do
+            if systemctl is-active --quiet peerivo-helicopter-notify-bridge.service && ss -ltnH '( sport = :3301 )' | awk '{print $4}' | grep -Fx '127.0.0.1:3301' >/dev/null; then
+              echo "BEGET_NOTIFY_BRIDGE=ok"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          systemctl --no-pager --full status peerivo-helicopter-notify-bridge.service || true
+          exit 1
+          REMOTE
+
+      - name: Install restricted Notify tunnel and enable Helicopter runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          reg_opts=(-i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+
+          scp "${reg_opts[@]}" -q ~/.ssh/beget_known_hosts "$remote:/root/.ssh/helicopter-notify-known-hosts"
+
+          ssh "${reg_opts[@]}" "$remote" "bash -s -- '$BEGET_SUPABASE_USER' '$HELICOPTER_TENANT_ID'" <<'REMOTE'
+          set -euo pipefail
+          beget_user="$1"
+          tenant_id="$2"
+
+          key=/root/.ssh/helicopter-notify-tunnel
+          known_hosts=/root/.ssh/helicopter-notify-known-hosts
+          token_file=/etc/peerivo/helicopter-notify-bridge.token
+          env_file=/etc/peerivo/helicopter.env
+
+          test -s "$key"
+          test -s "$known_hosts"
+          test -s "$token_file"
+          test -s "$env_file"
+          chmod 600 "$key" "$known_hosts" "$token_file"
+
+          gateway="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')"
+          [[ "$gateway" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+          cat > /etc/systemd/system/peerivo-helicopter-notify-tunnel.service <<UNIT
+          [Unit]
+          Description=Peerivo Helicopter Notify tunnel to Beget
+          After=network-online.target docker.service
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/bin/ssh -NT -F /dev/null -i $key -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L $gateway:55433:127.0.0.1:3301 $beget_user@45.144.176.213
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          sed -i 's/^          //' /etc/systemd/system/peerivo-helicopter-notify-tunnel.service
+
+          systemctl daemon-reload
+          systemctl enable --now peerivo-helicopter-notify-tunnel.service
+
+          ready=0
+          for _ in $(seq 1 20); do
+            if systemctl is-active --quiet peerivo-helicopter-notify-tunnel.service && ss -ltnH '( sport = :55433 )' | awk '{print $4}' | grep -Fx "$gateway:55433" >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+
+          token="$(cat "$token_file")"
+          test "${#token}" -ge 32
+
+          python3 - "$env_file" "$tenant_id" "$token" <<'PY'
+          from pathlib import Path
+          import os
+          import sys
+
+          path = Path(sys.argv[1])
+          tenant = sys.argv[2]
+          token = sys.argv[3]
+          updates = {
+              "OUTBOUND_INTEGRATIONS_ENABLED": "true",
+              "BITRIX_SYNC_ENABLED": "false",
+              "NOTIFY_API_URL": "http://host.docker.internal:55433",
+              "NOTIFY_API_TOKEN": token,
+              "NOTIFY_TENANT_ID": tenant,
+              "NOTIFY_ACTION_POLL_MS": "2500",
+          }
+
+          lines = path.read_text().splitlines()
+          out, seen = [], set()
+          for line in lines:
+              if "=" in line and not line.lstrip().startswith("#"):
+                  key = line.split("=", 1)[0].strip()
+                  if key in updates:
+                      if key not in seen:
+                          out.append(f"{key}={updates[key]}")
+                          seen.add(key)
+                      continue
+              out.append(line)
+
+          for key, value in updates.items():
+              if key not in seen:
+                  out.append(f"{key}={value}")
+
+          tmp = path.with_suffix(".env.notify.tmp")
+          tmp.write_text("\n".join(out).rstrip() + "\n")
+          os.chmod(tmp, 0o600)
+          tmp.replace(path)
+          os.chmod(path, 0o600)
+          PY
+          unset token
+
+          cd /opt/peerivo/helicopter/current
+          HELICOPTER_HOST_PORT=3300 docker compose -p peerivo-helicopter -f deploy/docker-compose.production.yml up -d --force-recreate helicopter
+
+          for _ in $(seq 1 30); do
+            if payload="$(curl -fsS --max-time 3 http://127.0.0.1:3300/healthz 2>/dev/null)"; then
+              if python3 -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("databaseConfigured") and d.get("outboundIntegrationsEnabled") and d.get("notifyActionsConfigured") and not d.get("bitrixSyncEnabled") else 1)' <<<"$payload"; then
+                echo "HELICOPTER_NOTIFY_RUNTIME=enabled"
+                exit 0
+              fi
+            fi
+            sleep 2
+          done
+          exit 1
+          REMOTE
+
+      - name: Verify Telegram and backfill missed web leads
+        shell: bash
+        run: |
+          set -euo pipefail
+          reg_opts=(-i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+
+          ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          container="$(docker ps --filter label=com.docker.compose.project=peerivo-helicopter --filter label=com.docker.compose.service=helicopter --format '{{.ID}}' | head -n1)"
+          test -n "$container"
+
+          docker exec -i "$container" node --input-type=module - <<'NODE'
+          import pg from "pg";
+          import { requestLeadClaimAction } from "./src/lead-notifications.mjs";
+
+          const api = String(process.env.NOTIFY_API_URL || "").replace(/\/+$/, "");
+          const token = String(process.env.NOTIFY_API_TOKEN || "");
+          const tenant = String(process.env.NOTIFY_TENANT_ID || "");
+          if (!api || token.length < 32 || !tenant) throw new Error("NOTIFY_RUNTIME_NOT_CONFIGURED");
+
+          const smoke = await fetch(api + "/v1/notify", {
+            method: "POST",
+            headers: {
+              authorization: "Bearer " + token,
+              "x-notify-tenant-id": tenant,
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              title: "Helicopter · уведомления включены",
+              body: "Заявки с сайтов теперь отправляются в Telegram через Peerivo Notify."
+            }),
+            signal: AbortSignal.timeout(10000)
+          });
+          const smokePayload = await smoke.json().catch(() => ({}));
+          if (!smoke.ok || !Array.isArray(smokePayload.delivered) || smokePayload.delivered.length < 1) {
+            throw new Error("TELEGRAM_SMOKE_FAILED:" + smoke.status);
+          }
+          console.log("HELICOPTER_TELEGRAM_DELIVERY=ok");
+
+          const client = new pg.Client({
+            connectionString: process.env.HELICOPTER_DATABASE_URL,
+            ssl: false
+          });
+          await client.connect();
+          try {
+            const { rows } = await client.query(`
+              select l.*, c.name as city_name, s.site_key
+              from helicopter.leads l
+              join helicopter.cities c on c.id=l.city_id
+              left join helicopter.sites s on s.id=l.site_id
+              where l.status='new'
+                and l.claimed_by_agent_id is null
+                and l.notify_action_id is null
+                and l.created_at >= now() - interval '24 hours'
+              order by l.id asc
+              limit 10
+            `);
+
+            let sent = 0;
+            for (const lead of rows) {
+              const result = await requestLeadClaimAction({
+                lead,
+                site: { key: lead.site_key || "direct", city: { name: lead.city_name || "—" } },
+                input: {
+                  source: lead.source || "web",
+                  name: lead.name || "",
+                  phone: lead.phone || "",
+                  email: lead.email || "",
+                  comment: lead.comment || ""
+                },
+                dedupeKey: "helicopter-lead-" + lead.id + "-claim"
+              });
+
+              if (!result.sent || !result.actionId) continue;
+              await client.query(
+                `update helicopter.leads
+                   set notify_action_id=$2,
+                       notify_action_kind='claim',
+                       notify_action_created_at=now(),
+                       notify_action_checked_at=null,
+                       updated_at=now()
+                 where id=$1 and notify_action_id is null`,
+                [lead.id, result.actionId]
+              );
+              sent += 1;
+            }
+            console.log("HELICOPTER_BACKFILLED_LEADS=" + sent);
+          } finally {
+            await client.end();
+          }
+          NODE
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/reg_ru ~/.ssh/beget ~/.ssh/reg_known_hosts ~/.ssh/beget_known_hosts
