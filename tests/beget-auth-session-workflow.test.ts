@@ -27,8 +27,8 @@ describe("Beget Auth three-day session repair", () => {
     expect(workflow).toContain("environment: production");
     expect(workflow).toContain("github.ref == 'refs/heads/main'");
     expect(workflow).toContain("REPAIR_AUTH_SESSION_3D");
-    expect(workflow).toContain("event=push");
-    expect(workflow).toContain(".conclusion == \"success\"");
+    expect(workflow).toContain('bash scripts/verify-current-main-ci-evidence.sh "${EXPECTED_SHA}"');
+    expect(workflow).not.toContain("actions/workflows/ci.yml/runs?");
     expect(workflow).toContain("github.run_attempt == 1");
   });
 
