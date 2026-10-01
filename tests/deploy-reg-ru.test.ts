@@ -46,6 +46,7 @@ describe("REG.RU production deployment safety contract", () => {
     expect(workflow).toContain("LIVE_BEGET_SERVICE_ROLE_VERIFIED");
     expect(workflow).toContain("/auth/v1/admin/users?page=1&per_page=1");
     expect(workflow).not.toContain("SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.");
+    expect(workflow).not.toContain("runner-side GoTrue Admin verification");
   });
 
   it("arms rollback before removing an existing application container", () => {
@@ -119,7 +120,7 @@ describe("REG.RU one-shot PREPARE dispatcher", () => {
     expect(dispatcher).toContain("[run-reg-ru-prepare]");
     expect(dispatcher).toContain("github.run_attempt == 1");
     expect(dispatcher).toContain(
-      "APPROVED_BASE_SHA: 44d6321ea486e6fa6568f589facbb6551d85769c",
+      "APPROVED_BASE_SHA: 65c67b2161baca24f9a22944475c4ca0557a4512",
     );
     expect(dispatcher).toContain('test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"');
     expect(dispatcher).toContain("One-shot dispatcher increment contains unexpected files.");
