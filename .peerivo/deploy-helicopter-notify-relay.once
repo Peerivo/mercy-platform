@@ -1,0 +1,3 @@
+One-time carrier for private Peerivo/notify commit 127585ebddb17ee99d27eb72635021f79aed017a.
+The workflow exports that exact commit from the private self-hosted runner checkout on REG.RU and deploys it directly to Beget using protected production credentials.
+No Notify source or secret is committed here.
