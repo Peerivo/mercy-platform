@@ -7,6 +7,7 @@ Raw subprocess output and exception details must never reach stdout or stderr.
 """
 from __future__ import annotations
 
+import errno
 import ipaddress
 import json
 import os
@@ -29,8 +30,64 @@ ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 NETWORK_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
 
+REASON_MAP = {
+    "ambiguous inspect": "ambiguous_inspect",
+    "command failed": "command_failed",
+    "command output oversized": "command_output_oversized",
+    "command unavailable": "command_unavailable",
+    "duplicate JSON key": "duplicate_json_key",
+    "image ID unavailable": "image_id_unavailable",
+    "invalid JSON": "invalid_json",
+    "invalid aliases": "invalid_aliases",
+    "invalid environment": "invalid_environment",
+    "invalid logging observations": "invalid_logging_observations",
+    "invalid or duplicate environment entry": "invalid_or_duplicate_environment_entry",
+    "invalid preload inventory": "invalid_preload_inventory",
+    "invalid project": "invalid_project",
+    "missing environment": "missing_environment",
+    "nonboolean database response": "nonboolean_database_response",
+    "nonfinite": "nonfinite_json",
+    "oversized environment": "oversized_environment",
+    "directory not regular": "private_directory_not_directory",
+    "directory mode mismatch": "private_directory_mode_not_0700",
+    "directory owner mismatch": "private_directory_owner_mismatch",
+    "environment not regular": "environment_not_regular_file",
+    "environment mode mismatch": "environment_mode_not_0600",
+    "environment owner mismatch": "environment_owner_mismatch",
+    "environment hardlink": "environment_hardlink_rejected",
+    "remote Docker context is not supported": "remote_docker_override_rejected",
+    "unexpected database response": "unexpected_database_response",
+}
+OS_REASON_MAP = {errno.ENOENT: "required_path_missing", errno.EACCES: "path_read_denied",
+                 errno.EPERM: "path_read_denied", errno.ELOOP: "symlink_rejected"}
+REASON_CODES = frozenset(REASON_MAP.values()) | frozenset(OS_REASON_MAP.values()) | {"unclassified"}
+INSPECTION_STAGES = frozenset(("docker_rest", "docker_db", "image", "private_env", "runtime_facts", "database_facts"))
+
+
 class Refused(Exception):
-    """Internal exception. Its text is never rendered."""
+    """Stores a static enum only. Raw authored/runtime text is never rendered."""
+
+    def __init__(self, reason=None):
+        super().__init__()
+        self.reason_code = REASON_MAP.get(reason, "unclassified") if type(reason) is str else "unclassified"
+
+
+def safe_reason(error) -> str:
+    if type(error) in (Refused, StageRefused):
+        code = error.reason_code
+        return code if type(code) is str and code in REASON_CODES else "unclassified"
+    if isinstance(error, OSError):
+        return OS_REASON_MAP.get(error.errno, "unclassified")
+    return "unclassified"
+
+
+class StageRefused(Refused):
+    """Carries only fixed diagnostic enums, never an exception description."""
+
+    def __init__(self, stage, reason_code="unclassified"):
+        super().__init__()
+        self.stage = stage if type(stage) is str and stage in INSPECTION_STAGES else "unclassified"
+        self.reason_code = reason_code if type(reason_code) is str and reason_code in REASON_CODES else "unclassified"
 
 
 def command(argv: list[str], data: bytes | None = None) -> bytes:
@@ -47,11 +104,15 @@ def command(argv: list[str], data: bytes | None = None) -> bytes:
         result = subprocess.run(argv, input=data, stdin=subprocess.DEVNULL if data is None else None,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 check=False, timeout=25, env=env)
-        if result.returncode != 0 or len(result.stdout) > MAX_BYTES:
-            raise Refused("command failed or output oversized")
+        if result.returncode != 0:
+            raise Refused("command failed")
+        if len(result.stdout) > MAX_BYTES:
+            raise Refused("command output oversized")
         return result.stdout
-    except Exception as error:
-        raise Refused("command unavailable") from error
+    except Refused:
+        raise
+    except Exception:
+        raise Refused("command unavailable") from None
 
 
 def decode_json(raw: bytes):
@@ -91,22 +152,50 @@ def env_map(items) -> dict[str, str]:
     return result
 
 
+def env_file_map(text: str) -> dict[str, str]:
+    """Docker env-file blank/comment semantics, without shell interpolation.
+
+    Leading whitespace and CRLF are accepted; whitespace and # in a value are
+    preserved. Bare names that depend on a caller environment remain forbidden.
+    Runtime Config.Env parsing uses env_map directly and stays strict.
+    """
+    lines = []
+    for line in text.split("\n"):
+        if line.endswith("\r"):
+            line = line[:-1]
+        line = line.lstrip()
+        if not line or line.startswith("#"):
+            continue
+        lines.append(line)
+    return env_map(lines)
+
+
 def read_private_env(path: Path) -> dict[str, str]:
     # Never follow a symlink or accept a hard-linked/group-readable secret file.
     parent = path.parent
     info = parent.lstat()
-    if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700 or info.st_uid != os.geteuid():
-        raise Refused("private directory required")
+    if not stat.S_ISDIR(info.st_mode):
+        raise Refused("directory not regular")
+    if stat.S_IMODE(info.st_mode) != 0o700:
+        raise Refused("directory mode mismatch")
+    if info.st_uid != os.geteuid():
+        raise Refused("directory owner mismatch")
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.geteuid() or info.st_nlink != 1:
-            raise Refused("private regular file required")
+        if not stat.S_ISREG(info.st_mode):
+            raise Refused("environment not regular")
+        if stat.S_IMODE(info.st_mode) != 0o600:
+            raise Refused("environment mode mismatch")
+        if info.st_uid != os.geteuid():
+            raise Refused("environment owner mismatch")
+        if info.st_nlink != 1:
+            raise Refused("environment hardlink")
         with os.fdopen(fd, "rb", closefd=False) as stream:
             raw = stream.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES:
             raise Refused("oversized environment")
-        return env_map(raw.decode("utf-8").splitlines())
+        return env_file_map(raw.decode("utf-8"))
     finally:
         os.close(fd)
 
@@ -337,15 +426,24 @@ def database_facts() -> dict:
 
 
 def run_inspection() -> dict:
-    rest = inspect_one("container", REST_NAME)
-    db = inspect_one("container", DB_NAME)
-    image_id = rest.get("Image", "")
-    if type(image_id) is not str or not SHA.fullmatch(image_id):
-        raise Refused("image ID unavailable")
-    image = inspect_one("image", image_id)
-    private_env = read_private_env(Path.home() / ".living-menaion" / "postgrest.env")
-    runtime = runtime_facts(rest, db, image, private_env)
-    database = database_facts()
+    stage = "docker_rest"
+    try:
+        rest = inspect_one("container", REST_NAME)
+        stage = "docker_db"
+        db = inspect_one("container", DB_NAME)
+        stage = "image"
+        image_id = rest.get("Image", "")
+        if type(image_id) is not str or not SHA.fullmatch(image_id):
+            raise Refused("image ID unavailable")
+        image = inspect_one("image", image_id)
+        stage = "private_env"
+        private_env = read_private_env(Path.home() / ".living-menaion" / "postgrest.env")
+        stage = "runtime_facts"
+        runtime = runtime_facts(rest, db, image, private_env)
+        stage = "database_facts"
+        database = database_facts()
+    except BaseException as error:
+        raise StageRefused(stage, safe_reason(error)) from None
     return {
         "inspection_completed": True,
         "read_only": True,
@@ -375,8 +473,14 @@ def main(argv=None) -> int:
         result = run_inspection()
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
-    except BaseException:
-        print('{"inspection_completed":false,"activation_ready":false,"error":"inspection_refused_no_configuration_disclosed"}')
+    except BaseException as error:
+        stage = error.stage if type(error) is StageRefused else "unclassified"
+        if type(stage) is not str or stage not in INSPECTION_STAGES:
+            stage = "unclassified"
+        print(json.dumps({"inspection_completed": False, "activation_ready": False,
+                          "error": "inspection_refused_no_configuration_disclosed", "failed_stage": stage,
+                          "reason_code": safe_reason(error)},
+                         sort_keys=True, separators=(",", ":")))
         return 1
 
 
