@@ -5,7 +5,7 @@ umask 077
 root="${1:?isolated temporary directory required}"
 [[ "$root" =~ ^/tmp/menaion-feedback\.[A-Za-z0-9]+$ ]]
 trap 'rm -rf -- "$root"' EXIT
-fail() { echo 'Menaion feedback migration refused; inspect sanitized prerequisites/ledger before retry.' >&2; exit 1; }
+fail() { echo 'Menaion feedback migration outcome not confirmed; inspect ledger before any retry.' >&2; exit 1; }
 test -d "$root" || fail
 test "$(stat -c '%a' "$root")" = 700 || fail
 test "$(docker inspect -f '{{.State.Running}}' supabase-db)" = true || fail
@@ -21,7 +21,7 @@ openssl cms -decrypt -binary -inform DER -in "$root/payload.cms" \
 test "$(sha256sum "$root/migration.sql" | cut -d' ' -f1)" = '15265e48dcbf87b24b7aed34c296c2a4a83cbba132a5e33bffc0cfdd9469444c' || fail
 python3 "$root/build-transaction.py" "$root" 2>"$root/build-error" || fail
 # Never emit PostgreSQL errors: CONTEXT can include private source or row data.
-if ! docker exec -i supabase-db psql -X -U supabase_admin -d living_menaion \
+if ! docker exec -i supabase-db psql -X -qAt -U supabase_admin -d living_menaion \
   -v ON_ERROR_STOP=1 < "$root/transaction.sql" > "$root/result" 2> "$root/db-error"; then
   fail
 fi
