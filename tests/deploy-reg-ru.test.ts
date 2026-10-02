@@ -81,6 +81,19 @@ describe("REG.RU production deployment safety contract", () => {
     expect(workflow).not.toMatch(/cloudflare|route53|change-resource-record|dns.*update/i);
   });
 
+  it("gates REG.RU promotion on working admin and public Auth channels", () => {
+    expect(workflow).toContain("REG_RU_AUTH_CHANNELS_VERIFIED admin=200 public=200");
+    expect(workflow).toContain("Candidate Mercy GoTrue Admin channel failed with HTTP");
+    expect(workflow).toContain("Candidate Mercy public Auth channel failed with HTTP");
+    expect(workflow).toContain("/auth/v1/admin/users?page=1&per_page=1");
+    expect(workflow).toContain("/auth/v1/settings");
+
+    const authGate = workflow.indexOf("REG_RU_AUTH_CHANNELS_VERIFIED admin=200 public=200");
+    const promote = workflow.indexOf('phase="promoting"');
+    expect(authGate).toBeGreaterThan(-1);
+    expect(promote).toBeGreaterThan(authGate);
+  });
+
   it("gates REG.RU promotion on the canonical Auth callback redirect", () => {
     expect(workflow).toContain("Candidate Auth callback escaped canonical Mercy origin.");
     expect(workflow).toContain("'http://127.0.0.1:3100/auth/callback'");
