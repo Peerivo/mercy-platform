@@ -1,0 +1,78 @@
+name: Inspect Menaion feedback transport
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/inspect-menaion-feedback-transport.yml'
+      - 'scripts/inspect-menaion-feedback-transport.sh'
+      - 'tests/test_menaion_transport_inspection.py'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current Mercy main commit to inspect with
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: |
+          bash -n scripts/inspect-menaion-feedback-transport.sh
+          python3 -m unittest discover -s tests -p 'test_menaion_transport_inspection.py' -v
+  inspect:
+    concurrency:
+      group: living-menaion-database-production
+      cancel-in-progress: false
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate exact current main
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$EXPECTED_SHA" = "$GITHUB_SHA"
+          current="$(gh api repos/Peerivo/mercy-platform/git/ref/heads/main --jq .object.sha)"
+          test "$current" = "$GITHUB_SHA"
+      - name: Check out reviewed inspector
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Inspect through existing protected transport
+        env:
+          BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+          BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || { echo "::error::Missing protected binding: $name"; exit 1; }
+          done
+          [[ "$BEGET_SUPABASE_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          [[ "$BEGET_SUPABASE_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          umask 077
+          key="$(mktemp)"
+          hosts="$(mktemp)"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > "$key"
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > "$hosts"
+          ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$hosts" "$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST" \
+            'bash -s' < scripts/inspect-menaion-feedback-transport.sh
