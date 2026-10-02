@@ -49,6 +49,26 @@ class EnvironmentTests(unittest.TestCase):
     def test_environment_preserves_values_without_printing(self):
         self.assertEqual(m.env_map(["A=a=b"]), {"A": "a=b"})
 
+    def test_file_blank_lines_comments_and_crlf_are_accepted_only_for_file(self):
+        text = "# comment\n\n   # indented comment\r\nA=synthetic # literal  \r\n \t\n\n"
+        self.assertEqual(m.env_file_map(text), {"A": "synthetic # literal  "})
+        self.assertEqual(m.env_file_map("A=x\n\n"), {"A": "x"})
+        for runtime in (["A=x", ""], ["# comment", "A=x"]):
+            with self.assertRaises(m.Refused):
+                m.env_map(runtime)
+
+    def test_file_duplicate_keys_and_bare_imports_remain_rejected(self):
+        for text in ("A=x\n# ignored\nA=y\n", "A\n", "A=x\x00\n"):
+            with self.assertRaises(m.Refused):
+                m.env_file_map(text)
+
+    def test_private_file_with_provisioner_trailing_blank_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "postgrest.env"
+            path.write_text("# comment\nA=synthetic\n\n")
+            path.chmod(0o600)
+            self.assertEqual(m.read_private_env(path), {"A": "synthetic"})
+
     def test_environment_rejects_ambiguous_inputs(self):
         for value in (None, {}, ["A=x", "A=y"], ["A"], ["A=one\ntwo"], ["A=bad\x00"], ["A=bad\r"], ["9BAD=x"], [False]):
             with self.subTest(value=value), self.assertRaises(m.Refused):
@@ -191,6 +211,62 @@ class BoundaryTests(unittest.TestCase):
             self.assertEqual(m.main(["--inspect"]), 1)
         self.assertNotIn(SENTINEL, stdout.getvalue() + stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_failure_reports_only_fixed_stage_enum(self):
+        rest, db, image, env = fixture()
+        cases = [
+            ("docker_rest", [ValueError(SENTINEL)], None),
+            ("docker_db", [rest, ValueError(SENTINEL)], None),
+            ("image", [rest, db, ValueError(SENTINEL)], None),
+            ("private_env", [rest, db, image], "read_private_env"),
+            ("runtime_facts", [rest, db, image], "runtime_facts"),
+            ("database_facts", [rest, db, image], "database_facts"),
+        ]
+        for expected, inspection_results, fail_function in cases:
+            stdout = io.StringIO()
+            with self.subTest(stage=expected), contextlib.ExitStack() as stack:
+                stack.enter_context(patch.object(m, "inspect_one", side_effect=inspection_results))
+                stack.enter_context(patch.object(m, "read_private_env", return_value=env))
+                stack.enter_context(patch.object(m, "database_facts", return_value=db_fixture()))
+                if fail_function:
+                    stack.enter_context(patch.object(m, fail_function, side_effect=ValueError(SENTINEL)))
+                stack.enter_context(contextlib.redirect_stdout(stdout))
+                self.assertEqual(m.main(["--inspect"]), 1)
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(report["failed_stage"], expected)
+            self.assertNotIn(SENTINEL, stdout.getvalue())
+
+    def test_invalid_stage_cannot_leak_exception_content(self):
+        stdout = io.StringIO()
+        failure = m.StageRefused(SENTINEL)
+        failure.stage = SENTINEL
+        with patch.object(m, "run_inspection", side_effect=failure), contextlib.redirect_stdout(stdout):
+            self.assertEqual(m.main(["--inspect"]), 1)
+        self.assertEqual(json.loads(stdout.getvalue())["failed_stage"], "unclassified")
+        self.assertNotIn(SENTINEL, stdout.getvalue())
+
+    def test_authored_reason_is_bounded_and_distinguishes_file_failures(self):
+        for reason, expected in (("directory mode mismatch", "private_directory_mode_not_0700"),
+                                 ("directory owner mismatch", "private_directory_owner_mismatch"),
+                                 ("environment mode mismatch", "environment_mode_not_0600"),
+                                 ("environment owner mismatch", "environment_owner_mismatch"),
+                                 ("environment hardlink", "environment_hardlink_rejected"),
+                                 (SENTINEL, "unclassified")):
+            failure = m.Refused(reason)
+            self.assertEqual(m.safe_reason(failure), expected)
+            self.assertNotIn(SENTINEL, str(failure))
+        failure = m.StageRefused("private_env", "environment_mode_not_0600")
+        stdout = io.StringIO()
+        with patch.object(m, "run_inspection", side_effect=failure), contextlib.redirect_stdout(stdout):
+            self.assertEqual(m.main(["--inspect"]), 1)
+        self.assertEqual(json.loads(stdout.getvalue())["reason_code"], "environment_mode_not_0600")
+        failure.reason_code = SENTINEL
+        self.assertEqual(m.safe_reason(failure), "unclassified")
+
+    def test_operating_system_error_never_discloses_filename(self):
+        error = FileNotFoundError(m.errno.ENOENT, SENTINEL, SENTINEL)
+        self.assertEqual(m.safe_reason(error), "required_path_missing")
+        self.assertEqual(m.safe_reason(OSError(m.errno.ELOOP, SENTINEL)), "symlink_rejected")
 
     def test_command_discards_stderr_and_stdin(self):
         completed = subprocess.CompletedProcess(["docker"], 0, b'{}')

@@ -110,3 +110,7 @@ Read-only inspection run `37057008733` verified the isolated target, all eight p
 
 ## Menaion runtime handoff preflight
 The existing manual exact-main Menaion inspector now includes a strictly read-only runtime handoff preflight. It pins the local Docker Unix socket and emits only allowlisted configuration-shape facts, environment-file equivalence, database-alias matching, role/migration state and logging/audit observations. It neither reads a submitted password nor accesses Kong credentials, probes authenticated HTTP, creates tokens, writes configuration or changes containers. The runtime activation/rollback path is not implemented or authorized by this inspector; unknown reproduction/logging facts remain explicit blockers.
+
+
+## Menaion inspection parser correction
+Run `37061862510` confirmed the nine migration checksums but the runtime inspector failed closed with a generic sanitized error. Its protected-file parser now accepts blank/full-line comments and CRLF permitted by Docker env files, while preserving literal values and strict runtime environment parsing. Fixed stage/reason codes distinguish safe compatibility failures without exposing exceptions or configuration. No mutation or credential operation is added; production runtime readiness remains unverified until the corrected read-only inspection succeeds.
