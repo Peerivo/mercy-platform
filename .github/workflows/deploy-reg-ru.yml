@@ -367,6 +367,51 @@ jobs:
 
           curl --fail --silent --show-error --max-time 10             http://127.0.0.1:3100/health/data >/dev/null
 
+          auth_channels="$(
+            docker exec -i "${CONTAINER_NAME}" node - <<'NODE'
+          (async () => {
+            const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            const publicKey =
+              process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+              process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+            if (!url || !serviceKey || !publicKey) {
+              process.stdout.write("config_missing config_missing");
+              return;
+            }
+
+            const admin = await fetch(
+              new URL("/auth/v1/admin/users?page=1&per_page=1", url),
+              {
+                signal: AbortSignal.timeout(10000),
+                headers: {
+                  apikey: serviceKey,
+                  Authorization: `Bearer ${serviceKey}`,
+                },
+              },
+            );
+            const settings = await fetch(new URL("/auth/v1/settings", url), {
+              signal: AbortSignal.timeout(10000),
+              headers: { apikey: publicKey },
+            });
+            process.stdout.write(`${admin.status} ${settings.status}`);
+          })().catch(() => {
+            process.stdout.write("fetch_error fetch_error");
+          });
+          NODE
+          )"
+          read -r admin_status public_status <<< "${auth_channels}"
+          test "${admin_status}" = "200" || {
+            echo "Candidate Mercy GoTrue Admin channel failed with HTTP ${admin_status}." >&2
+            false
+          }
+          test "${public_status}" = "200" || {
+            echo "Candidate Mercy public Auth channel failed with HTTP ${public_status}." >&2
+            false
+          }
+          echo "REG_RU_AUTH_CHANNELS_VERIFIED admin=200 public=200"
+
           callback_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             'http://127.0.0.1:3100/auth/callback')"
           printf '%s\n' "${callback_headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
           callback_location="$(printf '%s\n' "${callback_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
