@@ -5,6 +5,7 @@ import unittest
 import os
 import subprocess
 import tempfile
+import uuid
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,7 +63,8 @@ class TransactionTests(unittest.TestCase):
                     target = binaries/name
                     target.write_text(content)
                     target.chmod(0o755)
-                root = Path(tempfile.mkdtemp(prefix='menaion-feedback.',dir='/tmp'))
+                root = Path('/tmp') / ('menaion-feedback.' + uuid.uuid4().hex)
+                root.mkdir(mode=0o700)
                 (root/'payload.b64').write_text('RklYVFVSRQ==')
                 result = subprocess.run(['bash',str(ROOT/'scripts/apply-menaion-feedback-encrypted.sh'),str(root)],
                     env=dict(os.environ,HOME=str(home),PATH=str(binaries)+':'+os.environ['PATH'],FAIL_DB=str(int(fail_db))),capture_output=True,text=True)
