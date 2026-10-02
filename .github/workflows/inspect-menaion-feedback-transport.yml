@@ -6,6 +6,8 @@ on:
       - '.github/workflows/inspect-menaion-feedback-transport.yml'
       - 'scripts/inspect-menaion-feedback-transport.sh'
       - 'tests/test_menaion_transport_inspection.py'
+      - 'scripts/inspect-menaion-runtime-handoff.py'
+      - 'tests/test_menaion_runtime_handoff.py'
   workflow_dispatch:
     inputs:
       expected_sha:
@@ -28,6 +30,7 @@ jobs:
       - run: |
           bash -n scripts/inspect-menaion-feedback-transport.sh
           python3 -m unittest discover -s tests -p 'test_menaion_transport_inspection.py' -v
+          python3 -m unittest discover -s tests -p 'test_menaion_runtime_handoff.py' -v
   inspect:
     concurrency:
       group: living-menaion-database-production
@@ -76,3 +79,6 @@ jobs:
           ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$hosts" "$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST" \
             'bash -s' < scripts/inspect-menaion-feedback-transport.sh
+          ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$hosts" "$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST" \
+            'python3 - --inspect' < scripts/inspect-menaion-runtime-handoff.py
