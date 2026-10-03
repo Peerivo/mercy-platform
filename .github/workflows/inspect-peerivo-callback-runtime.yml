@@ -91,6 +91,27 @@ jobs:
           '
 
 
+          key_kind="unknown"
+          if [[ "${service_key}" == eyJ* ]]; then
+            key_kind="legacy_jwt"
+          elif [[ "${service_key}" == sb_secret_* ]]; then
+            key_kind="secret_key"
+          fi
+          echo "CALLBACK_MERCY_ADMIN_KEY_KIND=${key_kind}"
+
+          admin_status="$(curl -sS -o /tmp/mercy-admin-probe.json -w '%{http_code}' \
+            -H "apikey: ${service_key}" \
+            -H "Authorization: Bearer ${service_key}" \
+            "${public_url}/auth/v1/admin/users?page=1&per_page=1" || true)"
+          rm -f /tmp/mercy-admin-probe.json
+          echo "CALLBACK_MERCY_ADMIN_HTTP=${admin_status}"
+          case "${admin_status}" in
+            200) echo "CALLBACK_MERCY_ADMIN_KEY=accepted" ;;
+            401) echo "CALLBACK_MERCY_ADMIN_KEY=unauthorized" ;;
+            403) echo "CALLBACK_MERCY_ADMIN_KEY=forbidden" ;;
+            *) echo "CALLBACK_MERCY_ADMIN_KEY=unexpected_http" ;;
+          esac
+
           logs="$(docker logs --since 2h mercy 2>&1 || true)"
           count="$(printf '%s\n' "${logs}" | grep -c 'PEERIVO_AUTH_CALLBACK:' || true)"
           echo "CALLBACK_ERROR_COUNT=${count}"
@@ -129,17 +150,28 @@ jobs:
           echo "CALLBACK_ERROR_CATEGORY=${category}"
 
           stage="unknown"
-          if printf '%s\n' "${logs}" | grep -Eqi 'auth\.admin\.listUsers|GoTrueAdminApi.*listUsers|ensureLocalMercyUser.*listUsers'; then
-            stage="local_admin_lookup"
-          elif printf '%s\n' "${logs}" | grep -Eqi 'auth\.admin\.createUser|GoTrueAdminApi.*createUser|createUser'; then
-            stage="local_admin_create"
-          elif printf '%s\n' "${logs}" | grep -Eqi 'auth\.admin\.updateUserById|GoTrueAdminApi.*updateUser|updateUserById'; then
-            stage="local_admin_update"
-          elif printf '%s\n' "${logs}" | grep -Eqi 'signInWithPassword|_signInWithPassword'; then
-            stage="local_sign_in"
-          elif printf '%s\n' "${logs}" | grep -Eqi 'ensureLocalMercyUser'; then
-            stage="local_admin_bridge"
-          fi
+          explicit_stage="$(printf '%s\n' "${logs}" | sed -n 's/.*PEERIVO_AUTH_CALLBACK_STAGE:[[:space:]]*//p' | tail -n1 | tr -d '\r' | xargs || true)"
+          case "${explicit_stage}" in
+            admin-list) stage="local_admin_lookup" ;;
+            admin-create) stage="local_admin_create" ;;
+            admin-update) stage="local_admin_update" ;;
+            verify-code) stage="verify_code" ;;
+            local-user) stage="local_admin_bridge" ;;
+            local-sign-in) stage="local_sign_in" ;;
+            *)
+              if printf '%s\n' "${logs}" | grep -Eqi 'auth\.admin\.listUsers|GoTrueAdminApi.*listUsers|ensureLocalMercyUser.*listUsers'; then
+                stage="local_admin_lookup"
+              elif printf '%s\n' "${logs}" | grep -Eqi 'auth\.admin\.createUser|GoTrueAdminApi.*createUser|createUser'; then
+                stage="local_admin_create"
+              elif printf '%s\n' "${logs}" | grep -Eqi 'auth\.admin\.updateUserById|GoTrueAdminApi.*updateUser|updateUserById'; then
+                stage="local_admin_update"
+              elif printf '%s\n' "${logs}" | grep -Eqi 'signInWithPassword|_signInWithPassword'; then
+                stage="local_sign_in"
+              elif printf '%s\n' "${logs}" | grep -Eqi 'ensureLocalMercyUser'; then
+                stage="local_admin_bridge"
+              fi
+              ;;
+          esac
           echo "CALLBACK_ERROR_STAGE=${stage}"
           REMOTE
 
