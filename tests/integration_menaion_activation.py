@@ -134,6 +134,28 @@ class MenaionActivationIntegration(unittest.TestCase):
             raise AssertionError("Opted-in integration requires Linux and the local Docker socket; not skipped")
         if os.environ.get("DOCKER_HOST") or os.environ.get("DOCKER_CONTEXT"):
             raise AssertionError("Remote/custom Docker contexts are forbidden for this fixture")
+        # Diagnostics are fixture-only and emit field names/network shape, never
+        # environment values, labels, password data or raw Docker error bodies.
+        original_fidelity = m.fidelity
+        def checked_fidelity(actual, expected, image, network):
+            try:
+                return original_fidelity(actual, expected, image, network)
+            except m.Refused:
+                config = {key: value for key, value in expected.items()
+                          if key not in ("HostConfig", "NetworkingConfig")}
+                fields = []
+                for group, left, right in (("Config", actual["Config"], config),
+                                           ("HostConfig", actual["HostConfig"], expected["HostConfig"])):
+                    fields.extend(group + "." + key for key in sorted(set(left) | set(right))
+                                  if not m.strict_equal(left.get(key), right.get(key)) or (key in left) != (key in right))
+                actual_network = actual["NetworkSettings"]["Networks"].get(network, {})
+                print(json.dumps({"fixture_fidelity_differences": fields,
+                    "network_actual": m.endpoint_inputs(actual_network),
+                    "network_expected": expected["NetworkingConfig"]["EndpointsConfig"][network]}), flush=True)
+                raise
+        cls.fidelity_patch = patch.object(m, "fidelity", side_effect=checked_fidelity)
+        cls.fidelity_patch.start()
+        cls.addClassCleanup(cls.fidelity_patch.stop)
         cls.owner = uuid.uuid4().hex
         cls.temp = tempfile.TemporaryDirectory(prefix="menaion-disposable-ci-")
         cls.addClassCleanup(cls.temp.cleanup)
