@@ -1,0 +1,101 @@
+name: Apply approved Menaion feedback migration
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/apply-menaion-feedback-encrypted.yml'
+      - 'scripts/apply-menaion-feedback-encrypted.sh'
+      - 'scripts/build-menaion-feedback-transaction.py'
+      - 'tests/test_menaion_feedback_transaction.py'
+      - 'ops/living-menaion/feedback-20261002.cms.b64'
+      - 'ops/living-menaion/feedback-predecessors.json'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current Mercy main commit
+        required: true
+        type: string
+      confirmation:
+        description: Type APPLY_MENAION_FEEDBACK_DRAFT_ONLY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: |
+          bash -n scripts/apply-menaion-feedback-encrypted.sh
+          python3 -m unittest discover -s tests -p 'test_menaion_feedback_transaction.py' -v
+  apply:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    concurrency:
+      group: living-menaion-database-production
+      cancel-in-progress: false
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate exact approved dispatch
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$EXPECTED_SHA" = "$GITHUB_SHA"
+          test "$CONFIRMATION" = APPLY_MENAION_FEEDBACK_DRAFT_ONLY
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          current="$(gh api repos/Peerivo/mercy-platform/git/ref/heads/main --jq .object.sha)"
+          test "$current" = "$GITHUB_SHA"
+      - name: Check out reviewed encrypted payload and executor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Apply exact migration through existing protected transport
+        env:
+          BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+          BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || { echo "::error::Missing protected binding: $name"; exit 1; }
+          done
+          [[ "$BEGET_SUPABASE_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          [[ "$BEGET_SUPABASE_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          umask 077
+          key="$(mktemp)"
+          hosts="$(mktemp)"
+          remote_dir=''
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > "$key"
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > "$hosts"
+          options=(-i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts")
+          cleanup() {
+            if [[ "$remote_dir" =~ ^/tmp/menaion-feedback\.[A-Za-z0-9]+$ ]]; then
+              ssh "${options[@]}" "$remote" "rm -rf -- '$remote_dir'" </dev/null || true
+            fi
+            rm -f "$key" "$hosts"
+          }
+          trap cleanup EXIT
+          remote_dir="$(ssh "${options[@]}" "$remote" 'umask 077; mktemp -d /tmp/menaion-feedback.XXXXXXXX')"
+          [[ "$remote_dir" =~ ^/tmp/menaion-feedback\.[A-Za-z0-9]+$ ]]
+          scp "${options[@]}" ops/living-menaion/feedback-20261002.cms.b64 "$remote:$remote_dir/payload.b64"
+          scp "${options[@]}" ops/living-menaion/feedback-predecessors.json "$remote:$remote_dir/manifest.json"
+          scp "${options[@]}" scripts/build-menaion-feedback-transaction.py "$remote:$remote_dir/build-transaction.py"
+          scp "${options[@]}" scripts/apply-menaion-feedback-encrypted.sh "$remote:$remote_dir/apply.sh"
+          ssh "${options[@]}" "$remote" "bash '$remote_dir/apply.sh' '$remote_dir'" </dev/null

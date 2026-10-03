@@ -1,0 +1,143 @@
+name: Deploy Helicopter Notify relay
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/deploy-helicopter-notify-relay.yml"
+      - ".peerivo/deploy-helicopter-notify-relay.once"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-helicopter-notify-relay
+  cancel-in-progress: false
+
+env:
+  NOTIFY_SHA: 127585ebddb17ee99d27eb72635021f79aed017a
+  NOTIFY_SOURCE_DIR: /opt/peerivo-notify-runner/_work/notify/notify
+  HELICOPTER_TENANT_ID: c21db6b6-c544-4ae7-b00a-8ba416b85a92
+
+jobs:
+  deploy:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ vars.BEGET_SUPABASE_KNOWN_HOSTS || secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+
+    steps:
+      - name: Checkout carrier revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate protected transport
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_SSH_KEY REG_RU_KNOWN_HOSTS BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || { echo "::error::Missing protected production configuration: $name"; exit 1; }
+          done
+          test "$REG_RU_HOST" = "95.163.223.68"
+          test "$REG_RU_USER" = "root"
+          test "$BEGET_SUPABASE_HOST" = "45.144.176.213"
+          test "$BEGET_SUPABASE_USER" = "root"
+          [[ "$NOTIFY_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Configure pinned SSH transports
+        shell: bash
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$REG_RU_SSH_KEY" > "$RUNNER_TEMP/reg-ru-key"
+          printf '%s\n' "$REG_RU_KNOWN_HOSTS" > "$RUNNER_TEMP/reg-ru-known-hosts"
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > "$RUNNER_TEMP/beget-key"
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > "$RUNNER_TEMP/beget-known-hosts"
+          chmod 600 "$RUNNER_TEMP/reg-ru-key" "$RUNNER_TEMP/reg-ru-known-hosts" "$RUNNER_TEMP/beget-key" "$RUNNER_TEMP/beget-known-hosts"
+
+      - name: Export exact private Notify payload from REG.RU
+        shell: bash
+        run: |
+          set -euo pipefail
+          reg_opts=(
+            -i "$RUNNER_TEMP/reg-ru-key"
+            -o IdentitiesOnly=yes
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/reg-ru-known-hosts"
+            -o ConnectTimeout=10
+          )
+          remote="$REG_RU_USER@$REG_RU_HOST"
+
+          ssh "${reg_opts[@]}" "$remote"             "test -d '$NOTIFY_SOURCE_DIR/.git' && test \"\$(git -C '$NOTIFY_SOURCE_DIR' rev-parse HEAD)\" = '$NOTIFY_SHA'"
+
+          ssh "${reg_opts[@]}" "$remote"             "git -C '$NOTIFY_SOURCE_DIR' archive --format=tar.gz '$NOTIFY_SHA' -- src/ru-core.js src/ru-core-server.js src/supabase-rest-store.js migrations/postgres/0003_telegram_relays.sql scripts/helicopter-relay-rollout-root-remote.sh"             > "$RUNNER_TEMP/notify-relay-payload.tgz"
+
+          test -s "$RUNNER_TEMP/notify-relay-payload.tgz"
+          tar -tzf "$RUNNER_TEMP/notify-relay-payload.tgz" | sort
+          echo "NOTIFY_PAYLOAD_SOURCE_SHA=$NOTIFY_SHA"
+
+      - name: Deploy exact payload to Beget
+        shell: bash
+        run: |
+          set -euo pipefail
+          beget_opts=(
+            -i "$RUNNER_TEMP/beget-key"
+            -o IdentitiesOnly=yes
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/beget-known-hosts"
+            -o ConnectTimeout=10
+          )
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          remote_dir="$(ssh "${beget_opts[@]}" "$remote" 'umask 077; mktemp -d /tmp/helicopter-notify-relay.XXXXXXXX')"
+
+          cleanup_remote() {
+            ssh "${beget_opts[@]}" "$remote" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
+          }
+          trap cleanup_remote EXIT
+
+          scp "${beget_opts[@]}" -q "$RUNNER_TEMP/notify-relay-payload.tgz" "$remote:$remote_dir/payload.tgz"
+
+          ssh "${beget_opts[@]}" "$remote" "bash -s -- '$remote_dir' '$HELICOPTER_TENANT_ID'" <<'REMOTE'
+          set -euo pipefail
+          remote_dir="$1"
+          tenant_id="$2"
+          source_dir="$remote_dir/source"
+          stage="$remote_dir/stage"
+
+          mkdir -p "$source_dir" "$stage"
+          tar -xzf "$remote_dir/payload.tgz" -C "$source_dir"
+
+          cp "$source_dir/src/ru-core.js" "$stage/ru-core.js"
+          cp "$source_dir/src/ru-core-server.js" "$stage/ru-core-server.js"
+          cp "$source_dir/src/supabase-rest-store.js" "$stage/supabase-rest-store.js"
+          cp "$source_dir/migrations/postgres/0003_telegram_relays.sql" "$stage/0003_telegram_relays.sql"
+          cp "$source_dir/scripts/helicopter-relay-rollout-root-remote.sh" "$stage/helicopter-relay-rollout-root-remote.sh"
+
+          exec bash "$stage/helicopter-relay-rollout-root-remote.sh" "$stage" "$tenant_id" "Дима"
+          REMOTE
+
+      - name: Remove SSH and payload material
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/reg-ru-key" "$RUNNER_TEMP/reg-ru-known-hosts"
+          rm -f "$RUNNER_TEMP/beget-key" "$RUNNER_TEMP/beget-known-hosts"
+          rm -f "$RUNNER_TEMP/notify-relay-payload.tgz"
