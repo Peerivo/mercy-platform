@@ -118,3 +118,21 @@ Only `--inspect` is accepted. Core dumps are disabled; subprocess errors, raw Do
 
 
 The Menaion inspector file parser must accept trailing blank lines, full-line comments and CRLF without trimming literal values or interpreting inline comments. Runtime Docker Env parsing remains strict. Failed inspection must identify only a fixed stage/reason enum, never raw errors, unknown text, paths or values. Twenty-seven offline tests cover the correction and fail-closed diagnostics; failed run `37061862510` caused no production change.
+
+
+## Owner-operated Menaion runtime replacement acceptance
+Before credential mutation, preserve the observed immutable image and complete
+Config/HostConfig/network inputs and require exact post-create comparison; copy
+WorkingDir/Labels/MaskedPaths rather than guessing daemon defaults. Passwords use
+non-TTY psql client-encrypted SCRAM and stdin only, never plaintext SQL/argv/logging.
+No shared Mercy container or logging configuration changes. A sanitized durable
+journal and separate private runtime backup support compensating rollback and
+explicit post-crash recovery to the retained original container/env, inactive exact
+role, cleared password, terminated dedicated sessions and passing legacy access.
+A new activation with unresolved state is refused. Require precise HTTP statuses
+and codes for narrow denial, short-lived in-memory probes, no data writes and
+unchanged shared runtime. Owner-operated credential entry and final submission are
+mandatory. PR preparation, mocked tests and read-only preflight are not production
+activation or public-form success. Persistent feedback token and real draft-saving
+acceptance remain separate. Run the new secretless Docker/PostgreSQL CI and report
+its actual result before requesting activation.

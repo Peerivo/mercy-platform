@@ -114,3 +114,15 @@ The existing manual exact-main Menaion inspector now includes a strictly read-on
 
 ## Menaion inspection parser correction
 Run `37061862510` confirmed the nine migration checksums but the runtime inspector failed closed with a generic sanitized error. Its protected-file parser now accepts blank/full-line comments and CRLF permitted by Docker env files, while preserving literal values and strict runtime environment parsing. Fixed stage/reason codes distinguish safe compatibility failures without exposing exceptions or configuration. No mutation or credential operation is added; production runtime readiness remains unverified until the corrected read-only inspection succeeds.
+
+
+## Prepared owner-operated Menaion runtime activation
+A separate manual exact-main production workflow now prepares owner-operated
+credential binding and exact Menaion-only runtime replacement, with retained old
+container/private configuration, sanitized write-ahead recovery state, legacy
+zero-row access and narrow-role denial probes. The old destructive provisioner is
+retired before effects. Offline failure recovery and secretless disposable CI are
+provided. This does not mean production activation, persistent feedback-token
+issuance, Vercel binding or successful public form saving has occurred. The owner
+must personally enter/save the password and submit the reviewed activation; the
+assistant must not dispatch it. See `docs/MENAION_RUNTIME_HANDOFF.md`.
