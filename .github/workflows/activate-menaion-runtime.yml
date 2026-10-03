@@ -1,0 +1,116 @@
+name: Activate or roll back Menaion runtime
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/activate-menaion-runtime.yml'
+      - '.github/workflows/provision-living-menaion-rest.yml'
+      - 'scripts/activate-menaion-runtime.py'
+      - 'scripts/inspect-menaion-runtime-handoff.py'
+      - 'tests/test_menaion_activation.py'
+      - 'tests/integration_menaion_activation.py'
+      - 'tests/fixtures/menaion_activation.sql'
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Owner-operated credential binding, or recovery of the retained old runtime
+        required: true
+        type: choice
+        options:
+          - ROLLBACK
+          - ACTIVATE
+      expected_sha:
+        description: Exact current Mercy main commit containing the reviewed implementation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Fail-closed and failure-recovery tests
+        run: |
+          python3 -m unittest discover -s tests -p 'test_menaion_activation.py' -v
+          python3 -m unittest discover -s tests -p 'test_menaion_runtime_handoff.py' -v
+          python3 -m py_compile scripts/activate-menaion-runtime.py
+      - name: Disposable Docker and PostgreSQL integration (no production secrets)
+        run: RUN_MENAION_DOCKER_INTEGRATION=1 python3 tests/integration_menaion_activation.py
+
+  operator:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    concurrency:
+      group: living-menaion-database-production
+      cancel-in-progress: false
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify exact current main and explicit operation
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          OPERATION: ${{ inputs.operation }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$EXPECTED_SHA" = "$GITHUB_SHA"
+          test "$(gh api repos/Peerivo/mercy-platform/git/ref/heads/main --jq .object.sha)" = "$GITHUB_SHA"
+          case "$OPERATION" in ACTIVATE|ROLLBACK) ;; *) exit 1 ;; esac
+          if [ "$OPERATION" = ACTIVATE ]; then test "$GITHUB_RUN_ATTEMPT" = 1; fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Owner-operated isolated runtime change
+        env:
+          OPERATION: ${{ inputs.operation }}
+          BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+          BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+          MENAION_REST_AUTH_PASSWORD: ${{ secrets.MENAION_REST_AUTH_PASSWORD }}
+        shell: bash
+        run: |
+          set +x
+          set -euo pipefail
+          ulimit -c 0
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || { echo "::error::Missing protected binding: $name"; exit 1; }
+          done
+          [[ "$BEGET_SUPABASE_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          [[ "$BEGET_SUPABASE_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          case "$OPERATION" in ACTIVATE) action=--activate; test -n "$MENAION_REST_AUTH_PASSWORD" ;; ROLLBACK) action=--rollback ;; *) exit 1 ;; esac
+          umask 077
+          key="$(mktemp)"
+          hosts="$(mktemp)"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > "$key"
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > "$hosts"
+          ssh_args=(-T -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts")
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          directory=".living-menaion/activation-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          # Source and credential use separate SSH stdin streams. Code staging has
+          # no production credential content and never uses scp or an unpinned host.
+          ssh "${ssh_args[@]}" "$remote" "umask 077; test -d \"\$HOME/.living-menaion\" && test ! -L \"\$HOME/.living-menaion\" && mkdir \"\$HOME/$directory\""
+          for script in inspect-menaion-runtime-handoff.py activate-menaion-runtime.py; do
+            ssh "${ssh_args[@]}" "$remote" "umask 077; cat > \"\$HOME/$directory/$script\"" < "scripts/$script"
+          done
+          if [ "$OPERATION" = ACTIVATE ]; then
+            # The owner enters and saves this GitHub secret and personally clicks
+            # Run workflow. The assistant must never dispatch this operation.
+            printf '%s' "$MENAION_REST_AUTH_PASSWORD" | ssh "${ssh_args[@]}" "$remote" \
+              "python3 \"\$HOME/$directory/activate-menaion-runtime.py\" $action $GITHUB_SHA $GITHUB_RUN_ID"
+          else
+            ssh "${ssh_args[@]}" "$remote" \
+              "python3 \"\$HOME/$directory/activate-menaion-runtime.py\" $action $GITHUB_SHA $GITHUB_RUN_ID" < /dev/null
+          fi
