@@ -137,9 +137,9 @@ class MenaionActivationIntegration(unittest.TestCase):
         # Diagnostics are fixture-only and emit field names/network shape, never
         # environment values, labels, password data or raw Docker error bodies.
         original_fidelity = m.fidelity
-        def checked_fidelity(actual, expected, image, network):
+        def checked_fidelity(actual, expected, image, network, **kwargs):
             try:
-                return original_fidelity(actual, expected, image, network)
+                return original_fidelity(actual, expected, image, network, **kwargs)
             except m.Refused:
                 config = {key: value for key, value in expected.items()
                           if key not in ("HostConfig", "NetworkingConfig")}

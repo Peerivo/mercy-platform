@@ -65,7 +65,13 @@ logs. New script staging contains source only, not the credential.
 Before the password step, create a stopped candidate with the live configuration
 and compare every effective Config/HostConfig field, immutable image and writable
 network setting exactly. An ignored field, daemon normalization or unexpected
-Docker default fails closed; no broad null/default normalization is used. The
+Docker default fails closed; no broad null/default normalization is used.
+One source-verified prestart exception applies only when the daemon reports no
+OOM-kill-disable capability: Moby creates a stopped candidate with
+`OomKillDisable=false` from an original `null`, then restores `null` at start.
+Only that explicit null-to-false representation is allowed while state is
+`created`; the running candidate must pass the original full exact comparison.
+See [Moby create/start resource handling](https://github.com/moby/moby/blob/v28.5.1/daemon/daemon_unix.go). The
 observed WorkingDir, Labels and MaskedPaths differences are copied verbatim.
 
 After cutover, require legacy token HTTP 200 plus an empty zero-row query; an

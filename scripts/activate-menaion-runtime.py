@@ -113,6 +113,9 @@ class Docker:
         # Use the daemon's own schema; ignored/normalized fields are then caught by
         # full post-create equality. We never substitute local guessed defaults.
         self.prefix = "/v" + version
+        info = self.request("GET", "/info")
+        require(type(info.get("OomKillDisable")) is bool)
+        self.oom_kill_disable_supported = info["OomKillDisable"]
 
     def request(self, method, path, body=None, missing=False):
         connection = UnixHTTP("localhost", timeout=25)
@@ -167,10 +170,21 @@ def replacement(old, password):
             "NetworkingConfig": {"EndpointsConfig": {n: endpoint_inputs(v) for n, v in networks.items()}}}
 
 
-def fidelity(actual, expected, image, network):
+def fidelity(actual, expected, image, network, *, prestart_oom_default=False):
     config = {k: v for k, v in expected.items() if k not in ("HostConfig", "NetworkingConfig")}
     require(strict_equal(actual["Config"], config))
-    require(strict_equal(actual["HostConfig"], expected["HostConfig"]))
+    host = actual["HostConfig"]
+    if (prestart_oom_default is True and actual["State"].get("Status") == "created"
+            and actual["State"].get("Running") is False
+            and "OomKillDisable" in expected["HostConfig"]
+            and expected["HostConfig"]["OomKillDisable"] is None
+            and host.get("OomKillDisable") is False):
+        # Moby on hosts without OOM-kill-disable support sets null->false during
+        # create, then false->null during start. This prestart-only representation
+        # allowance requires a daemon capability check; the RUNNING comparison
+        # below remains exact. Never accept true, 0, missing fields or other drift.
+        host = {**host, "OomKillDisable": None}
+    require(strict_equal(host, expected["HostConfig"]))
     require(actual["Image"] == image)
     require(actual.get("Mounts") == [])
     networks = actual["NetworkSettings"]["Networks"]
@@ -411,7 +425,8 @@ class Activation:
             # stopped candidate. Never remove a foreign container on a name alone.
             require("proposed" in self.state)
             require(item["State"].get("Running") is False)
-            fidelity(item, self.state["proposed"], self.state["old"]["Image"], self.state["network"])
+            fidelity(item, self.state["proposed"], self.state["old"]["Image"], self.state["network"],
+                     prestart_oom_default=self.docker.oom_kill_disable_supported is False)
         return item
 
     def verify_shared(self):
@@ -433,7 +448,8 @@ class Activation:
             require(type(created) is dict and bool(CID.fullmatch(created.get("Id", ""))))
             self.state["candidate_id"] = created["Id"]
             self.save("created")
-            fidelity(self.docker.inspect(created["Id"]), self.state["proposed"], self.state["old"]["Image"], self.state["network"])
+            fidelity(self.docker.inspect(created["Id"]), self.state["proposed"], self.state["old"]["Image"], self.state["network"],
+                     prestart_oom_default=self.docker.oom_kill_disable_supported is False)
             self.save("password")
             set_password(password, self.state["role_oid"], self.database_target())
             self.save("login")

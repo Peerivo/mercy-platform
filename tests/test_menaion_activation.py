@@ -40,6 +40,7 @@ class FakeDocker:
         old, shared, kong, _ = fixture()
         self.items = {OLD_ID: old, SHARED_ID: shared, KONG_ID: kong, DB_ID: {'Id':DB_ID, 'Name':'/supabase-db'}}
         self.fail, self.events = fail, []
+        self.oom_kill_disable_supported = False
 
     def point(self, name):
         self.events.append(name)
@@ -142,6 +143,29 @@ class PureTests(unittest.TestCase):
             mutate(bad)
             with self.assertRaises(m.Refused):
                 m.fidelity(bad, proposed, old['Image'], 'stack_default')
+
+    def test_only_created_unsupported_oom_default_is_allowed_then_exact(self):
+        old, *_ = fixture()
+        old['HostConfig']['OomKillDisable'] = None
+        proposed = m.replacement(old, PASSWORD)
+        docker = FakeDocker()
+        docker.request('POST', '/containers/create?name=' + m.CANDIDATE, proposed)
+        actual = docker.inspect(NEW_ID)
+        actual['State']['Status'] = 'created'
+        actual['HostConfig']['OomKillDisable'] = False
+        m.fidelity(actual, proposed, old['Image'], 'stack_default', prestart_oom_default=True)
+        with self.assertRaises(m.Refused):
+            m.fidelity(actual, proposed, old['Image'], 'stack_default')
+        actual['State'] = {'Running': True, 'Status': 'running'}
+        with self.assertRaises(m.Refused):
+            m.fidelity(actual, proposed, old['Image'], 'stack_default', prestart_oom_default=True)
+        actual['HostConfig']['OomKillDisable'] = None
+        m.fidelity(actual, proposed, old['Image'], 'stack_default')
+        for wrong in (True, 0, '', []):
+            actual['State'] = {'Running': False, 'Status': 'created'}
+            actual['HostConfig']['OomKillDisable'] = wrong
+            with self.assertRaises(m.Refused):
+                m.fidelity(actual, proposed, old['Image'], 'stack_default', prestart_oom_default=True)
 
     def test_password_only_stdin_and_client_encrypted_command(self):
         calls = []
