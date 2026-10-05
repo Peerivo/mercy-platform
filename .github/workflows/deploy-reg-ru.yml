@@ -406,16 +406,28 @@ jobs:
               new URL("/auth/v1/admin/users?page=1&per_page=1", url),
               {
                 signal: AbortSignal.timeout(10000),
+                redirect: "error",
                 headers: {
                   apikey: serviceKey,
                   Authorization: `Bearer ${serviceKey}`,
                 },
               },
             );
+            const adminBody = await admin.json();
+            if (!adminBody || typeof adminBody !== "object" || !Array.isArray(adminBody.users)) {
+              throw new Error("Unexpected Admin response shape");
+            }
             const settings = await fetch(new URL("/auth/v1/settings", url), {
               signal: AbortSignal.timeout(10000),
+              redirect: "error",
               headers: { apikey: publicKey },
             });
+            const settingsBody = await settings.json();
+            if (!settingsBody || typeof settingsBody !== "object" ||
+                !settingsBody.external || typeof settingsBody.external !== "object" ||
+                Array.isArray(settingsBody.external)) {
+              throw new Error("Unexpected public Auth response shape");
+            }
             process.stdout.write(`${admin.status} ${settings.status}`);
           })().catch(() => {
             process.stdout.write("fetch_error fetch_error");

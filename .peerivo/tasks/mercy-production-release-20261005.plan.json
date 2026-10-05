@@ -15,7 +15,8 @@
     "Keep the direct GoTrue credential preflight and independent REG.RU public-path Admin/Public gate.",
     "Fail closed for missing or ambiguous identity, address or accepted key.",
     "Preserve the existing rollback image and runtime environment.",
-    "Never equate CI or a Vercel Preview with REG.RU deployment or real-account authentication acceptance."
+    "Never equate CI or a Vercel Preview with REG.RU deployment or real-account authentication acceptance.",
+    "The public Auth probe must not follow redirects or declare success before complete structurally valid JSON responses."
   ],
   "scenarios": [
     {

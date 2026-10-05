@@ -107,3 +107,7 @@ Before DNS cutover, a failed PREPARE automatically restores the previous REG.RU 
 After DNS cutover, the fastest application rollback is to repoint `mercy.peerivo.net` to the still-retained Vercel production deployment, then investigate REG.RU. Do not unfreeze or roll back the old managed Supabase merely because an application-host cutover failed.
 
 A database rollback, source unfreeze, migration, secret rotation or DNS mutation is outside PREPARE/VERIFY authority.
+
+
+### Complete, same-origin public Auth acceptance
+The candidate's external Admin/Public probes now reject redirects before any credential can be forwarded to another endpoint. Success requires complete JSON bodies within the existing 10-second abort windows, an Admin `users` array and a public-settings `external` object, then HTTP 200 for both. Truncated/stalled bodies, maintenance HTML and unexpected JSON shapes fail closed while rollback remains armed. Executable tests run the exact candidate Node probe against real loopback HTTP servers, including an independent redirect sink which must receive zero requests/credentials. Baseline `88f48d1` fails all ten rejection cases; this is production-gate regression evidence, not a claim of successful live sign-in.

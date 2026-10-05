@@ -140,6 +140,87 @@ describe("executable live Beget service-role preflight", () => {
   });
 });
 
+function runCandidateAuthProbe(channel: "admin" | "public" | null = null, fault: "truncate" | "timeout" | "redirect" | "html" | "shape" = "truncate") {
+  const script = workflow.split('auth_channels="$(')[1]?.split("<<'NODE'\n")[1]
+    ?.split("\n          NODE\n")[0].replace(/^ {10}/gm, "");
+  if (!script) throw new Error("Candidate Auth Node probe is missing");
+  const harness = `
+const http = require('node:http');
+const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+AbortSignal.timeout = milliseconds => {
+  if (milliseconds !== 10000) throw new Error('Unexpected production timeout');
+  return realTimeout(1000);
+};
+(async () => {
+  let redirectedRequests = 0;
+  let redirectedApiKey = false;
+  const sink = http.createServer((request, response) => {
+    redirectedRequests += 1;
+    redirectedApiKey ||= Boolean(request.headers.apikey);
+    response.end('{"users":[],"external":{}}');
+  });
+  await new Promise(resolve => sink.listen(0, '127.0.0.1', resolve));
+  const server = http.createServer((request, response) => {
+    const requestedChannel = request.url.includes('/admin/') ? 'admin' : 'public';
+    if (requestedChannel === ${JSON.stringify(channel)} && ${JSON.stringify(fault)} === 'redirect') {
+      response.writeHead(302, {Location: 'http://127.0.0.1:' + sink.address().port});
+      response.end();
+    } else if (requestedChannel === ${JSON.stringify(channel)} && ['html', 'shape'].includes(${JSON.stringify(fault)})) {
+      response.writeHead(200, {'Content-Type': 'application/json'});
+      response.end(${JSON.stringify(fault)} === 'html' ? '<h1>Maintenance</h1>' : '{}');
+    } else if (requestedChannel === ${JSON.stringify(channel)}) {
+      response.writeHead(200, {'Content-Type': 'application/json', 'Content-Length': '999'});
+      response.flushHeaders();
+      response.write('{');
+      if (${JSON.stringify(fault)} === 'truncate') setTimeout(() => response.destroy(), 40);
+    } else {
+      response.writeHead(200, {'Content-Type': 'application/json'});
+      response.end(requestedChannel === 'admin' ? '{"users":[]}' : '{"external":{}}');
+    }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:' + server.address().port;
+  try {
+    const probe = ${script}
+    await probe;
+  } finally {
+    server.closeAllConnections();
+    sink.closeAllConnections();
+    await Promise.all([new Promise(resolve => server.close(resolve)), new Promise(resolve => sink.close(resolve))]);
+    process.stderr.write(JSON.stringify({redirectedRequests, redirectedApiKey}));
+  }
+})().catch(() => process.exitCode = 1);
+`;
+  return spawnSync(process.execPath, ["-"], {
+    input: harness, encoding: "utf8", timeout: 15000,
+    env: { ...process.env,
+      SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key",
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fixture-public-key" },
+  });
+}
+
+describe("executable REG.RU public Auth gate", () => {
+  it("accepts complete Admin/Public responses from an actual loopback HTTP server", () => {
+    const result = runCandidateAuthProbe();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("200 200");
+    expect(JSON.parse(result.stderr)).toEqual({ redirectedRequests: 0, redirectedApiKey: false });
+  });
+
+  it.each([
+    ["admin", "truncate"], ["public", "truncate"],
+    ["admin", "timeout"], ["public", "timeout"],
+    ["admin", "redirect"], ["public", "redirect"],
+    ["admin", "html"], ["public", "html"],
+    ["admin", "shape"], ["public", "shape"],
+  ] as const)("rejects %s %s after HTTP 200 headers", (channel, fault) => {
+    const result = runCandidateAuthProbe(channel, fault);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("fetch_error fetch_error");
+    expect(JSON.parse(result.stderr)).toEqual({ redirectedRequests: 0, redirectedApiKey: false });
+  });
+});
+
 describe("REG.RU production deployment safety contract", () => {
   it("pins checkout and SSH trust", () => {
     expect(workflow).toContain("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683");
