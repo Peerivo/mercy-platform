@@ -150,3 +150,13 @@ The candidate's external Admin/Public probes now reject redirects before any cre
 - Run `37305664387` failed before inspection because the existing Beget account could not run Python via passwordless sudo. SSH and exact-main gates passed; protected runtime and owner facts remain unknown.
 - The default inspector and workflow now collect only existing-account systemd and public-health facts. Tests forbid file, environment and Docker reads in default mode and prohibit sudo/protected-mode selection in the workflow.
 - The full reviewed read-only metadata mode remains available only through an explicit operator invocation; no new privileged route or access change was added. See the immutable source/hash handoff in `docs/NOTIFY_RU_INSPECTION.md`.
+
+
+## Non-disruptive REG.RU data-readiness acceptance — 2026-10-05
+- Exact anonymous RPC preflight must complete before image build or REG.RU mutation; the immutable image's actual `/health/data` must also pass on the runner before upload.
+- The standalone probe must reject invalid/privileged public-key inputs before I/O, redirects with no credential forwarding, oversized/truncated/stalled bodies, invalid JSON/shapes and non-200 responses. Only fixed sanitized facts are emitted. Executable tests include equivalence with the actual application GET request contract.
+- The real deployment shell is exercised with isolated Docker/curl boundaries. Failed candidate data or Auth checks must leave the identical original container running and its env unchanged. Failures after stop, rename, production start or final data check must restore that same original container. Success retains the original stopped rollback container and previous env.
+- Baseline `e439c7c` fails assertions preserving original container identity on candidate data/Auth failure; the corrected transaction passes those regressions. Synthetic fixtures are not production acceptance.
+- Public DNS A `95.163.223.68`, nginx, actual public `/health` revision and `/health/data` are checked independently. Vercel READY does not establish REG.RU promotion. Follow with real-account login, cabinet return, reload and logout after the target public revision is observed.
+
+- Promotion/metadata failure injection must restore the same original running container even if env metadata cannot be rewritten; such metadata remains explicitly unverified and deployment remains failed.
