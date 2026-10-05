@@ -140,7 +140,13 @@ The Menaion inspector file parser must accept trailing blank lines, full-line co
 The candidate's external Admin/Public probes now reject redirects before any credential can be forwarded to another endpoint. Success requires complete JSON bodies within the existing 10-second abort windows, an Admin `users` array and a public-settings `external` object, then HTTP 200 for both. Truncated/stalled bodies, maintenance HTML and unexpected JSON shapes fail closed while rollback remains armed. Executable tests run the exact candidate Node probe against real loopback HTTP servers, including an independent redirect sink which must receive zero requests/credentials. Baseline `88f48d1` fails all ten rejection cases; this is production-gate regression evidence, not a claim of successful live sign-in.
 
 
-## Notify RU inspection preparation
+## Notify RU inspection preparation — historical before first dispatch
 - Synthetic tests verify read-only fixed-target commands, bounded file reads, safe metadata redaction, ignored credential fields, exact actor/private binding and manual exact-main gates. No authenticated HTTP request is ever issued; connection metadata comes from one scoped read-only database query and cannot count as API/delivery verification.
 - No protected dispatch or production result is included in local acceptance. Applied migration/actual owner identity/delivery remain separately unverified.
 - Full inspection scope and explicit input contract: `docs/NOTIFY_RU_INSPECTION.md`.
+
+
+## Notify diagnostic access boundary — 2026-10-05
+- Run `37305664387` failed before inspection because the existing Beget account could not run Python via passwordless sudo. SSH and exact-main gates passed; protected runtime and owner facts remain unknown.
+- The default inspector and workflow now collect only existing-account systemd and public-health facts. Tests forbid file, environment and Docker reads in default mode and prohibit sudo/protected-mode selection in the workflow.
+- The full reviewed read-only metadata mode remains available only through an explicit operator invocation; no new privileged route or access change was added. See the immutable source/hash handoff in `docs/NOTIFY_RU_INSPECTION.md`.
