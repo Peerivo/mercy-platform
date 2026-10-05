@@ -126,3 +126,15 @@ The Menaion inspector file parser must accept trailing blank lines, full-line co
 - Exact already-applied state is verified read-only and never replays SQL. Unknown outcome requires inspection before any retry. No raw SQL, submitted content, keys or runtime configuration appear in logs.
 - All nine previous ledger checksums, old encrypted payloads/executors and owner-activation PR #214 remain unchanged. This transport performs no credential, runtime or Telegram activation. Production and end-to-end verification remain explicit pending stages.
 - Unit regressions and opt-in disposable PostgreSQL acceptance are documented in `docs/MENAION_MODERATION_TRANSPORT.md`; the integration harness accepts only local PostgreSQL binaries/source files and creates its own database.
+
+
+## REG.RU direct GoTrue preflight acceptance — 2026-10-05
+- The exact PREPARE remote shell is executed by `tests/deploy-reg-ru.test.ts` with isolated synthetic Docker, curl and protected-env boundaries. It never accesses production services or files.
+- A unique valid candidate succeeds against direct GoTrue with a 10-second request timeout; rejected candidates may be skipped; duplicated copies are probed once. Missing/ambiguous containers or addresses, unreachable GoTrue, incomplete HTTP 200 responses, no valid JWT and multiple distinct accepted JWTs fail before any key is emitted.
+- Regression baseline `ca26183e711015ae80e1ca452075163fc9cc9f24` fails assertions for ambiguous containers, addresses and accepted keys; the corrected selector rejects each. A separate assertion also reproduces and blocks curl failure after partial HTTP 200 output. These fixtures establish selector behavior, not a production network root cause.
+- REG.RU promotion still requires public-path Admin=200/Public=200, app/data health, canonical callback and Peerivo PKCE-start verification while rollback is armed. The old image and previous env are retained for rollback.
+- After merge, record the exact production run/revision and then verify public health/data, callback, real-account login, cabinet return, reload and logout. Do not mark real-account E2E or REG.RU public cutover complete from CI, a Vercel Preview, or direct-GoTrue selection alone. No DB, DNS, credential creation/rotation or permission change belongs to this fix.
+
+
+### Complete, same-origin public Auth acceptance
+The candidate's external Admin/Public probes now reject redirects before any credential can be forwarded to another endpoint. Success requires complete JSON bodies within the existing 10-second abort windows, an Admin `users` array and a public-settings `external` object, then HTTP 200 for both. Truncated/stalled bodies, maintenance HTML and unexpected JSON shapes fail closed while rollback remains armed. Executable tests run the exact candidate Node probe against real loopback HTTP servers, including an independent redirect sink which must receive zero requests/credentials. Baseline `88f48d1` fails all ten rejection cases; this is production-gate regression evidence, not a claim of successful live sign-in.
