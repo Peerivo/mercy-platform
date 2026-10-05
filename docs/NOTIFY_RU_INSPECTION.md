@@ -45,19 +45,17 @@ tokens, customer content or Telegram messages.
   five-second statement timeout and `ROLLBACK`; no schema/table/user-data export;
 - unauthenticated loopback `http://127.0.0.1:3000/health` and canonical HTTPS
   `https://notify-api.peerivo.net/health`, with bounded bodies/timeouts and no redirects;
-- protected Notify environment: only the existing scoped Menaion profile and core
-  token equality check are parsed locally, without shell evaluation;
-- only when recognized, configured core health/capability and canonical port are
-  confirmed, and the expected active unit's PID/UID demonstrably owns the exact
-  loopback listener: authenticated GET of the already-bound private connection using the
-  already-existing dedicated scoped token. There is no general-token fallback.
+- protected Notify environment: only existing tenant/connection/actor references
+  and port are parsed, without shell evaluation; credential fields are ignored;
+- if those references are valid: one primary-key- and tenant-constrained connection
+  metadata read in the same PostgreSQL target, inside a bounded read-only transaction.
+  Only found/binding/private/actor/active booleans can leave the database.
 
-The connection report contains booleans for binding, private chat, active state
-and actor equality. It does not expose identity values. Token values are normalized
-exactly as the core does before rejecting accidental global-token aliasing. A
-missing/invalid core-token reference prevents the scoped request. Kernel PID start
-time, process identity and socket ownership are checked; public health JSON alone
-cannot establish listener identity. All file reads are bounded before allocation.
+The connection report contains safe metadata booleans without exposing identities.
+No bearer is transmitted. The HTTP request layer rejects credential headers and
+all paths except the two public health endpoints. This avoids trusting spoofable
+health JSON or a check-then-connect listener identity. File reads are bounded
+before allocation; symlinks and FIFOs are refused.
 
 ## Interpreting the report
 
@@ -67,11 +65,11 @@ while other checks remain false; workflow completion is not readiness success.
 Compare runtime hashes to the accepted Notify source independently. A declared
 revision alone is not proof of deployed bytes.
 
-`privateOwnerConnection.ready` means the returned connection matches the existing
-profile. It does not independently prove the profile actor belongs to the owner.
-The report always keeps `ownerIdentityIndependentlyVerified:false` and
-`productionDeliveryVerified:false`. Owner identity and actual approve/reject
-delivery need separate authorized acceptance evidence.
+`matchesConfiguredPrivateOwner` only indicates that stored connection metadata
+matches the existing scope reference. It does not verify an API credential,
+independently identify the owner, or prove delivery. `privateOwnerConnection.ready`
+and `apiVerified` always remain false here, as do `ownerIdentityIndependentlyVerified`
+and `productionDeliveryVerified`. Those need separate acceptance evidence.
 
 No restart, deploy, migration, credential provisioning, relay arm, onboarding or
 Telegram send is permitted by this workflow. If inspection identifies a needed
@@ -83,7 +81,7 @@ change, describe that exact next action and obtain its applicable authorization.
 python3 -m unittest discover -s tests -p 'test_notify_ru_inspection.py' -v
 ```
 
-Fixtures exercise sanitized output, missing/aliased credentials, whitespace aliasing,
-wrong actor/chat/binding, old/unconfigured health, wrong port, query limits, exception
-redaction, environment non-evaluation, symlink refusal and manual workflow gates.
-These tests do not contact production or prove live service availability.
+Fixtures exercise sanitized metadata, absent/aliased/arbitrary ignored credentials,
+wrong actor/chat/binding, spoofed listener health, SQL target/transaction/row bounds,
+exception redaction, environment non-evaluation, bounded memory, symlink/FIFO refusal
+and manual workflow gates. They do not contact production or prove live delivery.

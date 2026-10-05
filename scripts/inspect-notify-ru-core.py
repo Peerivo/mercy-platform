@@ -3,9 +3,9 @@
 import hashlib
 import json
 import os
-import pwd
 import re
 import shlex
+import stat
 import subprocess
 import urllib.error
 import urllib.request
@@ -20,7 +20,7 @@ RUNTIME_FILES = (
     "src/menaion-scope.js", "src/secret-box.js", "src/supabase-rest-store.js", "src/telegram-api.js",
 )
 ENV_NAMES = frozenset((
-    "PORT", "NOTIFY_CORE_TOKEN", "NOTIFY_MENAION_TOKEN", "NOTIFY_MENAION_TENANT_ID",
+    "PORT", "NOTIFY_MENAION_TENANT_ID",
     "NOTIFY_MENAION_CONNECTION_ID", "NOTIFY_MENAION_ALLOWED_ACTOR",
 ))
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", re.I)
@@ -56,54 +56,18 @@ def run_command(command, stdin=None):
 
 
 def read_bounded(filename, limit):
-    with filename.open("rb") as handle:
-        data = handle.read(limit + 1)
+    fd = os.open(filename, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("not_regular")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            data = handle.read(limit + 1)
+    finally:
+        os.close(fd)
     if len(data) > limit:
         raise ValueError("oversized")
     return data
 
-
-def listener_matches_service(pid, proc_root=Path("/proc"), expected_uid=None):
-    """Kernel-observed PID/uid/socket binding; health JSON alone is not identity."""
-    try:
-        if not isinstance(pid, int) or pid <= 0:
-            return False
-        uid = pwd.getpwnam("peerivo-notify").pw_uid if expected_uid is None else expected_uid
-        process = proc_root / str(pid)
-        def start_time():
-            fields = read_bounded(process / "stat", 8192).decode().rsplit(") ", 1)[1].split()
-            return fields[19]
-        started = start_time()
-        status = read_bounded(process / "status", 65536).decode()
-        identity = next((line.split()[1:] for line in status.splitlines() if line.startswith("Uid:")), [])
-        if identity != [str(uid)] * 4:
-            return False
-        cmdline = read_bounded(process / "cmdline", 4096).split(b"\0")
-        if cmdline != [b"/usr/bin/node", b"/opt/peerivo-notify/current/src/ru-core-server.js", b""]:
-            return False
-        listeners = set()
-        for line in read_bounded(proc_root / "net/tcp", 262144).decode().splitlines()[1:]:
-            fields = line.split()
-            if len(fields) >= 10 and fields[1] in ("0100007F:0BB8", "00000000:0BB8") and fields[3] == "0A":
-                if fields[7] != str(uid):
-                    return False
-                listeners.add(fields[9])
-        if len(listeners) != 1:
-            return False
-        owned = set()
-        count = 0
-        with os.scandir(process / "fd") as entries:
-            for entry in entries:
-                count += 1
-                if count > 1024:
-                    return False
-                target = os.readlink(entry.path)
-                match = re.fullmatch(r"socket:\[([0-9]+)\]", target)
-                if match:
-                    owned.add(match.group(1))
-        return listeners.issubset(owned) and start_time() == started
-    except Exception:
-        return False
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -112,12 +76,10 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def http_json(url, headers=None):
-    # Only these fixed read endpoints are reachable from this inspector.
-    if url != PUBLIC_HEALTH and url != LOOPBACK + "/health":
-        prefix = LOOPBACK + "/v1/telegram/connections/"
-        if not url.startswith(prefix) or not UUID.fullmatch(url[len(prefix):]):
-            return {"status": "refused"}
-    request = urllib.request.Request(url, headers=headers or {}, method="GET")
+    # This diagnostic never sends credentials, including to a local listener.
+    if headers or url not in (PUBLIC_HEALTH, LOOPBACK + "/health"):
+        return {"status": "refused"}
+    request = urllib.request.Request(url, method="GET")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     try:
         with opener.open(request, timeout=5) as response:
@@ -177,7 +139,7 @@ def health_summary(result):
     return summary
 
 
-def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, request=http_json, listener=listener_matches_service):
+def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, request=http_json):
     report = {"format": "peerivo-notify-readiness-v1", "readOnly": True,
               "productionDeliveryVerified": False, "ownerIdentityIndependentlyVerified": False}
     try:
@@ -251,36 +213,40 @@ def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, requ
     except Exception:
         report["publicHealth"] = {"status": "unverified"}
 
-    report["privateOwnerConnection"] = {"checked": False, "ready": False}
+    report["privateOwnerConnection"] = {"checked": False, "ready": False, "apiVerified": False}
     try:
         env = parse_environment(env_file)
-        token = env.get("NOTIFY_MENAION_TOKEN", "").strip(ECMASCRIPT_TRIM)
-        tenant = env.get("NOTIFY_MENAION_TENANT_ID", "").strip(ECMASCRIPT_TRIM)
-        connection_id = env.get("NOTIFY_MENAION_CONNECTION_ID", "").strip(ECMASCRIPT_TRIM)
+        tenant = env.get("NOTIFY_MENAION_TENANT_ID", "").strip(ECMASCRIPT_TRIM).lower()
+        connection_id = env.get("NOTIFY_MENAION_CONNECTION_ID", "").strip(ECMASCRIPT_TRIM).lower()
         actor = ACTOR.fullmatch(env.get("NOTIFY_MENAION_ALLOWED_ACTOR", "").strip(ECMASCRIPT_TRIM))
-        core = env.get("NOTIFY_CORE_TOKEN", "").strip(ECMASCRIPT_TRIM)
-        valid = re.fullmatch(r"[\x21-\x7e]{32,4096}", token) is not None and re.fullmatch(r"[\x21-\x7e]{32,4096}", core) is not None and token != core and UUID.fullmatch(tenant) is not None and UUID.fullmatch(connection_id) is not None and actor is not None
-        report["scopedProfile"] = {"readable": True, "configured": bool(valid), "canonicalPort": env.get("PORT", "3000") == "3000"}
-        health = report["loopbackHealth"]
-        service = report["service"].get("state", {})
-        expected_service = report["service"].get("available") and service.get("ActiveState") == "active" and service.get("SubState") == "running" and all(service.get(key) is True for key in ("UserExpected", "GroupExpected", "WorkingDirectoryExpected", "ExecStartExpected"))
-        report["listenerMatchesService"] = bool(expected_service and listener(service.get("MainPID")))
-        if valid and report["listenerMatchesService"] and report["scopedProfile"]["canonicalPort"] and health.get("configured") and health.get("recognizedService") and health.get("ok") and health.get("ownerScopedActions") and health.get("httpStatus") == 200:
-            result = request(LOOPBACK + "/v1/telegram/connections/" + connection_id,
-                             {"Authorization": "Bearer " + token, "Accept": "application/json"})
-            body = result.get("payload")
-            connection = body.get("connection") if isinstance(body, dict) else None
-            if result.get("httpStatus") == 200 and isinstance(body, dict) and body.get("ok") is True and isinstance(connection, dict):
-                found = body.get("found") is True
-                bound = connection.get("id") == connection_id and connection.get("tenantId") == tenant
-                private = connection.get("chatType") == "private"
-                matches = str(connection.get("chatId")) == actor.group(1) and str(connection.get("telegramUserId")) == actor.group(1)
-                active = connection.get("status") == "active"
-                ready = found and bound and private and matches and active and connection.get("ready") is True
-                report["privateOwnerConnection"] = {"checked": True, "found": found, "bindingMatches": bound,
-                                                     "private": private, "actorMatches": matches, "active": active, "ready": ready}
+        valid = UUID.fullmatch(tenant) is not None and UUID.fullmatch(connection_id) is not None and actor is not None
+        report["scopedProfile"] = {"readable": True, "scopeReferenceValid": bool(valid), "credentialsChecked": False,
+                                   "canonicalPort": env.get("PORT", "3000") == "3000"}
+        if valid:
+            # Identifiers are accepted only after UUID/digits validation. No secret
+            # is read into this query, and only five booleans can leave PostgreSQL.
+            sql = f"""BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '5s';
+SELECT json_build_object(
+ 'found', count(*) = 1,
+ 'bindingMatches', coalesce(bool_and(c.id = '{connection_id}'::uuid AND c.tenant_id = '{tenant}'::uuid), false),
+ 'private', coalesce(bool_and(coalesce(to_jsonb(c)->>'connected_chat_type',
+   CASE WHEN c.connected_chat_id > 0 AND c.connected_chat_id = c.connected_user_id THEN 'private' ELSE 'unknown' END) = 'private'), false),
+ 'actorMatches', coalesce(bool_and(c.connected_chat_id = {actor.group(1)}::bigint AND c.connected_user_id = {actor.group(1)}::bigint), false),
+ 'active', coalesce(bool_and(c.status = 'active'), false)
+)
+FROM public.notify_telegram_connections c
+WHERE c.id = '{connection_id}'::uuid AND c.tenant_id = '{tenant}'::uuid;
+ROLLBACK;
+"""
+            result = command(DATABASE_COMMAND, sql)
+            metadata = json.loads(result) if result is not None else None
+            names = ("found", "bindingMatches", "private", "actorMatches", "active")
+            if isinstance(metadata, dict) and set(metadata) == set(names) and all(type(metadata[name]) is bool for name in names):
+                report["privateOwnerConnection"] = {"checked": True, "source": "database_metadata", **metadata,
+                    "matchesConfiguredPrivateOwner": all(metadata.values()), "ready": False, "apiVerified": False}
     except Exception:
-        report.setdefault("scopedProfile", {"readable": False, "configured": False})
+        report.setdefault("scopedProfile", {"readable": False, "scopeReferenceValid": False, "credentialsChecked": False})
     return report
 
 
