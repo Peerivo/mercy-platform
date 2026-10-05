@@ -1,0 +1,32 @@
+{
+  "taskId": "mercy-data-readiness-20261005",
+  "repository": "Peerivo/mercy-platform",
+  "environment": "Existing protected GitHub runner and REG.RU Mercy application",
+  "scope": "Diagnose and correct the newly observed production data-readiness failure without interrupting the original container during staging; continue the owner-authorized Mercy release.",
+  "authorizationSource": "Owner request of 2026-10-05 10:52 UTC to finish Mercy and make it work without repeated ordinary approvals.",
+  "global": {
+    "version": "1.12.0",
+    "gitSha": "5ac07019c004415ed8eb82222f6bdc51b6a270aa",
+    "artifactSha256": "9ff754408729013041a0e442ed30002a644df14bc1b390ebcb64ab86c3f0426b"
+  },
+  "beforeSha": "e439c7cc67c5329c61f7ac62742cbe724afa88de",
+  "failedRun": "https://github.com/Peerivo/mercy-platform/actions/runs/37304787753",
+  "decisions": [
+    "Do not attribute the observed 503 to a credential or source-code fault without runtime evidence.",
+    "Match the actual anonymous RPC and keep its five-second deadline; reject redirects and incomplete responses.",
+    "Keep production container identity and environment unchanged until the isolated candidate passes all gates.",
+    "Retain and restore the same original container on promotion failure.",
+    "No secret values, user rows or raw exception text may enter logs.",
+    "Production DNS already points to REG.RU; Vercel readiness is not production acceptance."
+  ],
+  "scenarios": [
+    "Exact bounded public RPC preflight using current protected public configuration",
+    "Built image data readiness on the runner before upload",
+    "Candidate on loopback 3101 with original production on 3100 unchanged",
+    "Failure injection before and after stop, rename, start and final readiness",
+    "Same-origin Admin/Public, canonical callback and PKCE gates before and after switching",
+    "Observed public target revision, data readiness and real-account login/cabinet/reload/logout"
+  ],
+  "excluded": ["DB mutation", "DNS mutation", "new credentials or grants", "secret rotation", "security permission changes", "synthetic production accounts"],
+  "completion": "Report implementation, merge, actual deployment and scenario verification independently; preserve any unresolved runtime failure as a blocker."
+}

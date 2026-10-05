@@ -251,13 +251,16 @@ describe("REG.RU production deployment safety contract", () => {
     expect(workflow).not.toContain("runner-side GoTrue Admin verification");
   });
 
-  it("arms rollback before removing an existing application container", () => {
+  it("keeps the old container until staging passes and arms restoration before stopping it", () => {
     const safetyComment = workflow.indexOf("Arm rollback before the first destructive production-host action");
-    const arm = workflow.indexOf("armed=1", safetyComment);
-    const remove = workflow.indexOf('docker rm -f "${CONTAINER_NAME}"', arm);
+    const staged = workflow.indexOf('probe_application "${CANDIDATE_NAME}" http://127.0.0.1:3101');
+    const arm = workflow.indexOf("production_changed=1", safetyComment);
+    const stop = workflow.indexOf('docker stop "${old_id}"', arm);
     expect(safetyComment).toBeGreaterThan(-1);
+    expect(safetyComment).toBeGreaterThan(staged);
     expect(arm).toBeGreaterThan(safetyComment);
-    expect(remove).toBeGreaterThan(arm);
+    expect(stop).toBeGreaterThan(arm);
+    expect(workflow).toContain('docker rename "${old_id}" "${ROLLBACK_NAME}"');
   });
 
   it("bounds both readiness probes", () => {
@@ -298,12 +301,13 @@ describe("REG.RU production deployment safety contract", () => {
 
   it("gates REG.RU promotion on the canonical Auth callback redirect", () => {
     expect(workflow).toContain("Candidate Auth callback escaped canonical Mercy origin.");
-    expect(workflow).toContain("'http://127.0.0.1:3100/auth/callback'");
+    expect(workflow).toContain('"${probe_origin}/auth/callback"');
+    expect(workflow).toContain('probe_application "${CANDIDATE_NAME}" http://127.0.0.1:3101');
     expect(workflow).toContain("'https://mercy.peerivo.net/auth?error=callback'");
     expect(workflow).toContain("Canonical production Auth callback redirect is wrong");
 
     const candidateProbe = workflow.indexOf(
-      "'http://127.0.0.1:3100/auth/callback'",
+      'probe_application "${CANDIDATE_NAME}" http://127.0.0.1:3101',
     );
     const promote = workflow.indexOf('phase="promoting"');
     expect(candidateProbe).toBeGreaterThan(-1);
@@ -335,7 +339,7 @@ describe("REG.RU one-shot PREPARE dispatcher", () => {
     expect(dispatcher).toContain("[run-reg-ru-prepare]");
     expect(dispatcher).toContain("github.run_attempt == 1");
     expect(dispatcher).toContain(
-      "APPROVED_BASE_SHA: a5e54a16853122af3d4eb93ca4807b26ed709c56",
+      "APPROVED_BASE_SHA: 4e89291a095062cc828c18dd2ffa9535c9d02cb6",
     );
     expect(dispatcher).toContain('test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"');
     expect(dispatcher).toContain(".github/workflows/deploy-reg-ru.yml");

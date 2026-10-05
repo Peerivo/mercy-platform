@@ -19,7 +19,7 @@ The protected GitHub Actions workflow **Deploy REG.RU production** has two expli
 
 ### PREPARE
 
-PREPARE stages the exact current reviewed `main` SHA on the REG.RU host while public DNS may still point `mercy.peerivo.net` at Vercel.
+PREPARE stages the exact current reviewed `main` SHA. Read-only DNS/HTTPS verification on 2026-10-05 confirmed `mercy.peerivo.net` already reaches REG.RU at `95.163.223.68` through nginx, so final promotion changes the live application version. The candidate is first tested on loopback 3101 while the original container continues serving 3100.
 
 The operator supplies:
 
@@ -29,37 +29,31 @@ The operator supplies:
 
 The workflow:
 
-1. proves the dispatch SHA is still live `main`;
-2. validates protected configuration and that `NEXT_PUBLIC_SUPABASE_URL` is exactly `https://api.mercy.peerivo.net`;
-3. uses pinned Beget SSH to discover the unique Mercy GoTrue container/address and select exactly one distinct accepted live service-role candidate through direct `/admin/users`; unreachable/incomplete responses and ambiguous discovery/selection fail closed without key output;
-4. validates the configured public Supabase key against Beget before REG.RU SSH;
-5. builds one immutable application image;
-6. uploads the image and candidate runtime environment to REG.RU;
-7. creates/reuses the dedicated `mercy-reg-ru` Docker bridge at MTU 1400, then arms rollback before removing any existing REG.RU application container;
-8. starts the candidate on loopback `127.0.0.1:3100`;
-9. requires Docker health, bounded local `/health`, bounded local `/health/data`, exact Git SHA, the local host-based 308 redirect contract, canonical callback redirect and Peerivo PKCE start;
-10. independently requires Admin=200 and Public=200 from the candidate through the canonical public Beget API, then promotes the environment only after every gate passes;
-11. keeps only the current and one rollback image, with the previous runtime environment.
+1. proves the dispatch SHA is still live `main` and validates protected canonical configuration;
+2. resolves the unique accepted existing service-role candidate directly against GoTrue on Beget;
+3. tests the configured public key against the exact public PostgREST RPC, with bounded complete-body, JSON and redirect checks;
+4. builds the immutable image and tests its real `/health/data` on the runner before any upload;
+5. uploads the image, protected next env, deployment script and non-secret data-probe script over pinned SSH;
+6. starts a release-specific candidate on the existing MTU-1400 network and loopback 3101, leaving production untouched;
+7. requires Docker/app/data health, exact revision, complete same-origin Admin/Public 200, canonical callback, PKCE start and Russian-host redirect;
+8. only after every staging gate passes, saves the old env, stops and retains the original container under a release-specific rollback name, starts production on 3100 and repeats every gate;
+9. promotes env/image metadata only after the production-port gates pass, removes the temporary candidate and retains the original stopped rollback container plus old env/image.
 
-The direct preflight avoids Beget's same-origin public hairpin; it is only credential-selection evidence. Executable synthetic fixtures cover deduplication, selection, unreachable/rejected/partial-response failures and ambiguous containers, addresses or keys. Production acceptance still requires the independent REG.RU public-path gates and a real-account browser login, cabinet return, reload and logout. Never use fixture/Preview success as live production evidence.
+A failed staging probe removes only this release's labelled candidate. A failure after production switching restores the same original container and previous env; unknown restoration is reported explicitly. Existing release-specific candidate/rollback names fail closed rather than being overwritten. Historical retained rollback containers are not silently deleted.
 
-PREPARE does **not** change DNS and therefore does not move public traffic.
+The public RPC diagnostic never prints rows, credentials or raw errors. It reports fixed status/error categories, elapsed time and fingerprints only for validated public anon/publishable keys. A route failure additionally runs the equivalent runtime-env probe: runtime success with route failure suggests compiled config, while HTTP/error categories distinguish authorization from transport without guessing.
 
-### DNS cutover
+PREPARE does **not** change DNS. Since canonical traffic already reaches REG.RU, treat promotion as a live application deployment. Vercel deployment records alone never establish the REG.RU version.
 
-Only after PREPARE succeeds:
+### Current routing and historical cutover
 
-1. REG.RU reverse proxy/TLS must forward `mercy.peerivo.net` to `127.0.0.1:3100`;
-2. the Russian hostname must reach the same application (the app itself returns HTTP 308 to `mercy.peerivo.net`);
-3. change public DNS for `mercy.peerivo.net` from Vercel to the REG.RU host;
-4. point `язык-милосердия.рф` (and `www`, if used) to the REG.RU host too;
-5. do not change `api.mercy.peerivo.net`; it remains on Beget.
+The canonical hostname already resolves to REG.RU; no new DNS cutover is required for this release. The reverse proxy/TLS forwards `mercy.peerivo.net` to loopback 3100; the private staging port 3101 must not be exposed. The Russian hostname should reach the same application and return its canonical 308 redirect. `api.mercy.peerivo.net` stays on Beget.
 
-DNS mutation is intentionally outside the deployment workflow and requires its own production authorization.
+The earlier Vercel-to-REG.RU DNS cutover procedure is historical. Any future routing change or DNS rollback remains outside PREPARE/VERIFY and requires its own scoped authorization.
 
 ### VERIFY
 
-After DNS has converged, run:
+After the target revision is promoted and public routing is independently verified, run:
 
 - `operation=VERIFY`;
 - the same `expected_sha`;
@@ -96,15 +90,15 @@ Do not paste secret values into chat, PRs, issues, screenshots, or logs.
 
 The REG.RU host must provide Docker, gzip, curl and SSH access for the pinned deployment identity. The private deployment directory is `/opt/peerivo/mercy`.
 
-The application binds only to `127.0.0.1:3100`. The REG.RU reverse proxy is responsible for public HTTPS on ports 80/443 and for preserving the request Host header.
+Production binds only to `127.0.0.1:3100`; the isolated staging candidate uses `127.0.0.1:3101`. The REG.RU reverse proxy is responsible for public HTTPS on ports 80/443 and for preserving the request Host header.
 
 REG.RU's public interface is MTU 1450 while Docker's default `docker0` bridge is MTU 1500. This was proven to black-hole larger TLS packets from the Beget API: host networking succeeded while the default bridge timed out, and a temporary MTU-1400 bridge succeeded. PREPARE therefore creates/reuses a dedicated `mercy-reg-ru` bridge with MTU 1400 and fails closed if an existing network with that name has a different MTU. It does not modify `docker0`, Docker daemon configuration, firewalld, or host interface MTU.
 
 ## Rollback
 
-Before DNS cutover, a failed PREPARE automatically restores the previous REG.RU application image/environment when one exists.
+A failed staging gate leaves the original production container and env unchanged. After switching begins, rollback first restores the same retained original container ID/name/running state, independently of filesystem metadata restoration. It then attempts to restore previous env/image metadata. Metadata failure is explicitly reported as `REG_RU_ROLLBACK_METADATA_UNVERIFIED` and does not prevent the original process from restarting; the deployment remains failed and the metadata must be reconciled before another release.
 
-After DNS cutover, the fastest application rollback is to repoint `mercy.peerivo.net` to the still-retained Vercel production deployment, then investigate REG.RU. Do not unfreeze or roll back the old managed Supabase merely because an application-host cutover failed.
+After success, the original stopped container, image and previous env remain available. Do not substitute a DNS change to Vercel or a database rollback for this application-container rollback. Confirm the actual public revision and data readiness after restoration; a started container alone does not prove end-to-end health.
 
 A database rollback, source unfreeze, migration, secret rotation or DNS mutation is outside PREPARE/VERIFY authority.
 

@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APPROVED_BASE_SHA: a5e54a16853122af3d4eb93ca4807b26ed709c56
+  APPROVED_BASE_SHA: 4e89291a095062cc828c18dd2ffa9535c9d02cb6
   TARGET_WORKFLOW: deploy-reg-ru.yml
 
 jobs:
@@ -51,11 +51,14 @@ jobs:
             printf '%s\n' \
               '.github/workflows/deploy-reg-ru.yml' \
               '.github/workflows/dispatch-reg-ru-prepare-once.yml' \
-              'tests/deploy-reg-ru.test.ts' \
+              '.peerivo/tasks/mercy-data-readiness-20261005.plan.json' \
               'PROJECT.md' \
               'docs/ACCEPTANCE.md' \
               'docs/REG_RU_DEPLOYMENT.md' \
-              '.peerivo/tasks/mercy-production-release-20261005.plan.json' \
+              'scripts/probe-mercy-public-data.mjs' \
+              'tests/deploy-reg-ru.test.ts' \
+              'tests/deploy-reg-ru-transaction.test.ts' \
+              'tests/public-data-probe.test.ts' \
               | LC_ALL=C sort
           )"
           changed="$(git diff --name-only "${APPROVED_BASE_SHA}..${GITHUB_SHA}" | LC_ALL=C sort)"
