@@ -139,7 +139,16 @@ jobs:
               --filter "label=com.docker.compose.project=${project}" \
               --filter "label=com.docker.compose.service=kong"
           )"
+          auth="$(
+            docker ps -q \
+              --filter "label=com.docker.compose.project=${project}" \
+              --filter "label=com.docker.compose.service=auth" \
+              | head -n1
+          )"
           test -n "${kong}"
+          test -n "${auth}"
+          auth_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' "${auth}" | awk 'NF{print; exit}')"
+          test -n "${auth_ip}"
 
           live_kong_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${kong}")"
           candidates="$(
@@ -159,13 +168,17 @@ jobs:
 
           while IFS= read -r candidate; do
             [ -n "${candidate}" ] || continue
+            # Resolve the live service-role key against Mercy GoTrue directly.
+            # The Beget host is the public API origin, so probing the public hostname
+            # from that same origin is a hairpin path and must not gate credential
+            # selection. The staged REG.RU candidate independently verifies the full
+            # public admin + public Auth path before promotion.
             status="$(
               curl --silent --show-error \
                 --output /dev/null \
                 --write-out '%{http_code}' \
                 --max-time 10 \
-                'https://api.mercy.peerivo.net/auth/v1/admin/users?page=1&per_page=1' \
-                -H "apikey: ${candidate}" \
+                "http://${auth_ip}:9999/admin/users?page=1&per_page=1" \
                 -H "Authorization: Bearer ${candidate}" \
                 || true
             )"
@@ -183,13 +196,12 @@ jobs:
           test -n "${service_key}"
           echo "::add-mask::${service_key}"
 
-          # The live key was already verified against the public GoTrue Admin
-          # endpoint from the canonical Beget host. Do not repeat that probe
-          # from a GitHub-hosted runner: provider/network policy can reject
-          # runner egress even when the credential itself is valid.
+          # The live key was verified directly against Mercy GoTrue on Beget.
+          # Do not use a same-origin public hairpin as a credential gate here.
+          # The REG.RU candidate later proves the real public path before promotion.
           printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "${service_key}" >> "${GITHUB_ENV}"
           unset service_key
-          echo "LIVE_BEGET_SERVICE_ROLE_VERIFIED"
+          echo "LIVE_BEGET_SERVICE_ROLE_DIRECT_VERIFIED"
 
       - name: Verify configured public key against Beget before SSH
         shell: bash
