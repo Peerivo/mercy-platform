@@ -35,16 +35,22 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const name = path.basename(process.argv[1]);
 const args = process.argv.slice(2);
+// gzip and docker load are a concurrent pipe. Only the Docker mock may touch
+// the transaction journal; a second writer can truncate it mid-read in CI.
+if (name === 'gzip') { process.stdout.write('synthetic image'); process.exit(0); }
+if (name === 'sleep') process.exit(0);
 const file = process.env.TRANSACTION_STATE;
 const state = JSON.parse(fs.readFileSync(file, 'utf8'));
 const failure = process.env.TRANSACTION_FAILURE;
 const release = process.env.TRANSACTION_RELEASE;
 state.calls.push([name, ...args]);
-const save = () => fs.writeFileSync(file, JSON.stringify(state));
+const save = () => {
+  const pending = file + '.' + process.pid;
+  fs.writeFileSync(pending, JSON.stringify(state));
+  fs.renameSync(pending, file);
+};
 const finish = (code = 0, output = '') => { save(); process.stdout.write(output); process.exit(code); };
 const container = id => Object.values(state.containers).find(c => c.name === id || c.id === id);
-if (name === 'sleep') finish();
-if (name === 'gzip') finish(0, 'synthetic image');
 if (name === 'cp' || name === 'mv') {
   if (failure === 'metadata_restore' && name === 'cp' && args[args.length - 2].endsWith('/.env.previous')) finish(1);
   const result = spawnSync('/bin/' + name, args, {stdio:'inherit'});
@@ -173,6 +179,8 @@ describe("executed REG.RU candidate transaction", () => {
   it("restores the original process even when promotion and metadata restoration fail", () => {
     const result = runTransaction("metadata_restore");
     expect(result.status).not.toBe(0);
+    expect(result.stdout, result.stderr).toContain("REG_RU_STAGED_CANDIDATE_VERIFIED");
+    expect(result.state.calls.some(call => call[0] === "mv")).toBe(true);
     expect(result.state.containers.mercy).toMatchObject({ id: "original-container", running: true });
     expect(Object.keys(result.state.containers)).toEqual(["mercy"]);
     expect(result.productionEnv).toBe(result.newEnv);
