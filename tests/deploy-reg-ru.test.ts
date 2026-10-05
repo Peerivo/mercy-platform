@@ -263,6 +263,17 @@ describe("REG.RU production deployment safety contract", () => {
     expect(workflow).toContain('docker rename "${old_id}" "${ROLLBACK_NAME}"');
   });
 
+  it("passes Supabase public runtime config into the built-image readiness probe", () => {
+    const probeStart = workflow.indexOf('build_probe="mercy-build-probe-${GITHUB_RUN_ID}"');
+    const probeEnd = workflow.indexOf('docker save "${IMAGE_NAME}:${GITHUB_SHA}"', probeStart);
+    const probe = workflow.slice(probeStart, probeEnd);
+    expect(probe).toContain("-e NEXT_PUBLIC_SUPABASE_URL");
+    expect(probe).toContain("-e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+    expect(probe).toContain("-e NEXT_PUBLIC_SUPABASE_ANON_KEY");
+    expect(probe).toContain('-e "NEXT_PUBLIC_SITE_URL=${SITE_URL}"');
+    expect(probe).toContain("http://127.0.0.1:3101/health/data");
+  });
+
   it("bounds both readiness probes", () => {
     expect(workflow).toContain("curl --fail --silent --show-error --max-time 10");
     expect(healthData).toContain("AbortSignal.timeout(readinessTimeoutMs)");
@@ -339,7 +350,7 @@ describe("REG.RU one-shot PREPARE dispatcher", () => {
     expect(dispatcher).toContain("[run-reg-ru-prepare]");
     expect(dispatcher).toContain("github.run_attempt == 1");
     expect(dispatcher).toContain(
-      "APPROVED_BASE_SHA: 4e89291a095062cc828c18dd2ffa9535c9d02cb6",
+      "APPROVED_BASE_SHA: 763b4787e5d29b6aa915e6ea50fd3812b3834906",
     );
     expect(dispatcher).toContain('test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"');
     expect(dispatcher).toContain(".github/workflows/deploy-reg-ru.yml");
