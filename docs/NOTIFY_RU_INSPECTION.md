@@ -48,12 +48,16 @@ tokens, customer content or Telegram messages.
 - protected Notify environment: only the existing scoped Menaion profile and core
   token equality check are parsed locally, without shell evaluation;
 - only when recognized, configured core health/capability and canonical port are
-  confirmed: authenticated GET of the already-bound private connection using the
+  confirmed, and the expected active unit's PID/UID demonstrably owns the exact
+  loopback listener: authenticated GET of the already-bound private connection using the
   already-existing dedicated scoped token. There is no general-token fallback.
 
 The connection report contains booleans for binding, private chat, active state
 and actor equality. It does not expose identity values. Token values are normalized
-exactly as the core does before rejecting accidental global-token aliasing.
+exactly as the core does before rejecting accidental global-token aliasing. A
+missing/invalid core-token reference prevents the scoped request. Kernel PID start
+time, process identity and socket ownership are checked; public health JSON alone
+cannot establish listener identity. All file reads are bounded before allocation.
 
 ## Interpreting the report
 

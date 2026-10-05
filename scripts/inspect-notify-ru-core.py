@@ -2,6 +2,8 @@
 """Bounded, read-only Notify inspection. Never print environment or provider bodies."""
 import hashlib
 import json
+import os
+import pwd
 import re
 import shlex
 import subprocess
@@ -37,7 +39,8 @@ DATABASE_COMMAND = [
 ]
 MIGRATION_SQL = """BEGIN TRANSACTION READ ONLY;
 SET LOCAL statement_timeout = '5s';
-SELECT version FROM public.notify_schema_migrations ORDER BY version LIMIT 101;
+SELECT CASE WHEN octet_length(version) <= 128 THEN version ELSE '_invalid_migration_version_' END
+FROM public.notify_schema_migrations ORDER BY version LIMIT 101;
 ROLLBACK;
 """
 
@@ -50,6 +53,57 @@ def run_command(command, stdin=None):
     if len(completed.stdout) > 16384:
         return None
     return completed.stdout
+
+
+def read_bounded(filename, limit):
+    with filename.open("rb") as handle:
+        data = handle.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("oversized")
+    return data
+
+
+def listener_matches_service(pid, proc_root=Path("/proc"), expected_uid=None):
+    """Kernel-observed PID/uid/socket binding; health JSON alone is not identity."""
+    try:
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        uid = pwd.getpwnam("peerivo-notify").pw_uid if expected_uid is None else expected_uid
+        process = proc_root / str(pid)
+        def start_time():
+            fields = read_bounded(process / "stat", 8192).decode().rsplit(") ", 1)[1].split()
+            return fields[19]
+        started = start_time()
+        status = read_bounded(process / "status", 65536).decode()
+        identity = next((line.split()[1:] for line in status.splitlines() if line.startswith("Uid:")), [])
+        if identity != [str(uid)] * 4:
+            return False
+        cmdline = read_bounded(process / "cmdline", 4096).split(b"\0")
+        if cmdline != [b"/usr/bin/node", b"/opt/peerivo-notify/current/src/ru-core-server.js", b""]:
+            return False
+        listeners = set()
+        for line in read_bounded(proc_root / "net/tcp", 262144).decode().splitlines()[1:]:
+            fields = line.split()
+            if len(fields) >= 10 and fields[1] in ("0100007F:0BB8", "00000000:0BB8") and fields[3] == "0A":
+                if fields[7] != str(uid):
+                    return False
+                listeners.add(fields[9])
+        if len(listeners) != 1:
+            return False
+        owned = set()
+        count = 0
+        with os.scandir(process / "fd") as entries:
+            for entry in entries:
+                count += 1
+                if count > 1024:
+                    return False
+                target = os.readlink(entry.path)
+                match = re.fullmatch(r"socket:\[([0-9]+)\]", target)
+                if match:
+                    owned.add(match.group(1))
+        return listeners.issubset(owned) and start_time() == started
+    except Exception:
+        return False
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -84,9 +138,7 @@ def http_json(url, headers=None):
 def parse_environment(filename):
     result = {}
     # Parse only the required keys. No shell sourcing, expansion or command execution.
-    text = filename.read_text(encoding="utf-8")
-    if len(text) > 131072:
-        raise ValueError("oversized")
+    text = read_bounded(filename, 131072).decode("utf-8")
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -125,7 +177,7 @@ def health_summary(result):
     return summary
 
 
-def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, request=http_json):
+def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, request=http_json, listener=listener_matches_service):
     report = {"format": "peerivo-notify-readiness-v1", "readOnly": True,
               "productionDeliveryVerified": False, "ownerIdentityIndependentlyVerified": False}
     try:
@@ -166,9 +218,7 @@ def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, requ
             filename = runtime / relative
             if filename.is_symlink() or not filename.resolve().is_relative_to(runtime.resolve()):
                 raise ValueError("unsafe_file")
-            data = filename.read_bytes()
-            if len(data) > 1048576:
-                raise ValueError("oversized")
+            data = read_bounded(filename, 1048576)
             files.append({"path": relative, "present": True, "sha256": hashlib.sha256(data).hexdigest()})
         except Exception:
             files.append({"path": relative, "present": False})
@@ -177,7 +227,7 @@ def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, requ
         manifest_file = runtime / "release-manifest.json"
         if manifest_file.is_symlink() or not manifest_file.resolve().is_relative_to(runtime.resolve()) or manifest_file.stat().st_size > 1048576:
             raise ValueError("unsafe_manifest")
-        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        manifest = json.loads(read_bounded(manifest_file, 1048576))
         revision = manifest.get("sourceSha", "")
         report["declaredRevision"] = revision if isinstance(revision, str) and re.fullmatch(r"[0-9a-f]{40}", revision) else None
     except Exception:
@@ -208,10 +258,14 @@ def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, requ
         tenant = env.get("NOTIFY_MENAION_TENANT_ID", "").strip(ECMASCRIPT_TRIM)
         connection_id = env.get("NOTIFY_MENAION_CONNECTION_ID", "").strip(ECMASCRIPT_TRIM)
         actor = ACTOR.fullmatch(env.get("NOTIFY_MENAION_ALLOWED_ACTOR", "").strip(ECMASCRIPT_TRIM))
-        valid = re.fullmatch(r"[\x21-\x7e]{32,4096}", token) is not None and token != env.get("NOTIFY_CORE_TOKEN", "").strip(ECMASCRIPT_TRIM) and UUID.fullmatch(tenant) is not None and UUID.fullmatch(connection_id) is not None and actor is not None
+        core = env.get("NOTIFY_CORE_TOKEN", "").strip(ECMASCRIPT_TRIM)
+        valid = re.fullmatch(r"[\x21-\x7e]{32,4096}", token) is not None and re.fullmatch(r"[\x21-\x7e]{32,4096}", core) is not None and token != core and UUID.fullmatch(tenant) is not None and UUID.fullmatch(connection_id) is not None and actor is not None
         report["scopedProfile"] = {"readable": True, "configured": bool(valid), "canonicalPort": env.get("PORT", "3000") == "3000"}
         health = report["loopbackHealth"]
-        if valid and report["scopedProfile"]["canonicalPort"] and health.get("configured") and health.get("recognizedService") and health.get("ok") and health.get("ownerScopedActions") and health.get("httpStatus") == 200:
+        service = report["service"].get("state", {})
+        expected_service = report["service"].get("available") and service.get("ActiveState") == "active" and service.get("SubState") == "running" and all(service.get(key) is True for key in ("UserExpected", "GroupExpected", "WorkingDirectoryExpected", "ExecStartExpected"))
+        report["listenerMatchesService"] = bool(expected_service and listener(service.get("MainPID")))
+        if valid and report["listenerMatchesService"] and report["scopedProfile"]["canonicalPort"] and health.get("configured") and health.get("recognizedService") and health.get("ok") and health.get("ownerScopedActions") and health.get("httpStatus") == 200:
             result = request(LOOPBACK + "/v1/telegram/connections/" + connection_id,
                              {"Authorization": "Bearer " + token, "Accept": "application/json"})
             body = result.get("payload")

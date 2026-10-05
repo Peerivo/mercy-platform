@@ -57,7 +57,7 @@ class InspectorTests(unittest.TestCase):
         return {"status": "received", "httpStatus": 200, "payload": {"ok": True, "found": True, "connection": self.connection, "debug": TOKEN}}
 
     def inspect(self, **kwargs):
-        return INSPECTOR.collect_report(self.runtime, self.env, kwargs.get("command", self.command), kwargs.get("request", self.request))
+        return INSPECTOR.collect_report(self.runtime, self.env, kwargs.get("command", self.command), kwargs.get("request", self.request), kwargs.get("listener", lambda pid: pid == 123))
 
     def test_ready_profile_is_compared_without_exporting_identity_or_secrets(self):
         report = self.inspect()
@@ -117,6 +117,86 @@ class InspectorTests(unittest.TestCase):
                 report = self.inspect()
                 self.assertFalse(report["privateOwnerConnection"]["checked"])
                 self.assertEqual(len(self.requests), 2)
+
+    def test_missing_invalid_core_reference_never_sends_the_scoped_token(self):
+        for token in ("", "short", "\u1234" * 40):
+            with self.subTest(length=len(token)):
+                self.requests.clear()
+                self.write_env(NOTIFY_CORE_TOKEN=token)
+                report = self.inspect()
+                self.assertFalse(report["scopedProfile"]["configured"])
+                self.assertFalse(report["privateOwnerConnection"]["checked"])
+                self.assertEqual(len(self.requests), 2)
+
+    def test_spoofed_health_without_expected_listener_receives_no_token(self):
+        report = self.inspect(listener=lambda pid: False)
+        self.assertFalse(report["listenerMatchesService"])
+        self.assertFalse(report["privateOwnerConnection"]["checked"])
+        self.assertEqual(len(self.requests), 2)
+
+    def test_inactive_or_mismatched_service_receives_no_token(self):
+        for wrong in ("ActiveState=inactive", "SubState=dead", "User=other", "Group=other", "WorkingDirectory=/wrong", "ExecStart=wrong"):
+            with self.subTest(field=wrong.split("=")[0]):
+                self.requests.clear()
+                def changed(args, stdin=None):
+                    data = self.command(args, stdin)
+                    return data + wrong + "\n" if not stdin else data
+                report = self.inspect(command=changed)
+                self.assertFalse(report["listenerMatchesService"])
+                self.assertEqual(len(self.requests), 2)
+
+    def test_runtime_reads_are_bounded_before_hashing(self):
+        filename = self.runtime / "src/ru-core.js"
+        with filename.open("wb") as handle:
+            handle.truncate(2 * 1048576)
+        report = self.inspect()
+        self.assertFalse(next(item for item in report["runtimeFiles"] if item["path"] == "src/ru-core.js")["present"])
+        class LimitedFile:
+            def open(self, mode):
+                self.assert_mode = mode
+                return self
+            def __enter__(self): return self
+            def __exit__(self, *args): return None
+            def read(self, size):
+                self.size = size
+                return b"x" * size
+        limited = LimitedFile()
+        with self.assertRaises(ValueError):
+            INSPECTOR.read_bounded(limited, 256)
+        self.assertEqual(limited.size, 257)
+
+    def test_kernel_listener_binding_rejects_wrong_pid_uid_and_changed_start_time(self):
+        proc = self.root / "proc"
+        process = proc / "123"
+        (proc / "net").mkdir(parents=True)
+        (process / "fd").mkdir(parents=True)
+        (process / "stat").write_text("123 (node) " + " ".join(["S"] + ["0"] * 18 + ["777"]) + "\n")
+        (process / "status").write_text("Name:\tnode\nUid:\t1001\t1001\t1001\t1001\n")
+        (process / "cmdline").write_bytes(b"/usr/bin/node\0/opt/peerivo-notify/current/src/ru-core-server.js\0")
+        (proc / "net/tcp").write_text("header\n0: 0100007F:0BB8 00000000:0000 0A 0 0 0 1001 0 42\n")
+        (process / "fd/5").symlink_to("socket:[42]")
+        self.assertTrue(INSPECTOR.listener_matches_service(123, proc, 1001))
+        self.assertFalse(INSPECTOR.listener_matches_service(999, proc, 1001))
+        self.assertFalse(INSPECTOR.listener_matches_service(123, proc, 1002))
+        (process / "fd/5").unlink()
+        (process / "fd/5").symlink_to("socket:[99]")
+        self.assertFalse(INSPECTOR.listener_matches_service(123, proc, 1001))
+        (process / "fd/5").unlink()
+        (process / "fd/5").symlink_to("socket:[42]")
+        original = INSPECTOR.read_bounded
+        reads = 0
+        def changed_start(filename, limit):
+            nonlocal reads
+            data = original(filename, limit)
+            if filename.name == "stat":
+                reads += 1
+                if reads > 1: return data.replace(b"777", b"778")
+            return data
+        INSPECTOR.read_bounded = changed_start
+        try:
+            self.assertFalse(INSPECTOR.listener_matches_service(123, proc, 1001))
+        finally:
+            INSPECTOR.read_bounded = original
 
     def test_wrong_chat_actor_binding_or_status_never_reports_ready(self):
         for patch in ({"chatType": "group"}, {"chatId": "99"}, {"telegramUserId": "99"}, {"tenantId": CONNECTION}, {"id": TENANT}, {"status": "disabled"}, {"ready": False}):
