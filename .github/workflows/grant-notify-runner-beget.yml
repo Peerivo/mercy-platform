@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   grant:
@@ -22,9 +23,52 @@ jobs:
       BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
       BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
       BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
-      NOTIFY_RUNNER_PUBLIC_KEY: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJu/1p1YYEIA+yjQAn09KVjvDPD/OAibplHVlRPYDM6j peerivo-notify-runner
+      NOTIFY_RUNNER_KEY_ISSUE: "224"
+      NOTIFY_RUNNER_KEY_FINGERPRINT: "SHA256:jCPRoQ/hISbpSycBkJ2ylRqRfKKvxWhmKtw7KpIvP3Y"
 
     steps:
+      - name: Load fingerprint-pinned Notify runner public key
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/notify-runner.pub"
+          python3 - "$GITHUB_REPOSITORY" "$NOTIFY_RUNNER_KEY_ISSUE" "$GH_TOKEN" "$key_file" <<'PY'
+          import json
+          import sys
+          import urllib.request
+
+          repository, number, token, output = sys.argv[1:5]
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/issues/{number}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=20) as response:
+              issue = json.load(response)
+
+          if issue.get("title") != "[notify-runner-key] Peerivo Notify runner v2":
+              raise SystemExit("Unexpected Notify runner key issue title")
+          key = str(issue.get("body") or "").strip()
+          if "\n" in key or not key.startswith("ssh-ed25519 "):
+              raise SystemExit("Notify runner key issue has invalid format")
+          with open(output, "w", encoding="utf-8") as handle:
+              handle.write(key + "\n")
+          PY
+
+          fingerprint="$(ssh-keygen -lf "$key_file" | awk 'NR==1 {print $2}')"
+          test "$fingerprint" = "$NOTIFY_RUNNER_KEY_FINGERPRINT" || {
+            echo "::error::Notify runner public key fingerprint mismatch"
+            exit 1
+          }
+          key="$(cat "$key_file")"
+          printf 'NOTIFY_RUNNER_PUBLIC_KEY=%s\n' "$key" >> "$GITHUB_ENV"
+          echo "Notify runner public key fingerprint verified."
+
       - name: Validate protected configuration
         shell: bash
         run: |
@@ -32,7 +76,7 @@ jobs:
           for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS NOTIFY_RUNNER_PUBLIC_KEY; do
             test -n "${!name:-}" || { echo "::error::Missing protected configuration: $name"; exit 1; }
           done
-          [[ "$NOTIFY_RUNNER_PUBLIC_KEY" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+[[:space:]]peerivo-notify-runner$ ]]
+          [[ "$NOTIFY_RUNNER_PUBLIC_KEY" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+[[:space:]]peerivo-notify-runner-v2$ ]]
 
       - name: Configure pinned SSH
         shell: bash
