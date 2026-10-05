@@ -117,3 +117,7 @@ Run `37061862510` confirmed the nine migration checksums but the runtime inspect
 
 ## Menaion moderation migration transport — prepared, not activated
 Migration10 has a separate exact-main, manual, protected inspection/apply path reusing the existing Beget transport and verified public certificate. The encrypted payload and all nine historical predecessor checksums are pinned. APPLY requires a successful same-main inspection, repeats read-only gates, and atomically applies only the reviewed migration plus ledger after target/history checks; role, public/private grants and RLS verification precede commit. No credentials, runtime activation, key generation or direct-shell SQL path is introduced. Existing owner-activation draft PR #214 remains separate. See `docs/MENAION_MODERATION_TRANSPORT.md` for evidence, limits, explicit owner steps and rollback guidance. Effective policy resolves active Global 1.12; this preparation is not production or end-to-end success evidence.
+
+
+## Notify RU read-only inspection — prepared
+A separate exact-main manual workflow is prepared to inspect the existing Beget Notify service, source hashes, migration IDs, health and already-bound private owner profile. It uses existing pinned SSH, emits only sanitized facts, and performs no deployment, SQL mutation, credential or Telegram action. Missing evidence stays unverified. See `docs/NOTIFY_RU_INSPECTION.md`; this preparation is not activation.

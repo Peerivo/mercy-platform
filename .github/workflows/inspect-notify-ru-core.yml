@@ -1,0 +1,80 @@
+name: Inspect Notify RU core read-only
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/inspect-notify-ru-core.yml'
+      - 'scripts/inspect-notify-ru-core.py'
+      - 'tests/test_notify_ru_inspection.py'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current Mercy main commit containing the reviewed inspector
+        required: true
+        type: string
+      confirm:
+        description: Type INSPECT_NOTIFY_RU_CORE_READ_ONLY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tests -p 'test_notify_ru_inspection.py' -v
+  inspect:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' && inputs.confirm == 'INSPECT_NOTIFY_RU_CORE_READ_ONLY' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: peerivo-notify-read-only-inspection
+      cancel-in-progress: false
+    steps:
+      - name: Validate exact current main
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$EXPECTED_SHA" = "$GITHUB_SHA"
+          test "$(gh api repos/Peerivo/mercy-platform/git/ref/heads/main --jq .object.sha)" = "$GITHUB_SHA"
+      - name: Check out reviewed inspector
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Inspect only the established Beget Notify runtime
+        env:
+          BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+          BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || { echo "::error::Missing protected binding: $name"; exit 1; }
+          done
+          test "$BEGET_SUPABASE_HOST" = '45.144.176.213'
+          test "$BEGET_SUPABASE_USER" = 'supabase-deploy'
+          umask 077
+          key="$(mktemp "$RUNNER_TEMP/notify-inspect-key.XXXXXXXX")"
+          hosts="$(mktemp "$RUNNER_TEMP/notify-inspect-hosts.XXXXXXXX")"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > "$key"
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > "$hosts"
+          ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$hosts" -o ConnectTimeout=10 \
+            "$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST" \
+            'sudo -n /usr/bin/python3 -' < scripts/inspect-notify-ru-core.py

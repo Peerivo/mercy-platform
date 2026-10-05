@@ -126,3 +126,9 @@ The Menaion inspector file parser must accept trailing blank lines, full-line co
 - Exact already-applied state is verified read-only and never replays SQL. Unknown outcome requires inspection before any retry. No raw SQL, submitted content, keys or runtime configuration appear in logs.
 - All nine previous ledger checksums, old encrypted payloads/executors and owner-activation PR #214 remain unchanged. This transport performs no credential, runtime or Telegram activation. Production and end-to-end verification remain explicit pending stages.
 - Unit regressions and opt-in disposable PostgreSQL acceptance are documented in `docs/MENAION_MODERATION_TRANSPORT.md`; the integration harness accepts only local PostgreSQL binaries/source files and creates its own database.
+
+
+## Notify RU inspection preparation
+- Synthetic tests verify read-only fixed-target commands, redaction, no global-token fallback, normalized alias rejection, exact actor/private binding, manual exact-main gates and no authenticated request for an unconfigured/noncanonical runtime.
+- No protected dispatch or production result is included in local acceptance. Applied migration/actual owner identity/delivery remain separately unverified.
+- Full inspection scope and explicit input contract: `docs/NOTIFY_RU_INSPECTION.md`.
