@@ -131,3 +131,7 @@ The candidate's external Admin/Public probes now reject redirects before any cre
 
 ## Notify RU read-only inspection — prepared
 A separate exact-main manual workflow is prepared to inspect the existing Beget Notify service, source hashes, migration IDs, health and already-bound private owner profile. It uses existing pinned SSH, emits only sanitized facts, and performs no deployment, SQL mutation, credential or Telegram action. Missing evidence stays unverified. See `docs/NOTIFY_RU_INSPECTION.md`; this preparation is not activation.
+
+
+## Notify unprivileged diagnosis after host refusal
+Read-only run `37305664387` passed exact-main and pinned SSH but sudo refused the Python entrypoint before inspection. The workflow is narrowed to nonprivileged systemd/public-health facts only, with no runtime filesystem, protected environment or Docker reads and no escalation fallback. All protected checks remain unverified. The documented immutable full inspector is reserved for explicit human execution through existing administrator access. No permission change or Notify activation is claimed.

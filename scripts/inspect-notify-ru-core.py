@@ -7,6 +7,7 @@ import re
 import shlex
 import stat
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -139,9 +140,10 @@ def health_summary(result):
     return summary
 
 
-def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, request=http_json):
+def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, request=http_json, *, protected_metadata=False):
     report = {"format": "peerivo-notify-readiness-v1", "readOnly": True,
-              "productionDeliveryVerified": False, "ownerIdentityIndependentlyVerified": False}
+              "productionDeliveryVerified": False, "ownerIdentityIndependentlyVerified": False,
+              "inspectionMode": "protected_metadata" if protected_metadata else "public_service_only"}
     try:
         values = command(SYSTEMD_COMMAND)
         service = {}
@@ -164,6 +166,24 @@ def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, requ
         report["service"] = {"available": values is not None, "state": service}
     except Exception:
         report["service"] = {"available": False, "reason": "inspection_failed"}
+
+    for name, url in (("loopbackHealth", LOOPBACK + "/health"), ("publicHealth", PUBLIC_HEALTH)):
+        try:
+            report[name] = health_summary(request(url))
+        except Exception:
+            report[name] = {"status": "unverified"}
+
+    if not protected_metadata:
+        # This mode never touches runtime files, EnvironmentFile or Docker.
+        # It is safe to run with only the SSH account's existing read access.
+        report.update({
+            "runtimeLayout": {"currentKind": "not_checked"},
+            "runtimeFiles": [], "declaredRevision": None,
+            "migrations": {"verifiedRead": False, "versions": [], "ownerMigrationPresent": False},
+            "scopedProfile": {"readable": False, "scopeReferenceValid": False, "credentialsChecked": False},
+            "privateOwnerConnection": {"checked": False, "ready": False, "apiVerified": False},
+        })
+        return report
 
     try:
         report["runtimeLayout"] = {
@@ -204,15 +224,6 @@ def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, requ
     except Exception:
         report["migrations"] = {"verifiedRead": False, "versions": [], "ownerMigrationPresent": False}
 
-    try:
-        report["loopbackHealth"] = health_summary(request(LOOPBACK + "/health"))
-    except Exception:
-        report["loopbackHealth"] = {"status": "unverified"}
-    try:
-        report["publicHealth"] = health_summary(request(PUBLIC_HEALTH))
-    except Exception:
-        report["publicHealth"] = {"status": "unverified"}
-
     report["privateOwnerConnection"] = {"checked": False, "ready": False, "apiVerified": False}
     try:
         env = parse_environment(env_file)
@@ -251,4 +262,7 @@ ROLLBACK;
 
 
 if __name__ == "__main__":
-    print(json.dumps(collect_report(), sort_keys=True, separators=(",", ":")))
+    if sys.argv[1:] not in ([], ["--public-only"], ["--protected-metadata"]):
+        raise SystemExit("Unsupported inspection mode")
+    print(json.dumps(collect_report(protected_metadata=sys.argv[1:] == ["--protected-metadata"]),
+                     sort_keys=True, separators=(",", ":")))

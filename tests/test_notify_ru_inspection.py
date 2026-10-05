@@ -4,6 +4,7 @@ import os
 import tempfile
 import tracemalloc
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,7 +63,23 @@ class InspectorTests(unittest.TestCase):
         return {"status": "received", "httpStatus": 200, "payload": self.health}
 
     def inspect(self, **kwargs):
-        return INSPECTOR.collect_report(self.runtime, self.env, kwargs.get("command", self.command), kwargs.get("request", self.request))
+        return INSPECTOR.collect_report(self.runtime, self.env, kwargs.get("command", self.command), kwargs.get("request", self.request), protected_metadata=True)
+
+    def test_default_public_mode_never_reads_files_environment_or_database(self):
+        def command(args, stdin=None):
+            self.assertEqual(args, INSPECTOR.SYSTEMD_COMMAND)
+            self.assertIsNone(stdin)
+            return self.command(args, stdin)
+        with patch.object(INSPECTOR, "read_bounded", side_effect=AssertionError("file access forbidden")), \
+             patch.object(INSPECTOR, "parse_environment", side_effect=AssertionError("environment forbidden")), \
+             patch.object(Path, "is_symlink", side_effect=AssertionError("filesystem forbidden")):
+            report = INSPECTOR.collect_report(self.runtime, self.env, command, self.request)
+        self.assertEqual(report["inspectionMode"], "public_service_only")
+        self.assertEqual(len(self.commands), 1)
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(report["runtimeFiles"], [])
+        for item, key in (("migrations", "verifiedRead"), ("scopedProfile", "readable"), ("privateOwnerConnection", "checked")):
+            self.assertFalse(report[item][key])
 
     def test_private_metadata_without_exporting_identity_or_using_tokens(self):
         report = self.inspect()
@@ -203,8 +220,10 @@ class InspectorTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/inspect-notify-ru-core.yml").read_text()
         self.assertNotIn("\n  push:", workflow)
         self.assertNotIn("pull_request_target", workflow)
-        for marker in ("INSPECT_NOTIFY_RU_CORE_READ_ONLY", 'test "$EXPECTED_SHA" = "$GITHUB_SHA"', "refs/heads/main", "StrictHostKeyChecking=yes", "'45.144.176.213'", "'supabase-deploy'", "'sudo -n /usr/bin/python3 -' < scripts/inspect-notify-ru-core.py"):
+        for marker in ("INSPECT_NOTIFY_RU_CORE_READ_ONLY", 'test "$EXPECTED_SHA" = "$GITHUB_SHA"', "refs/heads/main", "StrictHostKeyChecking=yes", "'45.144.176.213'", "'supabase-deploy'", "'/usr/bin/python3 - --public-only' < scripts/inspect-notify-ru-core.py"):
             self.assertIn(marker, workflow)
+        self.assertNotIn("sudo -", workflow)
+        self.assertNotIn("--protected-metadata", workflow)
         validate, inspect = workflow.split("  inspect:\n", 1)
         self.assertNotIn("secrets.", validate)
         self.assertIn("environment: production", inspect)

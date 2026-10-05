@@ -54,7 +54,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Inspect only the established Beget Notify runtime
+      - name: Inspect public service facts without sudo or protected files
         env:
           BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
           BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
@@ -77,4 +77,4 @@ jobs:
           ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$hosts" -o ConnectTimeout=10 \
             "$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST" \
-            'sudo -n /usr/bin/python3 -' < scripts/inspect-notify-ru-core.py
+            '/usr/bin/python3 - --public-only' < scripts/inspect-notify-ru-core.py
