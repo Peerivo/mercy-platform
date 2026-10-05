@@ -339,7 +339,7 @@ describe("REG.RU one-shot PREPARE dispatcher", () => {
     expect(dispatcher).toContain("[run-reg-ru-prepare]");
     expect(dispatcher).toContain("github.run_attempt == 1");
     expect(dispatcher).toContain(
-      "APPROVED_BASE_SHA: 1c4232c18674f928fdb6d1ed21d8193968e969f2",
+      "APPROVED_BASE_SHA: 4e89291a095062cc828c18dd2ffa9535c9d02cb6",
     );
     expect(dispatcher).toContain('test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"');
     expect(dispatcher).toContain(".github/workflows/deploy-reg-ru.yml");
