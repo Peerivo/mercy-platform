@@ -237,7 +237,12 @@ jobs:
           build_probe="mercy-build-probe-${GITHUB_RUN_ID}"
           trap 'docker rm -f "${build_probe}" >/dev/null 2>&1 || true' EXIT
           docker run -d --name "${build_probe}" --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,size=64m -e "GIT_SHA=${GITHUB_SHA}" \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            -e "GIT_SHA=${GITHUB_SHA}" \
+            -e NEXT_PUBLIC_SUPABASE_URL \
+            -e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY \
+            -e NEXT_PUBLIC_SUPABASE_ANON_KEY \
+            -e "NEXT_PUBLIC_SITE_URL=${SITE_URL}" \
             -p 127.0.0.1:3101:3000 "${IMAGE_NAME}:${GITHUB_SHA}" >/dev/null
           build_ready=0
           for _ in $(seq 1 20); do
