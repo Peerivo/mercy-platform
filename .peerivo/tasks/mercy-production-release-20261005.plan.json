@@ -1,0 +1,52 @@
+{
+  "taskId": "mercy-production-release-20261005",
+  "repository": "Peerivo/mercy-platform",
+  "environment": "REG.RU production application and existing Beget Auth",
+  "acceptedScope": "Finish the existing Mercy production release, preserving PR 218 and unrelated current-main work; implement, verify, merge and use the existing protected release path.",
+  "authorizationSource": "Owner request of 2026-10-05 10:52 UTC to finish Mercy so it works, without repeated ordinary approvals.",
+  "global": {
+    "version": "1.12.0",
+    "gitSha": "5ac07019c004415ed8eb82222f6bdc51b6a270aa",
+    "canonicalArtifact": "Peerivo/global:contracts/global.contract.v1.json",
+    "artifactSha256": "9ff754408729013041a0e442ed30002a644df14bc1b390ebcb64ab86c3f0426b"
+  },
+  "beforeSha": "ca26183e711015ae80e1ca452075163fc9cc9f24",
+  "decisions": [
+    "Keep the direct GoTrue credential preflight and independent REG.RU public-path Admin/Public gate.",
+    "Fail closed for missing or ambiguous identity, address or accepted key.",
+    "Preserve the existing rollback image and runtime environment.",
+    "Never equate CI or a Vercel Preview with REG.RU deployment or real-account authentication acceptance."
+  ],
+  "scenarios": [
+    {
+      "id": "selector",
+      "kind": "behavioral",
+      "acceptance": "Unique valid key selected; duplicate candidates deduplicated; unreachable Auth, rejected JWT, ambiguous container/address/key fail without key output."
+    },
+    {
+      "id": "reg-ru-candidate",
+      "kind": "production",
+      "acceptance": "Exact revision passes application/data health, Admin=200, Public=200, canonical callback and Peerivo PKCE start before promotion, with rollback retained."
+    },
+    {
+      "id": "public-surface",
+      "kind": "production",
+      "acceptance": "Record actual public revision, health/data and canonical callback; distinguish current Vercel route from REG.RU cutover."
+    },
+    {
+      "id": "real-account-auth",
+      "kind": "browser",
+      "acceptance": "Existing authorized account logs in, returns to cabinet, survives reload and logs out; report blocked if user authentication is required."
+    }
+  ],
+  "excluded": [
+    "database migrations",
+    "DNS changes",
+    "new credentials or OAuth grants",
+    "credential rotation",
+    "security permission changes",
+    "synthetic production accounts",
+    "new UI requirements"
+  ],
+  "completion": "Report implementation, merge, deployment and user-scenario evidence separately, with exact revisions and remaining blockers."
+}

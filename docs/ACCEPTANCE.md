@@ -118,3 +118,19 @@ Only `--inspect` is accepted. Core dumps are disabled; subprocess errors, raw Do
 
 
 The Menaion inspector file parser must accept trailing blank lines, full-line comments and CRLF without trimming literal values or interpreting inline comments. Runtime Docker Env parsing remains strict. Failed inspection must identify only a fixed stage/reason enum, never raw errors, unknown text, paths or values. Twenty-seven offline tests cover the correction and fail-closed diagnostics; failed run `37061862510` caused no production change.
+# Menaion moderation migration transport acceptance
+
+- A PR validates transport only, without production secrets or remote dispatch. Manual inspection/apply require exact current protected main, attempt 1 and their exact confirmation; APPLY also requires successful same-SHA INSPECT evidence from the same workflow.
+- Read-only inspection runs before decryption. Wrong database/executor, malformed/missing/changed predecessor history, unexpected migration version, object collision, or payload/certificate/manifest mismatch cannot reach an apply.
+- Migration10 SQL and its ledger entry commit atomically. Before commit, all new private tables require RLS, worker RPCs remain service-role-only, public/feedback roles cannot access private data or moderation RPCs, and role attributes/memberships are unchanged. Injected post-SQL failures must roll everything back.
+- Exact already-applied state is verified read-only and never replays SQL. Unknown outcome requires inspection before any retry. No raw SQL, submitted content, keys or runtime configuration appear in logs.
+- All nine previous ledger checksums, old encrypted payloads/executors and owner-activation PR #214 remain unchanged. This transport performs no credential, runtime or Telegram activation. Production and end-to-end verification remain explicit pending stages.
+- Unit regressions and opt-in disposable PostgreSQL acceptance are documented in `docs/MENAION_MODERATION_TRANSPORT.md`; the integration harness accepts only local PostgreSQL binaries/source files and creates its own database.
+
+
+## REG.RU direct GoTrue preflight acceptance — 2026-10-05
+- The exact PREPARE remote shell is executed by `tests/deploy-reg-ru.test.ts` with isolated synthetic Docker, curl and protected-env boundaries. It never accesses production services or files.
+- A unique valid candidate succeeds against direct GoTrue with a 10-second request timeout; rejected candidates may be skipped; duplicated copies are probed once. Missing/ambiguous containers or addresses, unreachable GoTrue, incomplete HTTP 200 responses, no valid JWT and multiple distinct accepted JWTs fail before any key is emitted.
+- Regression baseline `ca26183e711015ae80e1ca452075163fc9cc9f24` fails assertions for ambiguous containers, addresses and accepted keys; the corrected selector rejects each. A separate assertion also reproduces and blocks curl failure after partial HTTP 200 output. These fixtures establish selector behavior, not a production network root cause.
+- REG.RU promotion still requires public-path Admin=200/Public=200, app/data health, canonical callback and Peerivo PKCE-start verification while rollback is armed. The old image and previous env are retained for rollback.
+- After merge, record the exact production run/revision and then verify public health/data, callback, real-account login, cabinet return, reload and logout. Do not mark real-account E2E or REG.RU public cutover complete from CI, a Vercel Preview, or direct-GoTrue selection alone. No DB, DNS, credential creation/rotation or permission change belongs to this fix.

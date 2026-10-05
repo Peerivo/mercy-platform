@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 const workflow = fs.readFileSync(
@@ -20,6 +22,123 @@ const healthData = fs.readFileSync(
   path.join(process.cwd(), "app", "health", "data", "route.ts"),
   "utf8",
 );
+
+type PreflightFixture = {
+  project?: string;
+  kong?: string;
+  auth?: string;
+  authIp?: string;
+  runtimeKeys?: string[];
+  fileKeys?: string[];
+  statuses?: Record<string, string>;
+  unreachable?: boolean;
+  partialResponse?: boolean;
+};
+
+// Execute the exact remote heredoc that PREPARE sends to Beget. Every external
+// boundary is mocked; this fixture cannot use production Docker, curl or env files.
+function runDirectPreflight(fixture: PreflightFixture = {}) {
+  const step = workflow.split("- name: Resolve live Beget service-role key for Mercy")[1]
+    .split("\n      - name:")[0];
+  const script = step.split("<<'REMOTE'\n")[1]?.split("\n          REMOTE\n")[0]
+    .replace(/^ {10}/gm, "");
+  if (!script) throw new Error("Direct preflight remote heredoc is missing");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mercy-direct-preflight-"));
+  const log = path.join(dir, "calls.jsonl");
+  const config = {
+    project: "mercy", kong: "kong-one", auth: "auth-one", authIp: "172.20.0.4",
+    runtimeKeys: ["fixture-valid-key"], fileKeys: [],
+    statuses: { "fixture-valid-key": "200" }, ...fixture,
+  };
+  const mock = `#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const config = JSON.parse(process.env.MERCY_FIXTURE);
+const name = path.basename(process.argv[1]);
+const args = process.argv.slice(2);
+const emit = (value) => process.stdout.write(value + '\\n');
+if (name === 'docker') {
+  if (args[0] === 'inspect' && /\\s/.test(args[3] || '')) process.exit(89);
+  if (args[0] === 'ps') {
+    if (!args.includes('label=com.docker.compose.project=mercy')) process.exit(90);
+    if (args.includes('label=com.docker.compose.service=kong')) emit(config.kong);
+    else if (args.includes('label=com.docker.compose.service=auth')) emit(config.auth);
+    else process.exit(91);
+  } else if (args[0] === 'inspect' && args[3] === 'supabase-db') emit(config.project);
+  else if (args[0] === 'inspect' && config.auth.split('\\n').includes(args[3])) emit(config.authIp);
+  else if (args[0] === 'inspect' && args[3] === config.kong) emit(config.runtimeKeys.map(k => 'SUPABASE_SERVICE_KEY=' + k).join('\\n'));
+  else process.exit(92);
+} else if (name === 'sed') {
+  if (args.includes('/opt/beget/supabase/.env')) emit(config.fileKeys.join('\\n'));
+  else { const result = spawnSync('/usr/bin/sed', args, { stdio: 'inherit' }); process.exit(result.status ?? 93); }
+} else if (name === 'curl') {
+  fs.appendFileSync(process.env.MERCY_FIXTURE_LOG, JSON.stringify(args) + '\\n');
+  if (config.unreachable) { process.stdout.write('000'); process.exit(7); }
+  if (config.partialResponse) { process.stdout.write('200'); process.exit(28); }
+  const token = (args.find(x => x.startsWith('Authorization: Bearer ')) || '').slice(22);
+  process.stdout.write(config.statuses[token] || '401');
+} else process.exit(94);
+`;
+  try {
+    for (const name of ["docker", "curl", "sed"]) {
+      fs.writeFileSync(path.join(dir, name), mock, { mode: 0o700 });
+    }
+    const result = spawnSync("bash", ["-c", script], {
+      encoding: "utf8", timeout: 15000,
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`,
+        MERCY_FIXTURE: JSON.stringify(config), MERCY_FIXTURE_LOG: log },
+    });
+    const calls: string[][] = fs.existsSync(log)
+      ? fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line))
+      : [];
+    return { ...result, calls };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("executable live Beget service-role preflight", () => {
+  it("selects the unique accepted key through direct GoTrue with a bounded probe", () => {
+    const result = runDirectPreflight();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("fixture-valid-key");
+    expect(result.stderr).toBe("");
+    expect(result.calls).toHaveLength(1);
+    expect(result.calls[0]).toContain("http://172.20.0.4:9999/admin/users?page=1&per_page=1");
+    expect(result.calls[0][result.calls[0].indexOf("--max-time") + 1]).toBe("10");
+    expect(result.calls[0].join(" ")).not.toContain("api.mercy.peerivo.net");
+  });
+
+  it("tries rejected candidates and deduplicates runtime and protected-file keys", () => {
+    const result = runDirectPreflight({ runtimeKeys: ["fixture-old-key", "fixture-old-key"],
+      fileKeys: ["fixture-old-key", "fixture-valid-key", "fixture-valid-key"] });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("fixture-valid-key");
+    expect(result.calls).toHaveLength(2);
+  });
+
+  it.each([
+    ["unreachable Auth", { unreachable: true }],
+    ["incomplete HTTP 200 response", { partialResponse: true }],
+    ["rejected JWT", { statuses: { "fixture-valid-key": "401" } }],
+    ["empty candidates", { runtimeKeys: [] }],
+    ["missing Auth", { auth: "" }],
+    ["missing project", { project: "" }],
+    ["missing address", { authIp: "" }],
+    ["ambiguous Kong containers", { kong: "kong-one\nkong-two" }],
+    ["Auth HTTP 500", { statuses: { "fixture-valid-key": "500" } }],
+    ["ambiguous Auth containers", { auth: "auth-one\nauth-two" }],
+    ["ambiguous Auth addresses", { authIp: "172.20.0.4\n172.21.0.4" }],
+    ["ambiguous accepted keys", { runtimeKeys: ["fixture-valid-key", "fixture-second-key"],
+      statuses: { "fixture-valid-key": "200", "fixture-second-key": "200" } }],
+  ] satisfies [string, PreflightFixture][])("fails closed for %s without emitting keys", (_name, fixture) => {
+    const result = runDirectPreflight(fixture);
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).not.toMatch(/fixture-(valid|second|old)-key/);
+  });
+});
 
 describe("REG.RU production deployment safety contract", () => {
   it("pins checkout and SSH trust", () => {
@@ -135,7 +254,7 @@ describe("REG.RU one-shot PREPARE dispatcher", () => {
     expect(dispatcher).toContain("[run-reg-ru-prepare]");
     expect(dispatcher).toContain("github.run_attempt == 1");
     expect(dispatcher).toContain(
-      "APPROVED_BASE_SHA: 15fe3f513e7d87599f9af7149dc2a4aeb14461ee",
+      "APPROVED_BASE_SHA: a5e54a16853122af3d4eb93ca4807b26ed709c56",
     );
     expect(dispatcher).toContain('test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"');
     expect(dispatcher).toContain(".github/workflows/deploy-reg-ru.yml");
