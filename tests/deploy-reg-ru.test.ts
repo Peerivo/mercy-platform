@@ -43,7 +43,9 @@ describe("REG.RU production deployment safety contract", () => {
   it("sources the Mercy admin key from live Beget instead of a stale repository secret", () => {
     expect(workflow).toContain("Resolve live Beget service-role key for Mercy");
     expect(workflow).toContain("BEGET_SUPABASE_SSH_KEY");
-    expect(workflow).toContain("LIVE_BEGET_SERVICE_ROLE_VERIFIED");
+    expect(workflow).toContain("LIVE_BEGET_SERVICE_ROLE_DIRECT_VERIFIED");
+    expect(workflow).toContain('http://${auth_ip}:9999/admin/users?page=1&per_page=1');
+    expect(workflow).toContain("com.docker.compose.service=auth");
     expect(workflow).toContain("/auth/v1/admin/users?page=1&per_page=1");
     expect(workflow).not.toContain("SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.");
     expect(workflow).not.toContain("runner-side GoTrue Admin verification");
@@ -133,9 +135,10 @@ describe("REG.RU one-shot PREPARE dispatcher", () => {
     expect(dispatcher).toContain("[run-reg-ru-prepare]");
     expect(dispatcher).toContain("github.run_attempt == 1");
     expect(dispatcher).toContain(
-      "APPROVED_BASE_SHA: 15af55ae4ac2df156a2f5709c22fba5a9cea4ca7",
+      "APPROVED_BASE_SHA: 15fe3f513e7d87599f9af7149dc2a4aeb14461ee",
     );
     expect(dispatcher).toContain('test "$(git rev-parse HEAD^)" = "${APPROVED_BASE_SHA}"');
+    expect(dispatcher).toContain(".github/workflows/deploy-reg-ru.yml");
     expect(dispatcher).toContain("One-shot dispatcher increment contains unexpected files.");
   });
 
