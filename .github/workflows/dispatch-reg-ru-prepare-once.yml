@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APPROVED_BASE_SHA: 15af55ae4ac2df156a2f5709c22fba5a9cea4ca7
+  APPROVED_BASE_SHA: 15fe3f513e7d87599f9af7149dc2a4aeb14461ee
   TARGET_WORKFLOW: deploy-reg-ru.yml
 
 jobs:
@@ -49,6 +49,7 @@ jobs:
 
           allowed="$(
             printf '%s\n' \
+              '.github/workflows/deploy-reg-ru.yml' \
               '.github/workflows/dispatch-reg-ru-prepare-once.yml' \
               'tests/deploy-reg-ru.test.ts' \
               | LC_ALL=C sort
