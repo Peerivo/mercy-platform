@@ -27,7 +27,7 @@ ECMASCRIPT_TRIM = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\
 MIGRATION = re.compile(r"[0-9]{4}_[a-z0-9_]{1,110}\.sql")
 SYSTEMD_COMMAND = [
     "/usr/bin/systemctl", "show", "peerivo-notify", "--no-pager",
-    "--property=ActiveState,SubState,ExecMainStatus,MainPID",
+    "--property=ActiveState,SubState,ExecMainStatus,MainPID,User,Group,WorkingDirectory,ExecStart",
 ]
 DATABASE_COMMAND = [
     "/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "exec", "-i", "supabase-db",
@@ -139,9 +139,26 @@ def collect_report(runtime=RUNTIME, env_file=ENV_FILE, command=run_command, requ
                 service[name] = value
             elif name in ("ExecMainStatus", "MainPID") and value.isdigit() and len(value) <= 12:
                 service[name] = int(value)
+            elif name in ("User", "Group"):
+                service[name + "Expected"] = value == "peerivo-notify"
+            elif name == "WorkingDirectory":
+                service["WorkingDirectoryExpected"] = value == str(RUNTIME)
+            elif name == "ExecStart":
+                executable = re.search(r"(?:^|[{;])\s*path=([^;]+?)\s*;", value)
+                argv = re.search(r"(?:^|[{;])\s*argv\[\]=([^;]+?)\s*;", value)
+                service["ExecStartExpected"] = bool(executable and argv and executable.group(1) == "/usr/bin/node" and argv.group(1) == "/usr/bin/node /opt/peerivo-notify/current/src/ru-core-server.js")
         report["service"] = {"available": values is not None, "state": service}
     except Exception:
         report["service"] = {"available": False, "reason": "inspection_failed"}
+
+    try:
+        report["runtimeLayout"] = {
+            "currentKind": "symlink" if runtime.is_symlink() else "directory" if runtime.is_dir() else "missing",
+            "resolvesInsideNotify": runtime.resolve().is_relative_to(RUNTIME.parent),
+            "sourceDirectoryPresent": (runtime / "src").is_dir(),
+        }
+    except Exception:
+        report["runtimeLayout"] = {"currentKind": "unverified"}
 
     files = []
     for relative in RUNTIME_FILES:

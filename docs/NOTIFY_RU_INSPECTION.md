@@ -35,7 +35,9 @@ tokens, customer content or Telegram messages.
 
 ## Read set
 
-- `systemctl show peerivo-notify`: only allowlisted state, PID and exit code;
+- `systemctl show peerivo-notify`: allowlisted state, PID/exit code and booleans
+  comparing user/group/working directory/entrypoint to the existing canonical unit;
+- current runtime layout: directory/symlink/missing and bounded location categories;
 - fixed runtime `package.json` and seven RU modules: existence and SHA-256 only;
 - optional local release manifest: validated 40-hex source revision only;
 - fixed local Docker socket, existing `supabase-db`, database `postgres`: bounded

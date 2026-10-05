@@ -42,7 +42,7 @@ class InspectorTests(unittest.TestCase):
     def command(self, args, stdin=None):
         self.commands.append((args, stdin))
         if args == INSPECTOR.SYSTEMD_COMMAND:
-            return "ActiveState=active\nSubState=running\nMainPID=123\nExecMainStatus=0\nUnexpected=private-debug\n"
+            return "ActiveState=active\nSubState=running\nMainPID=123\nExecMainStatus=0\nUser=peerivo-notify\nGroup=peerivo-notify\nWorkingDirectory=/opt/peerivo-notify/current\nExecStart={ path=/usr/bin/node ; argv[]=/usr/bin/node /opt/peerivo-notify/current/src/ru-core-server.js ; ignore_errors=no ; }\nUnexpected=private-debug\n"
         self.assertEqual(args, INSPECTOR.DATABASE_COMMAND)
         self.assertEqual(stdin, INSPECTOR.MIGRATION_SQL)
         return "0001_notify_core.sql\n0002_human_action_choices.sql\n0003_telegram_relays.sql\n0004_owner_scoped_human_actions.sql\n"
@@ -84,6 +84,23 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("-i", self.commands[1][0])
         self.assertIn("PGCONNECT_TIMEOUT=5", self.commands[1][0])
         self.assertNotIn("-c", self.commands[1][0])
+
+    def test_layout_and_service_paths_are_reported_only_as_safe_categories(self):
+        report = self.inspect()
+        self.assertEqual(report["runtimeLayout"]["currentKind"], "directory")
+        self.assertTrue(report["runtimeLayout"]["sourceDirectoryPresent"])
+        self.assertTrue(report["service"]["state"]["ExecStartExpected"])
+        self.assertTrue(report["service"]["state"]["WorkingDirectoryExpected"])
+        self.assertTrue(report["service"]["state"]["UserExpected"])
+        def unexpected(args, stdin=None):
+            if stdin:
+                return self.command(args, stdin)
+            return "User=private-user\nGroup=private-group\nWorkingDirectory=/private-path\nExecStart={ path=/usr/bin/node ; argv[]=/usr/bin/node --import=" + TOKEN + " /opt/peerivo-notify/current/src/ru-core-server.js ; }\n"
+        report = self.inspect(command=unexpected)
+        self.assertFalse(report["service"]["state"]["ExecStartExpected"])
+        self.assertFalse(report["service"]["state"]["WorkingDirectoryExpected"])
+        for secret in (TOKEN, "private-user", "private-group", "private-path"):
+            self.assertNotIn(secret, json.dumps(report))
 
     def test_unreadable_environment_never_falls_back_to_global_credential(self):
         self.env.unlink()
