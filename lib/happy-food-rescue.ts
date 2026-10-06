@@ -205,7 +205,7 @@ function envelope(input: {
 }
 
 export function happyFoodRescueConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
 ): HappyFoodRescueConfig {
   const rawEnabled =
     env.HAPPY_FOOD_RESCUE_ENABLED ?? "false";
@@ -273,7 +273,9 @@ export function createHappyFoodRescueClient({
   if (!config.enabled) {
     return Object.freeze({
       enabled: false as const,
-      async send(): Promise<never> {
+      async send(
+        _event: HappyFoodRescueEnvelope,
+      ): Promise<never> {
         throw new Error(
           "Happy Food Rescue integration is disabled",
         );
