@@ -2,17 +2,12 @@ name: Provision Living Menaion PostgREST
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/provision-living-menaion-rest.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: living-menaion-postgrest-production
+  group: living-menaion-database-production
   cancel-in-progress: false
 
 jobs:
@@ -29,6 +24,10 @@ jobs:
 
 
     steps:
+      - name: Refuse retired destructive provisioner
+        run: |
+          echo "::error::Retired: this provisioner restores the shared authenticator and deletes the retained runtime. Use the reviewed owner-operated Menaion activation/recovery workflow."
+          exit 1
       - name: Validate protected configuration
         shell: bash
         run: |
@@ -228,3 +227,4 @@ jobs:
         if: always()
         shell: bash
         run: rm -f ~/.ssh/id_ed25519
+

@@ -115,6 +115,17 @@ The existing manual exact-main Menaion inspector now includes a strictly read-on
 ## Menaion inspection parser correction
 Run `37061862510` confirmed the nine migration checksums but the runtime inspector failed closed with a generic sanitized error. Its protected-file parser now accepts blank/full-line comments and CRLF permitted by Docker env files, while preserving literal values and strict runtime environment parsing. Fixed stage/reason codes distinguish safe compatibility failures without exposing exceptions or configuration. No mutation or credential operation is added; production runtime readiness remains unverified until the corrected read-only inspection succeeds.
 
+
+## Prepared owner-operated Menaion runtime activation
+A separate manual exact-main production workflow now prepares owner-operated
+credential binding and exact Menaion-only runtime replacement, with retained old
+container/private configuration, sanitized write-ahead recovery state, legacy
+zero-row access and narrow-role denial probes. The old destructive provisioner is
+retired before effects. Offline failure recovery and secretless disposable CI are
+provided. This does not mean production activation, persistent feedback-token
+issuance, Vercel binding or successful public form saving has occurred. The owner
+must personally enter/save the password and submit the reviewed activation; the
+assistant must not dispatch it. See `docs/MENAION_RUNTIME_HANDOFF.md`.
 ## Menaion moderation migration transport — prepared, not activated
 Migration10 has a separate exact-main, manual, protected inspection/apply path reusing the existing Beget transport and verified public certificate. The encrypted payload and all nine historical predecessor checksums are pinned. APPLY requires a successful same-main inspection, repeats read-only gates, and atomically applies only the reviewed migration plus ledger after target/history checks; role, public/private grants and RLS verification precede commit. No credentials, runtime activation, key generation or direct-shell SQL path is introduced. Existing owner-activation draft PR #214 remains separate. See `docs/MENAION_MODERATION_TRANSPORT.md` for evidence, limits, explicit owner steps and rollback guidance. Effective policy resolves active Global 1.12; this preparation is not production or end-to-end success evidence.
 
@@ -143,3 +154,15 @@ Run `37304787753` passed direct GoTrue selection, image build and upload, then r
 PREPARE now tests the exact anonymous public RPC before building, then tests the built image's real data-readiness route on the GitHub runner before upload. On REG.RU it stages the candidate separately on loopback 3101 while the original production container continues serving 3100. Candidate health/data, complete same-origin Admin/Public responses, callback and PKCE checks must pass before stopping production. Promotion repeats the same gates on 3100; any failure restores the same retained old container and environment, rather than reconstructing it. The stopped prior container is retained after success for rollback.
 
 The standalone public RPC probe uses existing public config, rejects secret/service-role keys and redirects, consumes at most 64 KiB within five seconds and prints only status, fixed failure/error categories, timing and a public-key fingerprint. It prints no rows, keys or exception messages. A failing route also triggers that runtime-env probe, distinguishing compiled-config readiness from runtime connectivity; no runtime key, DB, DNS, firewall or network-security change is introduced. Deployment and real-account E2E remain unverified until actual runs pass.
+
+
+## Menaion activation history compatibility — prepared 2026-10-06
+The owner-operated runtime gate now verifies the complete immutable nine-row ledger
+or exactly those nine rows plus reviewed migration10, matching the pinned moderation
+transport manifest. It no longer incorrectly rejects the canonical schema-first
+moderation rollout. Every historical digest and the exact migration10 digest remain
+required; unknown future policy migrations fail closed before activation effects.
+Read-only inspection exposes only a boolean history verdict. Recovery remains bound
+to retained runtime/role identities and does not block revocation on subsequent
+history changes. Disposable PostgreSQL and offline adversarial regressions pass;
+new Docker CI and production activation remain unverified. No migration is added.

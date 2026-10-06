@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import importlib.util
+import hashlib
 import io
 import json
 import os
@@ -38,10 +39,13 @@ def fixture():
     return rest, db, image, m.env_map(env)
 
 
-def db_fixture():
+def db_fixture(raw=False):
     data = {key: True for key in m.DB_FIELDS}
     data["credential_logging_observations"] = {key: True for key in m.LOG_FIELDS}
     data["preload_inventory"] = {**{key: False for key in m.PRELOAD_MODULES}, "unknown_count": 0}
+    if raw:
+        del data["migration_history_exact"]
+        data["migration_history"] = [{"version": v, "checksum": c} for v, c in m.FEEDBACK_HISTORY]
     return data
 
 
@@ -163,29 +167,75 @@ class RuntimeTests(unittest.TestCase):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_exact_history_matches_pinned_transport_contract(self):
+        manifest = (SCRIPT.parents[1] / "ops/living-menaion/moderation-predecessors.json").read_bytes()
+        self.assertEqual(hashlib.sha256(manifest).hexdigest(), "613887b5920dcffae6cad1db2b107ba0f8e366ae8c21f809a0b31f7d2fbf91a6")
+        rows = json.loads(manifest)
+        self.assertTrue(m.approved_migration_history(rows))
+        ten = rows + [{"version": "20261005073345", "checksum": "ee2bf27553ca0a71baa275ad607b7ddbf0893e9e64d5687d8029d94bf592b499"}]
+        self.assertTrue(m.approved_migration_history(ten))
+        for history in (rows, ten):
+            data = db_fixture(raw=True)
+            data["migration_history"] = history
+            result = m.validate_db_facts(data)
+            self.assertTrue(result["migration_history_exact"])
+            self.assertNotIn("migration_history", result)
+            self.assertEqual(data["migration_history"], history)
+
+    def test_history_rejects_every_missing_changed_duplicate_or_extra_row(self):
+        nine = db_fixture(raw=True)["migration_history"]
+        ten = nine + [{"version": "20261005073345", "checksum": "ee2bf27553ca0a71baa275ad607b7ddbf0893e9e64d5687d8029d94bf592b499"}]
+        for history in (nine, ten):
+            invalid = [None, False, True, {}, tuple(history), [], list(reversed(history)),
+                       history + [{"version": "20261006123456", "checksum": "a" * 64}]]
+            for index in range(len(history)):
+                invalid.extend([history[:index] + history[index+1:], history[:index] + [history[index]] + history[index:]])
+                for field in ("version", "checksum"):
+                    for value in (None, False, True, 0, 1, "", " " + history[index][field], history[index][field] + " "):
+                        changed = copy.deepcopy(history)
+                        changed[index][field] = value
+                        invalid.append(changed)
+                    # Generated adversarial coverage: change every digest character.
+                    if field == "checksum":
+                        for offset, char in enumerate(history[index][field]):
+                            changed = copy.deepcopy(history)
+                            changed[index][field] = history[index][field][:offset] + ("1" if char != "1" else "0") + history[index][field][offset+1:]
+                            invalid.append(changed)
+                changed = copy.deepcopy(history); changed[index]["extra"] = True; invalid.append(changed)
+            for value in invalid:
+                # Removing the single approved tenth row returns the approved nine.
+                if value == nine:
+                    continue
+                with self.subTest(history_length=len(history), case=str(value)[:100]):
+                    self.assertFalse(m.approved_migration_history(value))
+                    data = db_fixture(raw=True); data["migration_history"] = value
+                    result = m.validate_db_facts(data)
+                    self.assertIs(result["migration_history_exact"], False)
+                    self.assertNotIn("migration_history", result)
+
     def test_database_schema_requires_exact_booleans(self):
-        self.assertEqual(m.validate_db_facts(db_fixture()), db_fixture())
+        self.assertEqual(m.validate_db_facts(db_fixture(raw=True)), db_fixture())
         for bad in (None, 0, 1, "true", [], {}):
-            data = db_fixture()
+            data = db_fixture(raw=True)
             data["roles_safe"] = bad
             with self.assertRaises(m.Refused):
                 m.validate_db_facts(data)
-        data = db_fixture()
+        data = db_fixture(raw=True)
         data[SENTINEL] = True
         with self.assertRaises(m.Refused):
             m.validate_db_facts(data)
-        data = db_fixture()
+        data = db_fixture(raw=True)
         data["credential_logging_observations"]["pgaudit_logging_disabled"] = "true"
         with self.assertRaises(m.Refused):
             m.validate_db_facts(data)
 
     def test_preload_inventory_cannot_export_arbitrary_names_or_accept_ambiguous_counts(self):
         for bad in (True, "0", -1, None, 1001):
-            data = db_fixture()
+            data = db_fixture(raw=True)
             data["preload_inventory"]["unknown_count"] = bad
             with self.assertRaises(m.Refused):
                 m.validate_db_facts(data)
-        data = db_fixture()
+        data = db_fixture(raw=True)
         data["preload_inventory"][SENTINEL] = True
         with self.assertRaises(m.Refused):
             m.validate_db_facts(data)

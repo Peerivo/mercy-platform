@@ -15,6 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('moderation_builder', ROOT/'scripts/build-menaion-moderation-transaction.py')
 builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
+spec = importlib.util.spec_from_file_location('runtime_inspector', ROOT/'scripts/inspect-menaion-runtime-handoff.py')
+inspector = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(inspector)
 
 
 def run(pg_bin, migrations):
@@ -69,8 +72,44 @@ create database living_menaion;''', db='postgres')
             for row in rows:
                 query(f"insert into public.living_menaion_schema_migrations values ('{row['version']}','{row['checksum']}')")
             assert query(inspection) == 'MENAION_MODERATION_READY'
+            facts = inspector.validate_db_facts(json.loads(query(inspector.DB_SQL)))
+            assert all(facts[key] is True for key in inspector.DB_FIELDS), 'Exact nine-row runtime preflight refused'
             baseline()
             print('PASS: exact nine-predecessor read-only inspection')
+            # Exercise the actual runtime SQL/decoder against every immutable
+            # predecessor, including drift that the old latest-only gate missed.
+            def runtime_history(expected):
+                snapshot = query("select jsonb_agg(t order by version) from public.living_menaion_schema_migrations t")
+                facts = inspector.validate_db_facts(json.loads(query(inspector.DB_SQL)))
+                assert facts['migration_history_exact'] is expected
+                assert 'migration_history' not in facts
+                assert query("select jsonb_agg(t order by version) from public.living_menaion_schema_migrations t") == snapshot
+            runtime_history(True)
+            for row in rows:
+                query(f"update public.living_menaion_schema_migrations set checksum='{'0'*64}' where version='{row['version']}'")
+                runtime_history(False)
+                query(f"update public.living_menaion_schema_migrations set checksum='{row['checksum']}' where version='{row['version']}'")
+                query(f"delete from public.living_menaion_schema_migrations where version='{row['version']}'")
+                runtime_history(False)
+                query(f"insert into public.living_menaion_schema_migrations values ('{row['version']}','{row['checksum']}')")
+            runtime_history(True)
+            print('PASS: runtime history rejects every predecessor checksum drift and omission without writes')
+            # A hostile ledger remains a bounded metadata read: row eleven is
+            # a rejection sentinel, and oversized field prefixes cannot become valid.
+            query("insert into public.living_menaion_schema_migrations select '9999'||lpad(i::text,10,'0'),repeat('a',8192) from generate_series(1,1000) i")
+            raw_facts = json.loads(query(inspector.DB_SQL))
+            assert len(raw_facts['migration_history']) == 11
+            assert all(len(row['version']) <= 15 and len(row['checksum']) <= 65 for row in raw_facts['migration_history'])
+            assert inspector.validate_db_facts(raw_facts)['migration_history_exact'] is False
+            query("delete from public.living_menaion_schema_migrations where version like '9999%'")
+            query("insert into public.living_menaion_schema_migrations values ('"+rows[-1]['version']+"'||repeat('x',8192),repeat('a',8192))")
+            raw_facts = json.loads(query(inspector.DB_SQL))
+            assert len(raw_facts['migration_history'][-1]['version']) == 15
+            assert len(raw_facts['migration_history'][-1]['checksum']) == 65
+            assert inspector.validate_db_facts(raw_facts)['migration_history_exact'] is False
+            query("delete from public.living_menaion_schema_migrations where length(version)>14")
+            runtime_history(True)
+            print('PASS: oversized row counts and metadata stay bounded and fail closed')
             for sql in (inspection, transaction):
                 query(sql, False, db='postgres')
                 query(sql, False, user='wrong_executor')
@@ -105,12 +144,20 @@ create database living_menaion;''', db='postgres')
             assert query('select count(*) from public.living_menaion_schema_migrations') == '10'
             assert query(inspection) == 'MENAION_MODERATION_ALREADY_APPLIED'
             query(transaction, False)
-            print('PASS: atomic canonical apply, role/RLS/ACL checks, already-applied inspection, denied replay')
+            facts = inspector.validate_db_facts(json.loads(query(inspector.DB_SQL)))
+            assert all(facts[key] is True for key in inspector.DB_FIELDS), 'Exact ten-row runtime preflight refused'
+            runtime_history(True)
+            query("insert into public.living_menaion_schema_migrations values ('20261006123456','"+'0'*64+"')")
+            runtime_history(False)
+            query("delete from public.living_menaion_schema_migrations where version='20261006123456'")
+            runtime_history(True)
+            print('PASS: atomic canonical apply, exact ten-row runtime acceptance, unknown eleventh-row denial and no replay')
             acceptance = migrations.parent/'tests/pronunciation_moderation.sql'
             query(acceptance.read_text())
             print('PASS: actual moderation owner/denial/rollback acceptance after transport')
             query("update public.living_menaion_schema_migrations set checksum='"+'0'*64+"' where version='20261005073345'")
             query(inspection, False)
+            runtime_history(False)
             print('PASS: applied checksum tamper denied')
         finally:
             if started:

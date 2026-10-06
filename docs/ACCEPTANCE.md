@@ -118,6 +118,24 @@ Only `--inspect` is accepted. Core dumps are disabled; subprocess errors, raw Do
 
 
 The Menaion inspector file parser must accept trailing blank lines, full-line comments and CRLF without trimming literal values or interpreting inline comments. Runtime Docker Env parsing remains strict. Failed inspection must identify only a fixed stage/reason enum, never raw errors, unknown text, paths or values. Twenty-seven offline tests cover the correction and fail-closed diagnostics; failed run `37061862510` caused no production change.
+
+
+## Owner-operated Menaion runtime replacement acceptance
+Before credential mutation, preserve the observed immutable image and complete
+Config/HostConfig/network inputs and require exact post-create comparison; copy
+WorkingDir/Labels/MaskedPaths rather than guessing daemon defaults. Passwords use
+non-TTY psql client-encrypted SCRAM and stdin only, never plaintext SQL/argv/logging.
+No shared Mercy container or logging configuration changes. A sanitized durable
+journal and separate private runtime backup support compensating rollback and
+explicit post-crash recovery to the retained original container/env, inactive exact
+role, cleared password, terminated dedicated sessions and passing legacy access.
+A new activation with unresolved state is refused. Require precise HTTP statuses
+and codes for narrow denial, short-lived in-memory probes, no data writes and
+unchanged shared runtime. Owner-operated credential entry and final submission are
+mandatory. PR preparation, mocked tests and read-only preflight are not production
+activation or public-form success. Persistent feedback token and real draft-saving
+acceptance remain separate. Run the new secretless Docker/PostgreSQL CI and report
+its actual result before requesting activation.
 # Menaion moderation migration transport acceptance
 
 - A PR validates transport only, without production secrets or remote dispatch. Manual inspection/apply require exact current protected main, attempt 1 and their exact confirmation; APPLY also requires successful same-SHA INSPECT evidence from the same workflow.
@@ -160,3 +178,22 @@ The candidate's external Admin/Public probes now reject redirects before any cre
 - Public DNS A `95.163.223.68`, nginx, actual public `/health` revision and `/health/data` are checked independently. Vercel READY does not establish REG.RU promotion. Follow with real-account login, cabinet return, reload and logout after the target public revision is observed.
 
 - Promotion/metadata failure injection must restore the same original running container even if env metadata cannot be rewritten; such metadata remains explicitly unverified and deployment remains failed.
+
+
+## Exact Menaion runtime ledger compatibility
+- The exact historical nine entries from the pinned moderation manifest pass;
+  adding only migration10 `20261005073345` with its canonical plaintext digest also
+  passes. Source normalization never rewrites historical ledger digests.
+- Every predecessor omission/digest change, duplicate, reordered response, malformed
+  value, extra field, migration10 digest change and unknown future row must refuse.
+  Generated tests mutate every digest character. Raw history never enters reports.
+- Refusal must occur before candidate creation, credential changes, backup/journal
+  writes, container stop/rename/start or a rollback attempt. Existing runtime/env,
+  role inactivity and unrelated data are unchanged.
+- Successful activation on either history remains recoverable even after a future
+  migration: rollback keeps exact retained identities, revokes the dedicated role,
+  restores the old runtime and can repeat without requiring an activation preflight.
+- Real disposable PostgreSQL17 reproduces the old ten-row failure and verifies the
+  corrected nine/ten boundaries against canonical source migrations. New Docker
+  cases cover actual activation/refusal/recovery and need fresh secretless PR CI;
+  local mocks and historical green CI do not establish those new cases or production.

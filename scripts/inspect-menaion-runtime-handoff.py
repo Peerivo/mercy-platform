@@ -21,6 +21,24 @@ from urllib.parse import unquote, urlsplit
 
 MIGRATION_VERSION = "20261002184929"
 MIGRATION_SHA = "15265e48dcbf87b24b7aed34c296c2a4a83cbba132a5e33bffc0cfdd9469444c"
+# Immutable historical ledger, copied byte-for-value from PR219's pinned
+# moderation-predecessors.json (SHA-256 613887b5920dcffae6cad1db2b107ba0f8e366ae8c21f809a0b31f7d2fbf91a6).
+# Keep inline because the read-only workflow streams this inspector over stdin.
+# These are deployed checksums, never hashes regenerated from normalized sources.
+FEEDBACK_HISTORY = (
+    ("20260916193000", "3b34be574e02d0a15ad4c7e2d2b73dcc5b78b55b5bac8d303462eca299f31c9c"),
+    ("20260917094000", "c2cabd0b8fed228e9214117a3fbfe768df1d96724dc0614f9dd4da38ba9704cf"),
+    ("20260917224000", "0c67674026043a80021df34bbbb824aee842afe37fb8eea88f21ff5d0e7c1e45"),
+    ("20260917231000", "0a3be17f25f9e423c773c232eafb8e036c42ff7ce82401dcb771c5a3a3ab5551"),
+    ("20260918022500", "aa8be3c8305818638d6a77e5602adaf95ac8ed1ff5af6e1a10fd41ef8ab480e4"),
+    ("20260918213000", "c93038b2dddfbf75b38374dca8c850f036874ed67248550a31848b17a2eddaf6"),
+    ("20260927140000", "d6ffce4f79c96d24c88759edbff989373a96364871027f87e8c7bafff2905761"),
+    ("20260929193000", "6f945a29618a646d1f1e3d8c3be89fbbab1883fec8bc0e911b7494e9df19bddc"),
+    ("20261002184929", "15265e48dcbf87b24b7aed34c296c2a4a83cbba132a5e33bffc0cfdd9469444c"),
+)
+MODERATION_MIGRATION = ("20261005073345", "ee2bf27553ca0a71baa275ad607b7ddbf0893e9e64d5687d8029d94bf592b499")
+APPROVED_HISTORIES = (FEEDBACK_HISTORY, FEEDBACK_HISTORY + (MODERATION_MIGRATION,))
+
 REST_NAME = "living-menaion-rest"
 DB_NAME = "supabase-db"
 MAX_BYTES = 2 * 1024 * 1024
@@ -341,7 +359,11 @@ select jsonb_build_object(
  'database_exact', current_database()='living_menaion',
  'superuser_executor', (select rolsuper from pg_roles where rolname=current_user),
  'migration_exact', (select count(*)=1 from public.living_menaion_schema_migrations where version='20261002184929' and checksum='15265e48dcbf87b24b7aed34c296c2a4a83cbba132a5e33bffc0cfdd9469444c'),
- 'migration_is_latest', (select max(version)='20261002184929' from public.living_menaion_schema_migrations),
+ -- Eleven rows prove an oversized history without collecting the full ledger.
+ -- One character beyond each exact field length preserves fail-closed rejection.
+ 'migration_history', (select coalesce(jsonb_agg(jsonb_build_object('version',version,'checksum',checksum) order by version),'[]'::jsonb)
+   from (select left(version,15) as version,left(checksum,65) as checksum
+         from public.living_menaion_schema_migrations order by version limit 11) bounded_history),
  'roles_safe', (select count(*)=3 from pg_authid where rolname in ('menaion_feedback_submit','menaion_feedback_writer','menaion_rest_authenticator') and not (rolcanlogin or rolsuper or rolinherit or rolbypassrls or rolcreatedb or rolcreaterole or rolreplication) and rolpassword is null),
  'dedicated_authenticator_unused', not exists (select from pg_stat_activity where usename='menaion_rest_authenticator'),
  'dedicated_memberships_exact', (select array_agg(r.rolname::text order by r.rolname::text)=array['menaion_feedback_submit','service_role'] from pg_auth_members m join pg_roles r on r.oid=m.roleid where m.member=(select oid from pg_roles where rolname='menaion_rest_authenticator')),
@@ -386,7 +408,7 @@ select jsonb_build_object(
 );
 rollback;
 """
-DB_FIELDS = {"database_exact", "superuser_executor", "migration_exact", "migration_is_latest", "roles_safe",
+DB_FIELDS = {"database_exact", "superuser_executor", "migration_exact", "migration_history_exact", "roles_safe",
              "dedicated_authenticator_unused", "dedicated_memberships_exact", "dedicated_has_no_members",
              "shared_authenticator_not_member", "no_effective_postgrest_overrides", "no_role_config_overrides",
              "feedback_schemas_present", "feedback_rpc_present"}
@@ -401,9 +423,26 @@ LOG_FIELDS = {"log_statement_none", "log_duration_off", "duration_logging_disabl
 PRELOAD_MODULES = {"pgaudit", "pg_stat_statements", "pg_net", "pg_cron", "pgsodium"}
 
 
+def approved_migration_history(value) -> bool:
+    # Exact JSON types and shapes prevent coercion, hidden fields, ordering drift,
+    # missing predecessors, duplicates and any unreviewed future migration.
+    if type(value) is not list or len(value) not in (9, 10):
+        return False
+    history = []
+    for row in value:
+        if (type(row) is not dict or set(row) != {"version", "checksum"}
+                or type(row["version"]) is not str or type(row["checksum"]) is not str):
+            return False
+        history.append((row["version"], row["checksum"]))
+    return tuple(history) in APPROVED_HISTORIES
+
+
 def validate_db_facts(value) -> dict:
-    if type(value) is not dict or set(value) != DB_FIELDS | {"credential_logging_observations", "preload_inventory"}:
+    raw_fields = (DB_FIELDS - {"migration_history_exact"}) | {"migration_history", "credential_logging_observations", "preload_inventory"}
+    if type(value) is not dict or set(value) != raw_fields:
         raise Refused("unexpected database response")
+    value = dict(value)
+    value["migration_history_exact"] = approved_migration_history(value.pop("migration_history"))
     if not all(type(value[key]) is bool for key in DB_FIELDS):
         raise Refused("nonboolean database response")
     inventory = value["preload_inventory"]
