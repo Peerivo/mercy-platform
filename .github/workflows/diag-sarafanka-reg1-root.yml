@@ -1,0 +1,65 @@
+name: Diagnose Sarafanka REG.RU root tunnels
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-sarafanka-reg1-root.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$REG_RU_SSH_KEY" > ~/.ssh/reg
+          printf '%s\n' "$REG_RU_KNOWN_HOSTS" > ~/.ssh/known
+          chmod 600 ~/.ssh/reg ~/.ssh/known
+
+      - name: Diagnose
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -F /dev/null -i ~/.ssh/reg -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known -o GlobalKnownHostsFile=/dev/null root@95.163.223.68 'bash -se' <<'REMOTE'
+          set -u
+          key=/var/lib/sarafanka-deploy/.ssh/sarafanka_beget_tunnel
+          known=/var/lib/sarafanka-deploy/.ssh/beget_sarafanka_known_hosts
+
+          echo '=== FILES ==='
+          ls -l "$key" "$known" /opt/peerivo/sarafanka/incoming/runtime.db.candidate.env 2>&1 || true
+
+          echo '=== ROOT TUNNEL SERVICES ==='
+          systemctl --no-pager --full status peerivo-sarafanka-beget-db-tunnel.service 2>&1 || true
+          systemctl --no-pager --full status peerivo-sarafanka-beget-storage-tunnel.service 2>&1 || true
+
+          echo '=== DB JOURNAL ==='
+          journalctl --no-pager -u peerivo-sarafanka-beget-db-tunnel.service -n 50 2>&1 || true
+          echo '=== STORAGE JOURNAL ==='
+          journalctl --no-pager -u peerivo-sarafanka-beget-storage-tunnel.service -n 50 2>&1 || true
+
+          echo '=== PORTS ==='
+          ss -ltnp 2>&1 | grep -E ':(55435|58003)[[:space:]]' || true
+
+          echo '=== DIRECT SSH AUTH ==='
+          timeout 8 ssh -vv -T -F /dev/null             -i "$key"             -o BatchMode=yes             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=yes             -o UserKnownHostsFile="$known"             -o GlobalKnownHostsFile=/dev/null             sarafanka-tunnel@45.144.176.213 'echo ROOT_DIRECT_AUTH_OK' 2>&1             | grep -E 'Authenticated|Offering public key|Server accepts key|Permission denied|ROOT_DIRECT_AUTH_OK|Remote:|identity file' || true
+
+          echo 'ROOT_TUNNEL_DIAG_DONE'
+          REMOTE
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/reg ~/.ssh/known
