@@ -1,0 +1,93 @@
+{
+  "format": 1,
+  "postgresMajor": 17,
+  "sourceDigests": {
+    "20261005073345": "ee2bf27553ca0a71baa275ad607b7ddbf0893e9e64d5687d8029d94bf592b499",
+    "20261006033844": "48292e5d1ae87aea8931cdd3cd8d28f1ffbef1795adc0e28c874eb0b6b5b7b34",
+    "20261006055900": "57661d31ed4bc5f441b94a1b9f44b704e17ac6b98c390c8a4bddfcdd16a076a3"
+  },
+  "catalogDigests": {
+    "ledger": "08a8bae91b226608e38f7dea458236a0ddafb2e2569e59b559f2f956efb3637a",
+    "schemas9": "b7b31f4da52f6ef86e2fa332b4d800c7e74dfd93d520e8d412343261820efdaa",
+    "rate9": "b924be29d9fa39ff1ce5857ddc211425cc2a2794c8bdd607d865f324772b7a6f",
+    "entries9": "d809e1140ac7da059e3206c335d927e30ef69733e2edef678df087bd5fd043f4",
+    "publish9": "ca029b30eff1386e7063669dd36e9734a046fc540d3749780032e36c640413c4",
+    "schemas10": "6d78abfd522988b89f5fd60b469235bd8607a9c87c9983be0d86d130e9a0cc77",
+    "entries10": "c8ae4e77a641d7e4fc6c909b4ebc8d0a265e659e7334625209b9c933619de4c8",
+    "tables10": "48b177f12a196997fdf57e6b7a6add17a732d4001fbc3c0fbf43cc1e454cafb0",
+    "functions10": "69099f22f0b693c0345d7564130412d87557939060aabceadcecc668aa830677",
+    "publish10": "003fe2267603fd381a772d426358900c2809d1ae5861ee9bfe40e7923a583784",
+    "enqueueTrigger": "f772c399f0ae7c9a4676854eaf411121e9ffa4d8232e94bf055b2366424d07c5",
+    "policy11Functions": "a1ab4e3d0d08b3e1b929789e79d5cf11311b69d1801638891f01c44fbf6f816a",
+    "policy11Trigger": "2c846311da24e249497aafd63715737de4ffb86a603ba362fa464f9f6161b2ad",
+    "tables12": "310f40ed22c37391179d51e9b1006d1f1a0f1d93435bff73342f0e2275634925",
+    "functions12": "8d1ca4a55a22c9fdae7f618a59948b2b0000e85ac0f4dce4c060b41e3df5e29d",
+    "rate12": "5af0c1a12a175e02d7bb88fa47c605068b4eb2fd91bf1f61605b08f0839b9e0c"
+  },
+  "newObjects": {
+    "20261005073345": {
+      "relations": [
+        "menaion_feedback_private.moderation_decisions",
+        "menaion_feedback_private.moderation_decisions_notify_action_id_key",
+        "menaion_feedback_private.moderation_decisions_pkey",
+        "menaion_feedback_private.moderation_outbox",
+        "menaion_feedback_private.moderation_outbox_due_idx",
+        "menaion_feedback_private.moderation_outbox_notify_action_id_key",
+        "menaion_feedback_private.moderation_outbox_pkey",
+        "menaion_feedback_private.pronunciation_cache_invalidations",
+        "menaion_feedback_private.pronunciation_cache_invalidations_due_idx",
+        "menaion_feedback_private.pronunciation_cache_invalidations_entry_id_key",
+        "menaion_feedback_private.pronunciation_cache_invalidations_pkey"
+      ],
+      "functions": [
+        "living_menaion.claim_pronunciation_moderation",
+        "living_menaion.record_pronunciation_notification",
+        "living_menaion.defer_pronunciation_moderation",
+        "living_menaion.hold_pronunciation_moderation",
+        "living_menaion.apply_pronunciation_moderation_decision",
+        "living_menaion.claim_pronunciation_cache_invalidations",
+        "living_menaion.renew_pronunciation_cache_invalidation",
+        "living_menaion.complete_pronunciation_cache_invalidation",
+        "menaion_feedback_private.enqueue_pronunciation_moderation",
+        "menaion_feedback_private.protect_moderation_binding"
+      ]
+    },
+    "20261006055900": {
+      "relations": [
+        "menaion_feedback_private.issue_action_attempts",
+        "menaion_feedback_private.issue_action_attempts_action_id_attempt_id_key",
+        "menaion_feedback_private.issue_action_attempts_action_id_attempt_number_key",
+        "menaion_feedback_private.issue_action_attempts_pkey",
+        "menaion_feedback_private.issue_actions",
+        "menaion_feedback_private.issue_actions_attempt_id_key",
+        "menaion_feedback_private.issue_actions_entry_id_key",
+        "menaion_feedback_private.issue_actions_pkey",
+        "menaion_feedback_private.issue_actions_repository_id_issue_id_key",
+        "menaion_feedback_private.issue_ingestions",
+        "menaion_feedback_private.issue_ingestions_due",
+        "menaion_feedback_private.issue_ingestions_one_saved_entry",
+        "menaion_feedback_private.issue_ingestions_pkey",
+        "menaion_feedback_private.issue_ingestions_repository_id_issue_number_key",
+        "menaion_feedback_private.issue_ingestions_repository_id_request_id_key",
+        "menaion_feedback_private.issue_receipts",
+        "menaion_feedback_private.issue_receipts_action",
+        "menaion_feedback_private.issue_receipts_callback_once",
+        "menaion_feedback_private.issue_receipts_pkey",
+        "menaion_feedback_private.issue_receipts_update_once"
+      ],
+      "functions": [
+        "living_menaion.ingest_pronunciation_issue",
+        "living_menaion.claim_pronunciation_issue_work",
+        "living_menaion.reserve_pronunciation_issue_action",
+        "living_menaion.retry_pronunciation_issue_action",
+        "living_menaion.record_pronunciation_issue_dispatch",
+        "living_menaion.record_pronunciation_issue_delivery",
+        "living_menaion.apply_pronunciation_issue_decision",
+        "living_menaion.finish_pronunciation_issue_work",
+        "menaion_feedback_private.valid_issue_receipt",
+        "menaion_feedback_private.issue_prior_attempts_failed",
+        "menaion_feedback_private.protect_issue_transport_binding"
+      ]
+    }
+  }
+}
