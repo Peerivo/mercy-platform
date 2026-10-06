@@ -1,0 +1,155 @@
+name: Inspect or apply Menaion issue moderation schema package
+run-name: Menaion issue package ${{ inputs.action || 'validation' }}
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/apply-menaion-issue-package-encrypted.yml'
+      - 'scripts/apply-menaion-issue-package-encrypted.sh'
+      - 'scripts/build-menaion-issue-package-transaction.py'
+      - 'tests/test_menaion_issue_package_transport.py'
+      - 'ops/living-menaion/moderation-20261005.cms.b64'
+      - 'ops/living-menaion/issue-ledger-20261006.cms.b64'
+      - 'ops/living-menaion/issue-package-contract.json'
+      - 'tests/fixture_menaion_issue_package.py'
+      - 'tests/integration_menaion_issue_package.py'
+      - 'ops/living-menaion/moderation-predecessors.json'
+      - 'ops/living-menaion/deploy-public.pem'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Inspection first; schema apply never activates any runtime or credential
+        required: true
+        default: INSPECT
+        type: choice
+        options: [INSPECT, APPLY]
+      expected_sha:
+        description: Exact current Mercy main commit
+        required: true
+        type: string
+      confirmation:
+        description: Type INSPECT_MENAION_ISSUE_PACKAGE or APPLY_MENAION_ISSUE_PACKAGE_SCHEMA_ONLY
+        required: true
+        type: string
+      inspection_run_id:
+        description: APPLY only; successful INSPECT run from this exact main commit
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: |
+          bash -n scripts/apply-menaion-issue-package-encrypted.sh
+          python3 -m unittest discover -s tests -p 'test_menaion_issue_package_transport.py' -v
+          python3 -m unittest discover -s tests -p 'test_menaion_feedback_transaction.py' -v
+  execute:
+    needs: validate
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: living-menaion-database-production
+      cancel-in-progress: false
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate exact approved dispatch and prior inspection
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          MODE: ${{ inputs.action }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          INSPECTION_RUN_ID: ${{ inputs.inspection_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$EXPECTED_SHA" = "$GITHUB_SHA"
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          case "$MODE" in
+            INSPECT) test "$CONFIRMATION" = INSPECT_MENAION_ISSUE_PACKAGE;;
+            APPLY)
+              test "$CONFIRMATION" = APPLY_MENAION_ISSUE_PACKAGE_SCHEMA_ONLY
+              [[ "$INSPECTION_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
+              gh api "repos/Peerivo/mercy-platform/actions/runs/$INSPECTION_RUN_ID" > "$RUNNER_TEMP/menaion-inspection-run.json"
+              python3 - <<'PY'
+          import json, os
+          with open(os.environ['RUNNER_TEMP'] + '/menaion-inspection-run.json') as file:
+              run = json.load(file)
+          expected = {
+              'head_sha': os.environ['GITHUB_SHA'], 'head_branch': 'main',
+              'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'success',
+              'display_title': 'Menaion issue package INSPECT',
+              'path': '.github/workflows/apply-menaion-issue-package-encrypted.yml',
+              'run_attempt': 1,
+          }
+          if any(type(run.get(k)) is not type(v) or run.get(k) != v for k, v in expected.items()):
+              raise SystemExit('Exact successful inspection required')
+          PY
+              ;;
+            *) exit 1;;
+          esac
+          current="$(gh api repos/Peerivo/mercy-platform/git/ref/heads/main --jq .object.sha)"
+          test "$current" = "$GITHUB_SHA"
+      - name: Check out reviewed encrypted payload and executor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Run through existing protected transport
+        env:
+          MODE: ${{ inputs.action }}
+          GH_TOKEN: ${{ github.token }}
+          BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+          BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+          BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+          BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$MODE" = INSPECT || "$MODE" = APPLY ]]
+          current="$(gh api repos/Peerivo/mercy-platform/git/ref/heads/main --jq .object.sha)"
+          test "$current" = "$GITHUB_SHA"
+          for name in BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || { echo "::error::Missing protected binding: $name"; exit 1; }
+          done
+          [[ "$BEGET_SUPABASE_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          [[ "$BEGET_SUPABASE_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          umask 077
+          key="$(mktemp)"
+          hosts="$(mktemp)"
+          remote_dir=''
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > "$key"
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > "$hosts"
+          options=(-i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts")
+          cleanup() {
+            if [[ "$remote_dir" =~ ^/tmp/menaion-issue-package\.[A-Za-z0-9]+$ ]]; then
+              ssh "${options[@]}" "$remote" "rm -rf -- '$remote_dir'" </dev/null || true
+            fi
+            rm -f "$key" "$hosts"
+          }
+          trap cleanup EXIT
+          remote_dir="$(ssh "${options[@]}" "$remote" 'umask 077; mktemp -d /tmp/menaion-issue-package.XXXXXXXX')"
+          [[ "$remote_dir" =~ ^/tmp/menaion-issue-package\.[A-Za-z0-9]+$ ]]
+          scp "${options[@]}" ops/living-menaion/moderation-20261005.cms.b64 "$remote:$remote_dir/payload10.b64"
+          scp "${options[@]}" ops/living-menaion/issue-ledger-20261006.cms.b64 "$remote:$remote_dir/payload12.b64"
+          scp "${options[@]}" ops/living-menaion/issue-package-contract.json "$remote:$remote_dir/contract.json"
+          scp "${options[@]}" ops/living-menaion/moderation-predecessors.json "$remote:$remote_dir/manifest.json"
+          scp "${options[@]}" scripts/build-menaion-issue-package-transaction.py "$remote:$remote_dir/build-transaction.py"
+          scp "${options[@]}" scripts/apply-menaion-issue-package-encrypted.sh "$remote:$remote_dir/apply.sh"
+          current="$(gh api repos/Peerivo/mercy-platform/git/ref/heads/main --jq .object.sha)"
+          test "$current" = "$GITHUB_SHA"
+          ssh "${options[@]}" "$remote" "bash '$remote_dir/apply.sh' '$remote_dir' '$MODE'" </dev/null
