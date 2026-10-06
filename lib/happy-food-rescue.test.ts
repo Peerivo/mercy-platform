@@ -153,23 +153,32 @@ describe("Happy Food Rescue adapter", () => {
   });
 
   it("sends only to the fixed Happy integration endpoint with its own bearer token", async () => {
-    const fetchImpl = vi.fn<
-      Parameters<typeof fetch>,
-      ReturnType<typeof fetch>
-    >(async () =>
-      new Response(
-        JSON.stringify({
-          accepted: true,
-          eventId: "event_mercy_food_001",
-        }),
-        {
-          status: 200,
-          headers: {
-            "content-type":
-              "application/json",
+    let captured:
+      | {
+          input: RequestInfo | URL;
+          init?: RequestInit;
+        }
+      | undefined;
+    const fetchImpl: typeof fetch = vi.fn(
+      async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        captured = { input, init };
+        return new Response(
+          JSON.stringify({
+            accepted: true,
+            eventId: "event_mercy_food_001",
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type":
+                "application/json",
+            },
           },
-        },
-      ),
+        );
+      },
     );
 
     const config = happyFoodRescueConfig({
@@ -207,15 +216,15 @@ describe("Happy Food Rescue adapter", () => {
     await client.send(event);
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(String(url)).toBe(
+    expect(captured).toBeDefined();
+    expect(String(captured!.input)).toBe(
       "https://happy.example.invalid/v1/integrations/mercy/food-rescue/events",
     );
-    expect(init?.headers).toMatchObject({
+    expect(captured!.init?.headers).toMatchObject({
       authorization: "Bearer " + TOKEN,
       "content-type": "application/json",
     });
-    expect(init?.cache).toBe("no-store");
+    expect(captured!.init?.cache).toBe("no-store");
   });
 
   it("rejects PII-shaped payloads before network I/O", async () => {
