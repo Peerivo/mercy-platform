@@ -177,7 +177,19 @@ jobs:
             fi
             sleep 1
           done
-          test "$ok" = 1
+          if [ "$ok" != 1 ]; then
+            echo "=== SARAFANKA TUNNEL SYSTEMD STATUS ==="
+            systemctl --no-pager --full status peerivo-sarafanka-beget-tunnel.service || true
+            echo "=== SARAFANKA TUNNEL JOURNAL ==="
+            journalctl --no-pager -u peerivo-sarafanka-beget-tunnel.service -n 80 || true
+            echo "=== SARAFANKA SSH CONNECTION PROBE ==="
+            /usr/bin/ssh -vv -NT -F /dev/null -i /root/.ssh/sarafanka-beget-tunnel -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/sarafanka-beget-known-hosts -o GlobalKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o ConnectTimeout=10 "$beget_user@45.144.176.213" 2>&1 &
+            probe_pid=$!
+            sleep 3
+            kill "$probe_pid" >/dev/null 2>&1 || true
+            wait "$probe_pid" >/dev/null 2>&1 || true
+            exit 1
+          fi
 
           docker run --rm --add-host=host.docker.internal:host-gateway postgres:17-alpine             pg_isready -h host.docker.internal -p 55433 -d sarafanka >/dev/null
 
