@@ -2,9 +2,11 @@
 
 ## Review scope and provenance
 
-This is a prepared, locally verified schema transport. It has not been published,
-merged, dispatched, or applied to production. The working base is Mercy main
-`6e980c5b127fa8959395b2d87e6d6f7f786df0dc`; paused/unmerged authentication PR #214
+The initial package transport merged through PR #227. These append-only13,
+policy11-authority and diagnostic corrections are prepared locally against the
+verified current Mercy main `6f353bb9c80946a5c8a448da30e275341bec2546`,
+preserving the already-merged Happy Food Rescue adapter and project documentation.
+They have not been dispatched or applied to production. Paused/unmerged authentication PR #214
 is not included. Effective Global authority was rechecked as 1.12.0 at
 `5ac07019c004415ed8eb82222f6bdc51b6a270aa` on 6 October 2026.
 
@@ -23,7 +25,8 @@ Frozen sources from `Peerivo/living-menaion`:
 | --- | --- | --- |
 | `20261005073345` | Apply only if missing: private moderation outbox, decisions and approval-only cache events | `ee2bf27553ca0a71baa275ad607b7ddbf0893e9e64d5687d8029d94bf592b499` |
 | `20261006033844` | Optional already-applied content policy; verify and preserve, never apply or replace | `48292e5d1ae87aea8931cdd3cd8d28f1ffbef1795adc0e28c874eb0b6b5b7b34` |
-| `20261006055900` | Apply missing issue-ingestion/action/attempt/receipt ledger and service-only RPCs | `57661d31ed4bc5f441b94a1b9f44b704e17ac6b98c390c8a4bddfcdd16a076a3` |
+| `20261006055900` | Apply missing immutable issue-ingestion/action/attempt/receipt ledger and service-only RPCs | `57661d31ed4bc5f441b94a1b9f44b704e17ac6b98c390c8a4bddfcdd16a076a3` |
+| `20261006070900` | Append-only submitted-time rate-window and shared-counter retention repair | `97dc3c7e3e76bdad2d3448dfbd75adef8c3f3c62ecd0248856b729c6d403cf2f` |
 
 The nine historical deployed checksums are taken only from unchanged
 `ops/living-menaion/moderation-predecessors.json`; its SHA-256 is
@@ -31,11 +34,13 @@ The nine historical deployed checksums are taken only from unchanged
 Current normalized source fixture bytes must never replace those historical values.
 
 New catalog contract SHA-256:
-`d2ff79cf5ecf3818e807b58130e05835b43369b4665fd9fa14c4b9361e67a2ce`.
+`b4ba5f1c5950dc444f150d241b4a2e7311d798d00dcdefa1a3ae984aca1ad122`.
 Existing migration10 ciphertext remains unchanged with SHA-256
 `0462c0804ee37bb73edfbe468c16ccd5cfd5de69a7f1e1e108c4d50625e7fa57`.
-New migration12 ciphertext-file SHA-256:
+Immutable migration12 ciphertext-file SHA-256:
 `1bc348d8c88f45815a34defd25e77b44aa589892a4be150ff3dddeb2ae5ebe68`.
+New migration13 ciphertext-file SHA-256:
+`3c84ef432b7ac4e0b7c46a14d4b8e6023818c01ddd0bf3722c0b937d430ea716`.
 Encryption is OpenSSL CMS, DER, binary, AES-256-CBC to the existing certificate,
 whose public DER SHA-256 is
 `1c445517d9fe95784a9caced337ce5f34b9132610afd1946f325bd5ad8d385c9`.
@@ -51,10 +56,12 @@ The only eligible starting histories are:
 - H9 + canonical10
 - H9 + canonical11
 - H9 + canonical10 + canonical11
+- H9 + canonical10 + canonical12
+- H9 + canonical10 + canonical11 + canonical12
 
-The completed histories H9+10+12 and H9+10+11+12 are verification-only. They never
-replay either source file. Missing predecessors, checksum drift, any other version,
-issue12 without10, and unknown future migrations fail closed. Counts alone are not
+The completed histories H9+10+12+13 and H9+10+11+12+13 are verification-only.
+Existing12 is eligible only for the missing13 repair; immutable12 never replays. Missing predecessors, checksum drift, any other version,
+issue12 without10, issue13 without12, and unknown future migrations fail closed. Counts alone are not
 history evidence. The older standalone migration10 transport is not called by this
 package and cannot be used to work around a policy11 history rejection.
 
@@ -69,12 +76,21 @@ feedback/editorial roles is checked separately to catch inherited service access
 For policy11, exact function definitions and trigger structure are required, and
 its existing function ownership/ACLs are preserved across application.
 
-Apply repeats those checks under an exclusive ledger lock. It applies missing10
-and12 in one transaction, verifies all resulting catalogs, inserts only missing
+Apply repeats those checks under an exclusive ledger lock. It applies missing10,12
+and13 in one transaction, verifies all resulting catalogs, inserts only missing
 ledger entries and commits. Role attributes/configuration/memberships, the
-publication RPC owner/ACL and the content policy remain unchanged. Any failure
+publication RPC owner/ACL, legacy submitter owner/ACL and the content policy remain unchanged. Any failure
 rolls back both package schemas and ledger entries. A race with an already
 completed package is refused under the lock rather than replayed.
+
+Migration13 attributes delayed issue admissions to their validated submission windows,
+and retains shared client/global counters through the seven-day delayed-admission
+horizon. It replaces only the existing issue-ingestion and restricted legacy-submitter
+function bodies, preserving owners, ACLs, signatures and security modes. It also extends
+still-live recognized counters without changing their counts. It does not restore
+already expired/deleted counters, reconsider terminal admissions, or replay issue12.
+Rollback tests prove these counter updates and function replacements roll back with
+all schema/history changes.
 
 Migration10 is generic private audit/outbox/cache infrastructure. There is no
 prerequisite for a Menaion PostgREST authenticator, active login, JWT, exposed
@@ -135,6 +151,22 @@ transport or by switching to a privileged route.
 
 ## Failure, retention and recovery
 
+Failures now include `MENAION_ISSUE_PACKAGE_FAILURE stage=<fixed stage> gate=<fixed gate>`.
+Stages distinguish input integrity, local Docker target, deployment-key/certificate
+presence, inspection construction/database/output, decode/decrypt/source integrity,
+and application construction/database/output. Database gate failures use fixed SQLSTATE
+codes mapped to fixed names, such as `history_mismatch`, `schema_catalog` and
+`policy11_authority`; unknown errors become `database_unclassified`. SQLSTATE-only
+psql verbosity and suppressed context ensure no raw SQL, row, error message, path or
+secret is copied into the diagnostic. The source SQL is never rewritten to instrument
+it. This diagnostics change does not retry the failed live inspection or authorize an
+application.
+
+Both policy11 functions now require their canonical owner and complete EXECUTE ACL,
+including grantors and grant options, before inspection can certify readiness. Existing
+canonical grants remain unchanged; a before/after snapshot alone is not accepted as
+proof of pre-existing authority.
+
 All temporary files use a validated owner-only directory and are removed. Database,
 decrypt and raw construction errors are withheld because they may contain source or
 row data. Output is limited to fixed state markers and the legacy count.
@@ -162,7 +194,7 @@ python3 tests/integration_menaion_issue_package.py \
 
 The real PG17 harness creates/stops its own disposable loopback-only cluster. It
 accepts no database URL, remote host, password or existing cluster. It recomputes
-and compares catalog fingerprints from the frozen sources; covers all four eligible
+and compares catalog fingerprints from the frozen sources; covers all six eligible
 starting histories; injects failure after DDL to prove atomic rollback; verifies
 success and policy11 preservation; denies replay, bad history/target/executor,
 object collisions and catalog/security drift; runs the source issue acceptance
@@ -171,3 +203,30 @@ Public PR CI cannot decrypt private source, so it runs deterministic integrity,
 shell/redaction/no-replay and dispatch gates without protected secrets. Full Mercy
 application CI and live Beget/Telegram acceptance are not claimed by local transport
 verification.
+
+The previous read-only INSPECT run `37427490190` failed with an unclassified marker
+before any approved APPLY. It remains failure evidence, not schema-install evidence.
+A new read-only diagnostic run requires the reviewed correction on exact current main;
+these local repairs do not themselves retry that run.
+
+## Pre-13 quiescent transition guard
+
+Migration13 remains byte-for-byte frozen. Its trailing live-counter UPDATE is not
+a safe 12->13 conversion by itself, and removing only that UPDATE is also unsafe:
+the migration13 ON CONFLICT path can still prolong a shared v12 key. The installer
+therefore hash-pins `pre13-quiescent-guard.sql` and executes those exact guard
+bytes only after canonical10+12 and immediately before unchanged13, in the same
+database transaction.
+
+Before APPLY, both pronunciation-admission writers must be paused and every
+in-flight call drained. The workflow requires an explicit quiescence attestation,
+but the database guard remains authoritative: it takes advisory transaction lock
+`(194819,1)` and refuses if any shared `rate_buckets` row is still live. A
+refusal never deletes, resets, shortens or namespaces a counter. Wait for natural
+expiry and run INSPECT again.
+
+INSPECT has three fixed states: READY, PRE13_LIVE_RATE_COUNTERS and 13_PRESENT.
+If13 is already present, APPLY stops before decryption/guard. The pre13 guard is
+not a repair for an installed13. Recovery must first preserve evidence and
+separately establish counter provenance; old and new counters have the same
+representation and the issue-ingestion ledger does not retain the client rate key.

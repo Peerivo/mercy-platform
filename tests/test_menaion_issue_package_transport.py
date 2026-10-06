@@ -33,14 +33,18 @@ class IntegrityTests(unittest.TestCase):
 
     def test_frozen_issue_ciphertext_contract_and_exact_histories(self):
         self.assertEqual(hashlib.sha256((ROOT/'ops/living-menaion/issue-ledger-20261006.cms.b64').read_bytes()).hexdigest(), builder.CIPHERTEXT12_SHA)
+        self.assertEqual(hashlib.sha256((ROOT/'ops/living-menaion/issue-rate-windows-20261006.cms.b64').read_bytes()).hexdigest(), builder.CIPHERTEXT13_SHA)
+        self.assertEqual(hashlib.sha256((ROOT/'ops/living-menaion/pre13-quiescent-guard.sql').read_bytes()).hexdigest(), builder.PRE13_GUARD_SHA)
         contract = builder.checked_contract(CONTRACT)
         self.assertEqual(contract['sourceDigests'][builder.VERSION12], builder.SOURCE12_SHA)
+        self.assertEqual(contract['sourceDigests'][builder.VERSION13], builder.SOURCE13_SHA)
         rows = builder.checked_manifest(MANIFEST)
         histories = builder.histories(rows) + builder.histories(rows, True)
-        self.assertEqual(len(histories), 6)
+        self.assertEqual(len(histories), 8)
         self.assertEqual([tuple(x['version'] for x in h[9:]) for h in histories], [
             (), (builder.VERSION11,), (builder.VERSION10,), (builder.VERSION10,builder.VERSION11),
-            (builder.VERSION10,builder.VERSION12), (builder.VERSION10,builder.VERSION11,builder.VERSION12)])
+            (builder.VERSION10,builder.VERSION12), (builder.VERSION10,builder.VERSION11,builder.VERSION12),
+            (builder.VERSION10,builder.VERSION12,builder.VERSION13), (builder.VERSION10,builder.VERSION11,builder.VERSION12,builder.VERSION13)])
         for index in range(0,len(CONTRACT),31):
             changed=bytearray(CONTRACT);changed[index]^=1
             with self.assertRaises(ValueError): builder.build_inspection(MANIFEST,bytes(changed))
@@ -50,7 +54,7 @@ class IntegrityTests(unittest.TestCase):
             changed = bytearray(MANIFEST)
             changed[index] ^= 1
             with self.assertRaises(ValueError): builder.build_inspection(bytes(changed), CONTRACT)
-        with self.assertRaises(ValueError): builder.build_transaction(b'PRIVATE_SQL_CANARY', b'PRIVATE_SQL_CANARY', MANIFEST, CONTRACT)
+        with self.assertRaises(ValueError): builder.build_transaction(b'PRIVATE_SQL_CANARY', b'PRIVATE_SQL_CANARY', b'PRIVATE_SQL_CANARY', MANIFEST, CONTRACT)
 
     def test_invalid_manifest_shapes_and_coercions(self):
         good = json.loads(MANIFEST)
@@ -77,11 +81,21 @@ class IntegrityTests(unittest.TestCase):
             (root/'manifest.json').write_bytes(MANIFEST)
             (root/'contract.json').write_bytes(CONTRACT)
             (root/'migration12.sql').write_bytes(b'PRIVATE_SQL_CANARY')
+            (root/'migration13.sql').write_bytes(b'PRIVATE_SQL_CANARY')
             (root/'migration10.sql').write_bytes(b'PRIVATE_SQL_CANARY')
             result = subprocess.run(['python3', str(ROOT/'scripts/build-menaion-issue-package-transaction.py'), 'apply', str(root)], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((root/'transaction.sql').exists())
             self.assertNotIn('PRIVATE_SQL_CANARY', result.stdout+result.stderr)
+
+
+class DiagnosticTests(unittest.TestCase):
+    def test_only_fixed_sqlstates_classify_database_errors(self):
+        for code,label in builder.GATE_CODES.values():
+            self.assertEqual(builder.classify_database_error(('ERROR:  '+code+'\n').encode()),label)
+        for raw in [b'ERROR:  PRIVATE_SQL_CANARY',b'ERROR:  MI999',b'CONTEXT: PRIVATE_SQL_CANARY MI001',
+          b'ERROR:  MI001 PRIVATE_SQL_CANARY',b'ERROR:  MI001\nERROR:  MI002',b'\xff',b'X'*65537]:
+            self.assertEqual(builder.classify_database_error(raw),'database_unclassified')
 
 
 class RemoteExecutorTests(unittest.TestCase):
@@ -99,9 +113,12 @@ class RemoteExecutorTests(unittest.TestCase):
                 'sha256sum': f'''#!/bin/bash
 case "${{1:-stdin}}" in
   *payload10.b64) echo "${{PAYLOAD_HASH:-{builder.CIPHERTEXT10_SHA}}}  file";;
+  *payload13.b64) echo "${{PAYLOAD13_HASH:-{builder.CIPHERTEXT13_SHA}}}  file";;
   *payload12.b64) echo "${{PAYLOAD12_HASH:-{builder.CIPHERTEXT12_SHA}}}  file";;
   *contract.json) echo "${{CONTRACT_HASH:-{builder.CONTRACT_SHA}}}  file";;
   *manifest.json) echo "${{MANIFEST_HASH:-{builder.MANIFEST_SHA}}}  file";;
+  *migration13.sql) echo "${{MIGRATION13_HASH:-{builder.SOURCE13_SHA}}}  file";;
+  *pre13-guard.sql) echo "${{PRE13_GUARD_HASH:-{builder.PRE13_GUARD_SHA}}}  file";;
   *migration12.sql) echo "${{MIGRATION12_HASH:-{builder.SOURCE12_SHA}}}  file";;
   *migration10.sql) echo "${{MIGRATION_HASH:-{builder.SOURCE10_SHA}}}  file";;
   stdin) cat >/dev/null; echo "${{CERT_HASH:-{builder.CERTIFICATE_SHA}}}  -";;
@@ -123,6 +140,7 @@ else
 fi
 ''',
                 'python3': '''#!/bin/bash
+if [ "$2" = diagnose ]; then printf '%s\\n' "${DIAGNOSTIC_GATE:-database_unclassified}"; exit; fi
 echo "build-$2" >> "$CALL_LOG"
 if [ "${BUILD_FAIL:-0}" = 1 ]; then echo PRIVATE_SQL_CANARY >&2; exit 1; fi
 case "$2" in inspect) echo INSPECT > "$3/inspection.sql";; apply) echo APPLY > "$3/transaction.sql";; *) exit 99;; esac
@@ -158,9 +176,11 @@ esac
             root.mkdir(mode=0o700)
             (root/'payload10.b64').write_text('RklYVFVSRQ==')
             (root/'payload12.b64').write_text('RklYVFVSRQ==')
+            (root/'payload13.b64').write_text('RklYVFVSRQ==')
             (root/'contract.json').write_text('{}')
             (root/'manifest.json').write_text('[]')
             (root/'build-transaction.py').write_text('# synthetic')
+            (root/'pre13-guard.sql').write_text('-- synthetic guard input')
             result = subprocess.run(['bash', str(ROOT/'scripts/apply-menaion-issue-package-encrypted.sh'), str(root), mode],
                 env=dict(os.environ, HOME=str(home), PATH=str(binaries)+':'+os.environ['PATH'], CALL_LOG=str(log), **options), capture_output=True, text=True)
             calls = log.read_text().splitlines() if log.exists() else []
@@ -178,14 +198,24 @@ esac
     def test_apply_inspects_before_decrypt_and_commit(self):
         result, calls = self.execute()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, ['build-inspect','inspect','decrypt','decrypt','build-apply','apply'])
+        self.assertEqual(calls, ['build-inspect','inspect','decrypt','decrypt','decrypt','build-apply','apply'])
         self.assertEqual(result.stdout.strip(), 'MENAION_ISSUE_PACKAGE_VERIFIED\nMENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0')
 
-    def test_already_applied_has_no_replay(self):
-        result, calls = self.execute(STATE='MENAION_ISSUE_PACKAGE_ALREADY_APPLIED')
+    def test_present13_stops_apply_before_decryption(self):
+        result, calls = self.execute(STATE='MENAION_ISSUE_PACKAGE_13_PRESENT')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, ['build-inspect', 'inspect'])
+        self.assertIn('stage=pre13_state', result.stderr)
+        result, calls = self.execute('INSPECT', STATE='MENAION_ISSUE_PACKAGE_13_PRESENT')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, ['build-inspect', 'inspect'])
-        self.assertEqual(result.stdout.strip(), 'MENAION_ISSUE_PACKAGE_ALREADY_APPLIED\nMENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0')
+        self.assertEqual(result.stdout.strip(), 'MENAION_ISSUE_PACKAGE_13_PRESENT\nMENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0')
+
+    def test_live_pre13_counter_stops_apply_before_decryption(self):
+        result, calls = self.execute(STATE='MENAION_ISSUE_PACKAGE_PRE13_LIVE_RATE_COUNTERS')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, ['build-inspect', 'inspect'])
+        self.assertIn('stage=pre13_live_rate_counters', result.stderr)
 
     def test_legacy_count_is_redacted_without_blocking_schema_apply(self):
         result,calls=self.execute(LEGACY='MENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=2',
@@ -194,8 +224,25 @@ esac
         self.assertIn('apply',calls)
         self.assertEqual(result.stdout.strip(),'MENAION_ISSUE_PACKAGE_VERIFIED\nMENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=2')
 
+    def test_failure_stages_and_fixed_gate_allowlist(self):
+        cases=[(dict(DOCKER_CONTEXT='remote'),'transport_target'),(dict(PAYLOAD12_HASH='0'*64),'ciphertext_integrity'),
+          (dict(PRE13_GUARD_HASH='0'*64),'pre13_guard_integrity'),(dict(MANIFEST_HASH='0'*64),'manifest_integrity'),(dict(CONTRACT_HASH='0'*64),'contract_integrity'),
+          (dict(RUNNING='false'),'docker_running'),(dict(EXPIRED='1'),'certificate_validity'),
+          (dict(CERT_HASH='0'*64),'certificate_identity'),(dict(BUILD_FAIL='1'),'inspection_build'),
+          (dict(INSPECT_FAIL='1'),'inspection_database'),(dict(STATE='UNKNOWN'),'inspection_output'),
+          (dict(DECRYPT_FAIL='1'),'decrypt_10'),(dict(MIGRATION12_HASH='0'*64),'source12_integrity'),
+          (dict(APPLY_FAIL='1'),'apply_database'),(dict(RESULT='UNKNOWN'),'apply_output')]
+        for options,stage in cases:
+            result,calls=self.execute(**options)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('FAILURE stage='+stage+' gate=',result.stderr)
+        result,_=self.execute(INSPECT_FAIL='1',DIAGNOSTIC_GATE='policy11_authority')
+        self.assertIn('stage=inspection_database gate=policy11_authority',result.stderr)
+        result,_=self.execute(INSPECT_FAIL='1',DIAGNOSTIC_GATE='PRIVATE_SQL_CANARY')
+        self.assertIn('gate=database_unclassified',result.stderr)
+
     def test_all_preflight_failures_have_zero_apply(self):
-        cases = [dict(DOCKER_HOST='tcp://wrong-daemon:2375'),dict(DOCKER_CONTEXT='other-daemon'),dict(PAYLOAD12_HASH='0'*64),dict(CONTRACT_HASH='0'*64),dict(MIGRATION12_HASH='0'*64),dict(LEGACY='-1'),dict(LEGACY='MENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=01'),dict(LEGACY='MENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0\nextra'),dict(PAYLOAD_HASH='0'*64), dict(MANIFEST_HASH='0'*64), dict(CERT_HASH='0'*64),
+        cases = [dict(PAYLOAD13_HASH='0'*64),dict(PRE13_GUARD_HASH='0'*64),dict(MIGRATION13_HASH='0'*64),dict(DOCKER_HOST='tcp://wrong-daemon:2375'),dict(DOCKER_CONTEXT='other-daemon'),dict(PAYLOAD12_HASH='0'*64),dict(CONTRACT_HASH='0'*64),dict(MIGRATION12_HASH='0'*64),dict(LEGACY='-1'),dict(LEGACY='MENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=01'),dict(LEGACY='MENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0\nextra'),dict(PAYLOAD_HASH='0'*64), dict(MANIFEST_HASH='0'*64), dict(CERT_HASH='0'*64),
                  dict(RUNNING='false'), dict(EXPIRED='1'), dict(BUILD_FAIL='1'), dict(INSPECT_FAIL='1'),
                  dict(STATE=''), dict(STATE='MENAION_ISSUE_PACKAGE_READY\nPRIVATE_SQL_CANARY'),
                  dict(STATE='t'), dict(STATE='MENAION_ISSUE_PACKAGE_READY '), dict(STATE='UNKNOWN'),
@@ -233,7 +280,8 @@ class DispatchGateTests(unittest.TestCase):
             gh.chmod(0o755)
             env=dict(os.environ, PATH=str(root)+':'+os.environ['PATH'], RUNNER_TEMP=str(root),
                      EXPECTED_SHA=sha, GITHUB_SHA=sha, CURRENT_SHA=sha, GITHUB_RUN_ATTEMPT='1',
-                     MODE='APPLY', CONFIRMATION='APPLY_MENAION_ISSUE_PACKAGE_SCHEMA_ONLY', INSPECTION_RUN_ID='123')
+                     MODE='APPLY', CONFIRMATION='APPLY_MENAION_ISSUE_PACKAGE_SCHEMA_ONLY', INSPECTION_RUN_ID='123',
+                     QUIESCENCE='BOTH_ADMISSION_WRITERS_PAUSED_AND_DRAINED')
             env.update(changes)
             return subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True)
 
@@ -243,7 +291,7 @@ class DispatchGateTests(unittest.TestCase):
 
     def test_unapproved_stale_rerun_and_inexact_inspection_denied(self):
         cases=[dict(EXPECTED_SHA='b'*40),dict(CURRENT_SHA='b'*40),dict(GITHUB_RUN_ATTEMPT='2'),
-               dict(CONFIRMATION='yes'),dict(MODE='APPLY;true'),dict(INSPECTION_RUN_ID=''),
+               dict(CONFIRMATION='yes'),dict(QUIESCENCE='NOT_CONFIRMED'),dict(MODE='APPLY;true'),dict(INSPECTION_RUN_ID=''),
                dict(INSPECTION_RUN_ID='123/../../dispatches')]
         for key, bad in [('head_sha','b'*40),('head_branch','feature'),('event','pull_request'),
                          ('status','in_progress'),('conclusion','failure'),('display_title','Menaion issue package APPLY'),

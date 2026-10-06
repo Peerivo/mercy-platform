@@ -147,3 +147,13 @@ The standalone public RPC probe uses existing public config, rejects secret/serv
 
 ## Prepared GitHub issue moderation schema transport — 2026-10-06
 A new package-specific protected workflow prepares schema-only application of missing canonical moderation10 plus issue12 against the existing Beget Menaion target. It accepts only exact historical H9 with optional10/policy11, preserves policy11, and treats completed package histories as verification-only. Frozen encrypted sources, full historical checksums, live PostgreSQL17 catalog/ACL/RLS gates and atomic ledger updates are fixture-tested. It has no authentication/Notify infrastructure prerequisite and reports outstanding attempted legacy work as a separate issue-only activation blocker. See `docs/MENAION_ISSUE_PACKAGE_TRANSPORT.md`. No production application or runtime activation is claimed.
+
+
+## Issue package post-merge correction — 2026-10-06
+The package now prepares append-only migration13 for submitted-time quota windows and seven-day shared-counter retention, while immutable migration12 remains unchanged. Six exact starting histories include existing12 upgrades; completed13 histories verify without replay. Full owner/EXECUTE ACL checks cover both policy11 functions and the legacy restricted submitter. Safe fixed stage/SQLSTATE diagnostics distinguish transport and catalog failures without exposing raw SQL, errors, rows or credentials. Real PostgreSQL17 rollback/success/authority tests and credential-free redaction tests cover the corrections. The earlier live INSPECT failed before any schema application; no activation or successful production migration is claimed. See `docs/MENAION_ISSUE_PACKAGE_TRANSPORT.md`.
+
+- Prepared safe Menaion12->13 quota transition: unchanged migration13 is guarded
+  inside the protected installer by an exact hash-pinned quiescent check. Both
+  admission writers must be paused/drained; any live old counter blocks13 without
+  mutation. Existing13 is a separate recovery branch. No production apply,
+  runtime activation, schedule change or mass audio operation is implied.
