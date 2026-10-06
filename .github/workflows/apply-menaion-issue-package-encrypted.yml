@@ -10,6 +10,8 @@ on:
       - 'tests/test_menaion_issue_package_transport.py'
       - 'ops/living-menaion/moderation-20261005.cms.b64'
       - 'ops/living-menaion/issue-ledger-20261006.cms.b64'
+      - 'ops/living-menaion/issue-rate-windows-20261006.cms.b64'
+      - 'ops/living-menaion/pre13-quiescent-guard.sql'
       - 'ops/living-menaion/issue-package-contract.json'
       - 'tests/fixture_menaion_issue_package.py'
       - 'tests/integration_menaion_issue_package.py'
@@ -35,6 +37,12 @@ on:
         description: APPLY only; successful INSPECT run from this exact main commit
         required: false
         type: string
+      quiescence:
+        description: APPLY only; attest both admission writers are paused and in-flight calls drained
+        required: true
+        default: NOT_CONFIRMED
+        type: choice
+        options: [NOT_CONFIRMED, BOTH_ADMISSION_WRITERS_PAUSED_AND_DRAINED]
 
 permissions:
   contents: read
@@ -71,6 +79,7 @@ jobs:
           MODE: ${{ inputs.action }}
           CONFIRMATION: ${{ inputs.confirmation }}
           INSPECTION_RUN_ID: ${{ inputs.inspection_run_id }}
+          QUIESCENCE: ${{ inputs.quiescence }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -82,6 +91,7 @@ jobs:
             INSPECT) test "$CONFIRMATION" = INSPECT_MENAION_ISSUE_PACKAGE;;
             APPLY)
               test "$CONFIRMATION" = APPLY_MENAION_ISSUE_PACKAGE_SCHEMA_ONLY
+              test "$QUIESCENCE" = BOTH_ADMISSION_WRITERS_PAUSED_AND_DRAINED
               [[ "$INSPECTION_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
               gh api "repos/Peerivo/mercy-platform/actions/runs/$INSPECTION_RUN_ID" > "$RUNNER_TEMP/menaion-inspection-run.json"
               python3 - <<'PY'
@@ -146,6 +156,8 @@ jobs:
           [[ "$remote_dir" =~ ^/tmp/menaion-issue-package\.[A-Za-z0-9]+$ ]]
           scp "${options[@]}" ops/living-menaion/moderation-20261005.cms.b64 "$remote:$remote_dir/payload10.b64"
           scp "${options[@]}" ops/living-menaion/issue-ledger-20261006.cms.b64 "$remote:$remote_dir/payload12.b64"
+          scp "${options[@]}" ops/living-menaion/issue-rate-windows-20261006.cms.b64 "$remote:$remote_dir/payload13.b64"
+          scp "${options[@]}" ops/living-menaion/pre13-quiescent-guard.sql "$remote:$remote_dir/pre13-guard.sql"
           scp "${options[@]}" ops/living-menaion/issue-package-contract.json "$remote:$remote_dir/contract.json"
           scp "${options[@]}" ops/living-menaion/moderation-predecessors.json "$remote:$remote_dir/manifest.json"
           scp "${options[@]}" scripts/build-menaion-issue-package-transaction.py "$remote:$remote_dir/build-transaction.py"

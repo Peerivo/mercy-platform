@@ -164,3 +164,19 @@ The candidate's external Admin/Public probes now reject redirects before any cre
 
 ## Prepared issue moderation schema package acceptance
 The package-specific `apply-menaion-issue-package-encrypted.yml` validates locally before protected exact-current-main dispatch. INSPECT is read-only; APPLY requires a successful same-SHA inspection, applies missing canonical10 plus12 atomically, verifies exact resulting live catalogs/role preservation and records only missing ledger entries. The only starting histories are H9, H9+10, H9+11 and H9+10+11; completed H9+10+12/H9+10+11+12 are verification-only. The real disposable PostgreSQL17 matrix covers rollback/success, all four histories, source issue acceptance, unknown versions, checksum drift, wrong target/executor, relation/type/index/RPC/policy collisions, effective inherited access, owner/ACL/RLS/index/trigger drift, policy11 preservation, legacy-work reporting and operation without a Menaion authenticator role. Ciphertext and catalog/source pins, shell redaction, dispatch attempts and prior-run exactness have credential-free tests. No production SQL, new login/JWT/credential, Notify DB, RU-core activation or prior-denial bypass belongs to this package. A positive outstanding attempted-legacy count blocks issue-only runtime activation until legacy polling/reconciliation is established. See `docs/MENAION_ISSUE_PACKAGE_TRANSPORT.md`; live Beget and Telegram acceptance remain separate.
+
+
+## Issue package post-merge correction — 2026-10-06
+The package now prepares append-only migration13 for submitted-time quota windows and seven-day shared-counter retention, while immutable migration12 remains unchanged. Six exact starting histories include existing12 upgrades; completed13 histories verify without replay. Full owner/EXECUTE ACL checks cover both policy11 functions and the legacy restricted submitter. Safe fixed stage/SQLSTATE diagnostics distinguish transport and catalog failures without exposing raw SQL, errors, rows or credentials. Real PostgreSQL17 rollback/success/authority tests and credential-free redaction tests cover the corrections. The earlier live INSPECT failed before any schema application; no activation or successful production migration is claimed. See `docs/MENAION_ISSUE_PACKAGE_TRANSPORT.md`.
+
+### Menaion migration12 -> 13 transition
+
+Before production13: pause both admission writers, drain in-flight calls, run an
+exact-head protected INSPECT, require READY, then use APPLY only with the explicit
+quiescence attestation and the successful INSPECT run from the same main SHA.
+APPLY repeats the no-live-counter condition under advisory lock in the same
+transaction between12 and unchanged13. PRE13_LIVE_RATE_COUNTERS means wait for
+natural expiry; never delete or reset the counters. 13_PRESENT means stop and use
+a separate no-loss recovery plan. Green CI is not live acceptance: the form,
+moderation action, owner decision, saved pronunciation and affected audio refresh
+must still be verified after the production migration.

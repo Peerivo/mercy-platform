@@ -8,13 +8,17 @@ import sys
 VERSION10 = '20261005073345'
 VERSION11 = '20261006033844'
 VERSION12 = '20261006055900'
+VERSION13 = '20261006070900'
 SOURCE10_SHA = 'ee2bf27553ca0a71baa275ad607b7ddbf0893e9e64d5687d8029d94bf592b499'
 SOURCE11_SHA = '48292e5d1ae87aea8931cdd3cd8d28f1ffbef1795adc0e28c874eb0b6b5b7b34'
 SOURCE12_SHA = '57661d31ed4bc5f441b94a1b9f44b704e17ac6b98c390c8a4bddfcdd16a076a3'
+SOURCE13_SHA = '97dc3c7e3e76bdad2d3448dfbd75adef8c3f3c62ecd0248856b729c6d403cf2f'
 MANIFEST_SHA = '613887b5920dcffae6cad1db2b107ba0f8e366ae8c21f809a0b31f7d2fbf91a6'
-CONTRACT_SHA = 'd2ff79cf5ecf3818e807b58130e05835b43369b4665fd9fa14c4b9361e67a2ce'
+CONTRACT_SHA = 'b4ba5f1c5950dc444f150d241b4a2e7311d798d00dcdefa1a3ae984aca1ad122'
 CIPHERTEXT10_SHA = '0462c0804ee37bb73edfbe468c16ccd5cfd5de69a7f1e1e108c4d50625e7fa57'
 CIPHERTEXT12_SHA = '1bc348d8c88f45815a34defd25e77b44aa589892a4be150ff3dddeb2ae5ebe68'
+CIPHERTEXT13_SHA = '3c84ef432b7ac4e0b7c46a14d4b8e6023818c01ddd0bf3722c0b937d430ea716'
+PRE13_GUARD_SHA = 'da9842f6392db9f8456b618e3fe705e59fde503a5e2a313d85b9cd15f3b5687f'
 CERTIFICATE_SHA = '1c445517d9fe95784a9caced337ce5f34b9132610afd1946f325bd5ad8d385c9'
 TABLES10 = ['menaion_feedback_private.' + n for n in
     ('moderation_outbox', 'moderation_decisions', 'pronunciation_cache_invalidations')]
@@ -39,6 +43,7 @@ POLICY11 = ['living_menaion.assert_liturgical_day_edition_complete',
             'living_menaion.guard_blockwise_edition_readiness']
 RATE = ['menaion_feedback_private.rate_buckets']
 ENTRIES = ['living_menaion.pronunciation_entries']
+LEGACY_SUBMITTER = ['menaion_feedback_private.submit_correction']
 
 
 def sha(raw):
@@ -55,6 +60,79 @@ def json_literal(value):
 
 def names_sql(names):
     return ','.join(map(literal, names))
+
+
+GATE_CODES = {
+    'Wrong fixed target or executor': ('MI001', 'fixed_target'),
+    'Unreviewed PostgreSQL catalog version': ('MI002', 'postgres_version'),
+    'Missing or unexpected history relation': ('MI003', 'history_relation'),
+    'History structure or trigger drift': ('MI004', 'history_structure'),
+    'Package object collision': ('MI005', 'object_collision'),
+    'Queue trigger collision': ('MI006', 'queue_trigger_collision'),
+    'Issue rate policy collision': ('MI007', 'rate_policy_collision'),
+    'Missing schema predecessor role': ('MI008', 'predecessor_roles'),
+    'Feedback role boundary drift': ('MI009', 'feedback_role'),
+    'Missing predecessor objects': ('MI010', 'predecessor_objects'),
+    'Missing service content schema usage': ('MI011', 'service_schema_usage'),
+    'Predecessor RLS drift': ('MI012', 'predecessor_rls'),
+    'Feedback content boundary drift': ('MI013', 'feedback_boundary'),
+    'Shared authenticator boundary drift': ('MI014', 'shared_authenticator'),
+    'Effective worker privilege exposed': ('MI015', 'worker_privileges'),
+    'Policy11 authority drift': ('MI016', 'policy11_authority'),
+    'Policy11 trigger drift': ('MI017', 'policy11_trigger'),
+    'Missing service private schema usage': ('MI018', 'private_schema_usage'),
+    'Unledgered policy11 objects': ('MI019', 'unledgered_policy11'),
+    'Exact history required': ('MI020', 'history_mismatch'),
+    'Incomplete package history': ('MI021', 'incomplete_history'),
+    'Role attributes changed': ('MI022', 'role_attributes'),
+    'Role memberships changed': ('MI023', 'role_memberships'),
+    'Content policy changed': ('MI024', 'content_policy'),
+    'Publisher owner or ACL changed': ('MI025', 'publisher_authority'),
+    'Pronunciation catalog drift': ('MI026', 'pronunciation_catalog'),
+    'Moderation table catalog drift': ('MI027', 'moderation_tables'),
+    'Moderation RPC catalog drift': ('MI028', 'moderation_functions'),
+    'Publisher catalog drift': ('MI029', 'publisher_function'),
+    'Queue trigger drift': ('MI030', 'queue_trigger'),
+    'Issue table catalog drift': ('MI031', 'issue_tables'),
+    'Issue RPC catalog drift': ('MI032', 'issue_functions'),
+    'History catalog drift': ('MI033', 'history_catalog'),
+    'Schema catalog drift': ('MI034', 'schema_catalog'),
+    'Predecessor schema catalog drift': ('MI035', 'predecessor_schema_catalog'),
+    'Pronunciation predecessor drift': ('MI036', 'pronunciation_predecessor'),
+    'Publisher predecessor drift': ('MI037', 'publisher_predecessor'),
+    'Issue quota catalog drift': ('MI038', 'issue_quota'),
+    'Predecessor quota catalog drift': ('MI039', 'predecessor_quota'),
+    'Legacy submitter authority drift': ('MI040', 'legacy_submitter_authority'),
+    'Legacy submitter owner or ACL changed': ('MI041', 'legacy_submitter_preservation'),
+}
+
+
+def instrument_sql(sql):
+    # Only generated wrapper SQL passes here. Frozen migration bytes are never rewritten.
+    def replace(match):
+        code, _ = GATE_CODES[match.group(1)]
+        return "raise exception using errcode='"+code+"',message='Package gate refused';"
+    return re.sub(r"raise exception '([^']+)';", replace, sql)
+
+
+def classify_database_error(raw):
+    if not isinstance(raw, bytes) or len(raw)>65536:
+        return 'database_unclassified'
+    try: lines=raw.decode('utf-8').splitlines()
+    except UnicodeDecodeError: return 'database_unclassified'
+    allowed={code:label for code,label in GATE_CODES.values()}
+    codes=[match.group(1) for line in lines
+      if (match:=re.fullmatch(r'ERROR:  (MI[0-9]{3})',line))]
+    return allowed.get(codes[0],'database_unclassified') if len(codes)==1 else 'database_unclassified'
+
+
+def checked_guard(raw):
+    if sha(raw) != PRE13_GUARD_SHA:
+        raise ValueError('Pre13 guard mismatch')
+    text = raw.decode('utf-8')
+    if text.count("raise check_violation using message = 'PRE13_LIVE_RATE_COUNTERS';") != 1:
+        raise ValueError('Pre13 guard shape mismatch')
+    return text
 
 
 def checked_manifest(raw):
@@ -77,23 +155,25 @@ def checked_contract(raw):
     if sha(raw) != CONTRACT_SHA:
         raise ValueError('Catalog contract mismatch')
     contract = json.loads(raw)
-    if contract['sourceDigests'] != {VERSION10: SOURCE10_SHA, VERSION11: SOURCE11_SHA, VERSION12: SOURCE12_SHA}:
+    if contract['sourceDigests'] != {VERSION10: SOURCE10_SHA, VERSION11: SOURCE11_SHA, VERSION12: SOURCE12_SHA, VERSION13: SOURCE13_SHA}:
         raise ValueError('Source contract mismatch')
     return contract
 
 
 def histories(rows, complete=False):
-    answer = []
-    for ten in (False, True):
-        for eleven in (False, True):
-            if complete and not ten:
-                continue
-            result = list(rows)
-            if ten: result.append({'version': VERSION10, 'checksum': SOURCE10_SHA})
-            if eleven: result.append({'version': VERSION11, 'checksum': SOURCE11_SHA})
-            if complete: result.append({'version': VERSION12, 'checksum': SOURCE12_SHA})
-            answer.append(result)
-    return answer
+    # Six exact starting histories; two complete histories. No version13 without12.
+    branches = [(True, False, True, True), (True, True, True, True)] if complete else [
+      (False,False,False,False), (False,True,False,False),
+      (True,False,False,False), (True,True,False,False),
+      (True,False,True,False), (True,True,True,False)]
+    result=[]
+    for ten,eleven,twelve,thirteen in branches:
+        h=list(rows)
+        for present,version,digest in [(ten,VERSION10,SOURCE10_SHA),(eleven,VERSION11,SOURCE11_SHA),
+          (twelve,VERSION12,SOURCE12_SHA),(thirteen,VERSION13,SOURCE13_SHA)]:
+            if present: h.append({'version':version,'checksum':digest})
+        result.append(h)
+    return result
 
 
 def history_query():
@@ -281,19 +361,18 @@ def catalog_gates(contract):
                      check_digest("""(select jsonb_build_array(pg_get_triggerdef(oid),tgenabled) from pg_trigger
                        where tgrelid=to_regclass('living_menaion.pronunciation_entries')
                          and tgname='pronunciation_moderation_enqueue')""",c['enqueueTrigger'],'Queue trigger drift')])
-    twelve = '\n'.join([check_digest(table_catalog(TABLES12),c['tables12'],'Issue table catalog drift'),
-                        check_digest(function_catalog(FUNCTIONS12),c['functions12'],'Issue RPC catalog drift')])
-    eleven = '\n'.join([check_digest(function_catalog(POLICY11,False),c['policy11Functions'],'Policy11 function drift'),
-                        check_digest(trigger_catalog(),c['policy11Trigger'],'Policy11 trigger drift'),
-                        """if not exists(select from pg_proc where oid=to_regprocedure('living_menaion.guard_blockwise_edition_readiness()')
-                           and proowner=(select oid from pg_roles where rolname='supabase_admin'))
-                           then raise exception 'Policy11 helper owner drift'; end if;
-                        if exists(select from pg_proc p,lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
-                           where p.oid=to_regprocedure('living_menaion.guard_blockwise_edition_readiness()')
-                             and a.grantee not in (p.proowner,(select oid from pg_roles where rolname='service_role'),(select oid from pg_roles where rolname='living_menaion_app')))
-                           then raise exception 'Policy11 helper grant drift'; end if;"""])
+    twelve = check_digest(table_catalog(TABLES12),c['tables12'],'Issue table catalog drift')
+    issue_functions = f"""if {has_version(VERSION13)} then
+      {check_digest(function_catalog(FUNCTIONS12),c['functions13'],'Issue RPC catalog drift')}
+      else {check_digest(function_catalog(FUNCTIONS12),c['functions12'],'Issue RPC catalog drift')} end if;"""
+    legacy = f"""if {has_version(VERSION13)} then
+      {check_digest(function_catalog(LEGACY_SUBMITTER),c['legacy13'],'Legacy submitter authority drift')}
+      else {check_digest(function_catalog(LEGACY_SUBMITTER),c['legacy9'],'Legacy submitter authority drift')} end if;"""
+    eleven = '\n'.join([check_digest(function_catalog(POLICY11),c['policy11Authority'],'Policy11 authority drift'),
+                        check_digest(trigger_catalog(),c['policy11Trigger'],'Policy11 trigger drift')])
     return prerequisite_gate()+f"""
  {check_digest(table_catalog(['public.living_menaion_schema_migrations']),c['ledger'],'History catalog drift')}
+ {legacy}
  if {has_version(VERSION10)} then {ten}
  {check_digest(schema_catalog(),c['schemas10'],'Schema catalog drift')}
  if not has_schema_privilege('service_role','menaion_feedback_private','USAGE')
@@ -304,6 +383,7 @@ def catalog_gates(contract):
  {check_digest(function_catalog(PUBLISH,False),c['publish9'],'Publisher predecessor drift')} end if;
  if {has_version(VERSION12)} then
    {twelve}
+   {issue_functions}
    {effective_denials(TABLES12,FUNCTIONS12)}
    {check_digest(table_catalog(RATE),c['rate12'],'Issue quota catalog drift')}
  else
@@ -346,31 +426,41 @@ end; $legacy$;
 
 def build_inspection(manifest, raw_contract):
     rows, contract = checked_manifest(manifest), checked_contract(raw_contract)
-    return """begin read only;
+    return instrument_sql("""\\set VERBOSITY sqlstate
+\\set SHOW_CONTEXT never
+begin read only;
 set local search_path=pg_catalog;
 set local statement_timeout='10s';
 """+target_gate()+f"""do $inspect$ begin
 {state_gate(rows,contract)}
 end; $inspect$;
 {legacy_count_sql()}
-select case when {has_version(VERSION12)} then 'MENAION_ISSUE_PACKAGE_ALREADY_APPLIED'
+select case
+ when {has_version(VERSION13)} then 'MENAION_ISSUE_PACKAGE_13_PRESENT'
+ when exists(select from menaion_feedback_private.rate_buckets
+   where expires_at>pg_catalog.clock_timestamp()) then 'MENAION_ISSUE_PACKAGE_PRE13_LIVE_RATE_COUNTERS'
  else 'MENAION_ISSUE_PACKAGE_READY' end;
 select 'MENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED='||current_setting('menaion.issue_legacy_count');
 rollback;
-"""
+""")
 
 
 ROLE_SNAPSHOT = "select oid,rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolcanlogin,rolreplication,rolbypassrls,rolconnlimit,rolvaliduntil,rolconfig from pg_roles"
 MEMBERSHIP_SNAPSHOT = 'select * from pg_auth_members'
 
 
-def build_transaction(migration10, migration12, manifest, raw_contract):
-    if sha(migration10)!=SOURCE10_SHA or sha(migration12)!=SOURCE12_SHA:
+def build_transaction(migration10, migration12, migration13, manifest, raw_contract, pre13_guard=None):
+    if sha(migration10)!=SOURCE10_SHA or sha(migration12)!=SOURCE12_SHA or sha(migration13)!=SOURCE13_SHA:
         raise ValueError('Canonical source mismatch')
+    if pre13_guard is None:
+        pre13_guard = (Path(__file__).resolve().parents[1]/'ops/living-menaion/pre13-quiescent-guard.sql').read_bytes()
+    guard_sql = checked_guard(pre13_guard)
     rows, contract = checked_manifest(manifest), checked_contract(raw_contract)
     # psql branch uses a catalog-derived boolean only. Both histories are checked
     # again under the exclusive ledger lock; completed packages cannot replay.
-    before = """begin;
+    before = """\\set VERBOSITY sqlstate
+\\set SHOW_CONTEXT never
+begin;
 set local search_path=pg_catalog;
 set local lock_timeout='5s';
 set local statement_timeout='30s';
@@ -383,15 +473,23 @@ create temporary table _issue_memberships_before on commit drop as {MEMBERSHIP_S
 create temporary table _issue_content_before on commit drop as select {content_guard_catalog()} as value;
 create temporary table _issue_publisher_before on commit drop as
  select proowner,proacl from pg_proc where oid='living_menaion.publish_pronunciation_entry(uuid,text)'::regprocedure;
+create temporary table _issue_legacy_before on commit drop as
+ select proowner,proacl from pg_proc where oid='menaion_feedback_private.submit_correction(text,text,text)'::regprocedure;
 select not {has_version(VERSION10)} as apply10 \\gset
 \\if :apply10
 """
     middle=f"""
 insert into public.living_menaion_schema_migrations(version,checksum) values ('{VERSION10}','{SOURCE10_SHA}');
 \\endif
+select not {has_version(VERSION12)} as apply12 \\gset
+\\if :apply12
+"""
+    middle13=f"""
+insert into public.living_menaion_schema_migrations(version,checksum) values ('{VERSION12}','{SOURCE12_SHA}');
+\\endif
 """
     after=f"""
-insert into public.living_menaion_schema_migrations(version,checksum) values ('{VERSION12}','{SOURCE12_SHA}');
+insert into public.living_menaion_schema_migrations(version,checksum) values ('{VERSION13}','{SOURCE13_SHA}');
 do $verify$ begin
 {state_gate(rows,contract)}
  if not ({' or '.join(history_query()+' = '+json_literal(h) for h in histories(rows,True))})
@@ -409,23 +507,36 @@ do $verify$ begin
    union all (select * from pg_temp._issue_publisher_before except
      select proowner,proacl from pg_proc where oid='living_menaion.publish_pronunciation_entry(uuid,text)'::regprocedure))
    then raise exception 'Publisher owner or ACL changed'; end if;
+ if exists((select proowner,proacl from pg_proc where oid='menaion_feedback_private.submit_correction(text,text,text)'::regprocedure
+   except select * from pg_temp._issue_legacy_before)
+   union all (select * from pg_temp._issue_legacy_before except
+     select proowner,proacl from pg_proc where oid='menaion_feedback_private.submit_correction(text,text,text)'::regprocedure))
+   then raise exception 'Legacy submitter owner or ACL changed'; end if;
 end; $verify$;
 {legacy_count_sql()}
 select 'MENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED='||current_setting('menaion.issue_legacy_count');
 commit;
 select 'MENAION_ISSUE_PACKAGE_VERIFIED';
 """
-    return before+migration10.decode('utf-8')+middle+migration12.decode('utf-8')+after
+    # Hash-pinned quiescent guard runs after12 and immediately before unchanged13.
+    return (instrument_sql(before)+migration10.decode('utf-8')+middle+migration12.decode('utf-8')
+            +middle13+guard_sql+migration13.decode('utf-8')+instrument_sql(after))
 
 
 def main():
     mode, directory = sys.argv[1:]
     root = Path(directory)
+    if mode=='diagnose':
+        try: raw=(root/'db-error').read_bytes()
+        except OSError: raw=b''
+        print(classify_database_error(raw))
+        return
     manifest, contract = (root/'manifest.json').read_bytes(), (root/'contract.json').read_bytes()
     if mode=='inspect': name, output = 'inspection.sql',build_inspection(manifest,contract)
     elif mode=='apply':
         name, output = 'transaction.sql',build_transaction((root/'migration10.sql').read_bytes(),
-          (root/'migration12.sql').read_bytes(),manifest,contract)
+          (root/'migration12.sql').read_bytes(),(root/'migration13.sql').read_bytes(),manifest,contract,
+          (root/'pre13-guard.sql').read_bytes())
     else: raise ValueError('Invalid mode')
     (root/name).write_text(output)
 

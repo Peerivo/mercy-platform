@@ -47,7 +47,8 @@ class Fixture:
         for version,raw,digest in [
             (builder.VERSION10,self.source(builder.VERSION10),builder.SOURCE10_SHA),
             (builder.VERSION11,self.policy11.read_bytes(),builder.SOURCE11_SHA),
-            (builder.VERSION12,self.source(builder.VERSION12),builder.SOURCE12_SHA)]:
+            (builder.VERSION12,self.source(builder.VERSION12),builder.SOURCE12_SHA),
+            (builder.VERSION13,self.source(builder.VERSION13),builder.SOURCE13_SHA)]:
             assert builder.sha(raw)==digest, 'Canonical fixture source mismatch: '+version
         result=self.process('initdb','-D',self.root/'data','-U','supabase_admin','--auth=trust','--no-locale','-E','UTF8')
         assert result.returncode==0,result.stderr
@@ -71,12 +72,13 @@ create database living_menaion;''',db='postgres')
         self.query('create database fixture_h9 template living_menaion',db='postgres')
         return self
 
-    def reset(self, ten=False, eleven=False):
+    def reset(self, ten=False, eleven=False, twelve=False):
         self.query('drop database living_menaion',db='postgres')
         self.query('create database living_menaion template fixture_h9',db='postgres')
         for version,raw,digest in [
             (builder.VERSION10,self.source(builder.VERSION10) if ten else None,builder.SOURCE10_SHA),
-            (builder.VERSION11,self.policy11.read_bytes() if eleven else None,builder.SOURCE11_SHA)]:
+            (builder.VERSION11,self.policy11.read_bytes() if eleven else None,builder.SOURCE11_SHA),
+            (builder.VERSION12,self.source(builder.VERSION12) if twelve else None,builder.SOURCE12_SHA)]:
             if raw:
                 self.query(raw.decode())
                 self.query(f"insert into public.living_menaion_schema_migrations(version,checksum) values ('{version}','{digest}')")
@@ -100,8 +102,9 @@ def generate_contract(f):
         return {'relations':relations,'functions':functions}
     f.reset()
     result={'format':1,'postgresMajor':17,'sourceDigests':{
-        builder.VERSION10:builder.SOURCE10_SHA,builder.VERSION11:builder.SOURCE11_SHA,builder.VERSION12:builder.SOURCE12_SHA},
+        builder.VERSION10:builder.SOURCE10_SHA,builder.VERSION11:builder.SOURCE11_SHA,builder.VERSION12:builder.SOURCE12_SHA,builder.VERSION13:builder.SOURCE13_SHA},
         'catalogDigests':{'ledger':digest(builder.table_catalog(['public.living_menaion_schema_migrations'])),
+          'legacy9':digest(builder.function_catalog(builder.LEGACY_SUBMITTER)),
           'schemas9':digest(builder.schema_catalog()),'rate9':digest(builder.table_catalog(builder.RATE)),
           'entries9':digest(builder.table_catalog(builder.ENTRIES)),
           'publish9':digest(builder.function_catalog(builder.PUBLISH,False))},'newObjects':{}}
@@ -116,13 +119,16 @@ def generate_contract(f):
       where tgrelid=to_regclass('living_menaion.pronunciation_entries') and tgname='pronunciation_moderation_enqueue')""")
     result['newObjects'][builder.VERSION10]=objects(builder.TABLES10,builder.FUNCTIONS10)
     f.query(f.policy11.read_text())
-    c['policy11Functions']=digest(builder.function_catalog(builder.POLICY11,False))
+    c['policy11Authority']=digest(builder.function_catalog(builder.POLICY11))
     c['policy11Trigger']=digest(builder.trigger_catalog())
     f.query(f.source(builder.VERSION12).decode())
     c['tables12']=digest(builder.table_catalog(builder.TABLES12))
     c['functions12']=digest(builder.function_catalog(builder.FUNCTIONS12))
     c['rate12']=digest(builder.table_catalog(builder.RATE))
     result['newObjects'][builder.VERSION12]=objects(builder.TABLES12,builder.FUNCTIONS12)
+    f.query(f.source(builder.VERSION13).decode())
+    c['functions13']=digest(builder.function_catalog(builder.FUNCTIONS12))
+    c['legacy13']=digest(builder.function_catalog(builder.LEGACY_SUBMITTER))
     return result
 
 

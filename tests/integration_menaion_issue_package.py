@@ -10,31 +10,53 @@ def run(pg_bin,migrations,policy11):
     inspected=builder.build_inspection(MANIFEST,raw)
     with Fixture(pg_bin,migrations,policy11) as f:
         assert generate_contract(f)==json.loads(raw), 'Reviewed catalog no longer matches frozen source'
-        applied=builder.build_transaction(f.source(builder.VERSION10),f.source(builder.VERSION12),MANIFEST,raw)
+        applied=builder.build_transaction(f.source(builder.VERSION10),f.source(builder.VERSION12),f.source(builder.VERSION13),MANIFEST,raw)
+        for version in (builder.VERSION10,builder.VERSION12,builder.VERSION13):
+            assert f.source(version).decode() in applied, 'Frozen source was rewritten'
         def inspect_ready(count=0):
             assert f.query(inspected)==f'MENAION_ISSUE_PACKAGE_READY\nMENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED={count}'
-        def baseline(ten,eleven):
-            assert f.query('select count(*) from public.living_menaion_schema_migrations')==str(9+ten+eleven)
-            for name in builder.TABLES12+(builder.TABLES10 if not ten else []):
+        def baseline(ten,eleven,twelve=False):
+            assert f.query('select count(*) from public.living_menaion_schema_migrations')==str(9+ten+eleven+twelve)
+            for name in ([] if twelve else builder.TABLES12)+(builder.TABLES10 if not ten else []):
                 assert f.query(f"select to_regclass('{name}') is null")=='t'
-        for ten,eleven in [(False,False),(False,True),(True,False),(True,True)]:
-            f.reset(ten,eleven)
+        for ten,eleven,twelve in [(False,False,False),(False,True,False),(True,False,False),(True,True,False),(True,False,True),(True,True,True)]:
+            f.reset(ten,eleven,twelve)
             inspect_ready()
             before=f.query('select '+builder.content_guard_catalog())
             # Inject immediately after the last DDL statement and before the final ledger insert.
-            fault=applied.replace(f"insert into public.living_menaion_schema_migrations(version,checksum) values ('{builder.VERSION12}'",
-                                  f"select 1/0;\ninsert into public.living_menaion_schema_migrations(version,checksum) values ('{builder.VERSION12}'")
+            fault=applied.replace(f"insert into public.living_menaion_schema_migrations(version,checksum) values ('{builder.VERSION13}'",
+                                  f"select 1/0;\ninsert into public.living_menaion_schema_migrations(version,checksum) values ('{builder.VERSION13}'")
             f.query(fault,False)
-            baseline(ten,eleven)
+            baseline(ten,eleven,twelve)
             assert f.query('select '+builder.content_guard_catalog())==before
             inspect_ready()
             assert f.query(applied)=='MENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0\nMENAION_ISSUE_PACKAGE_VERIFIED'
-            assert f.query('select count(*) from public.living_menaion_schema_migrations')==str(11+eleven)
+            assert f.query('select count(*) from public.living_menaion_schema_migrations')==str(12+eleven)
             assert f.query('select '+builder.content_guard_catalog())==before
-            assert f.query(inspected)=='MENAION_ISSUE_PACKAGE_ALREADY_APPLIED\nMENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0'
+            assert f.query(inspected)=='MENAION_ISSUE_PACKAGE_13_PRESENT\nMENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0'
             f.query(applied,False)
             f.query((migrations.parent/'tests/pronunciation_issues.sql').read_text())
-            print(f'PASS H9+10={ten}+11={eleven}: atomic failure/rollback, apply, exact catalog/security, policy preservation, no replay, source acceptance')
+            print(f'PASS H9+10={ten}+11={eleven}+12={twelve}: atomic failure/rollback, apply, exact catalog/security, policy preservation, no replay, source acceptance')
+        # Exact 12->13 safety: a live v12 counter is never promoted into13.
+        f.reset(True,False,True)
+        live_key=f.query("select 'client:'||repeat('9',64)||':'||floor(extract(epoch from clock_timestamp())/600)::text")
+        f.query(f"insert into menaion_feedback_private.rate_buckets values ('{live_key}',clock_timestamp()+interval '20 minutes',1)")
+        live_before=f.query(f"select expires_at::text||'/'||attempts from menaion_feedback_private.rate_buckets where bucket='{live_key}'")
+        assert f.query(inspected)=='MENAION_ISSUE_PACKAGE_PRE13_LIVE_RATE_COUNTERS\nMENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0'
+        f.query(applied,False)
+        assert f.query(f"select exists(select from public.living_menaion_schema_migrations where version='{builder.VERSION13}')")=='f'
+        assert f.query(f"select expires_at::text||'/'||attempts from menaion_feedback_private.rate_buckets where bucket='{live_key}'")==live_before
+        print('PASS 12->13 guard: live v12 counter refused without mutation')
+
+        # Already expired v12 evidence does not block; normal cleanup handles it later.
+        f.reset(True,False,True)
+        old_bucket=f.query("select 'global:'||(floor(extract(epoch from clock_timestamp())/3600)-2)::text")
+        f.query(f"insert into menaion_feedback_private.rate_buckets values ('{old_bucket}',clock_timestamp()-interval '1 second',100)")
+        inspect_ready()
+        assert f.query(applied)=='MENAION_ISSUE_PACKAGE_LEGACY_UNMAPPED_ATTEMPTED=0\nMENAION_ISSUE_PACKAGE_VERIFIED'
+        f.query((migrations.parent/'tests/pronunciation_issue_submission_windows.sql').read_text())
+        print('PASS 12->13 after natural expiry; valid windows accepted, sixth client and 101st global requests rejected')
+
         f.reset()
         for sql in (inspected,applied):
             f.query(sql,False,db='postgres')
@@ -55,6 +77,8 @@ def run(pg_bin,migrations,policy11):
            "delete from public.living_menaion_schema_migrations where version='20991231235959'"),
           (f"insert into public.living_menaion_schema_migrations(version,checksum) values ('{builder.VERSION12}','{builder.SOURCE12_SHA}')",
            f"delete from public.living_menaion_schema_migrations where version='{builder.VERSION12}'"),
+          (f"insert into public.living_menaion_schema_migrations(version,checksum) values ('{builder.VERSION13}','{builder.SOURCE13_SHA}')",
+           f"delete from public.living_menaion_schema_migrations where version='{builder.VERSION13}'"),
           ('create table menaion_feedback_private.issue_receipts(id integer)','drop table menaion_feedback_private.issue_receipts'),
           ('create type menaion_feedback_private.issue_ingestions as (id integer)','drop type menaion_feedback_private.issue_ingestions'),
           ('create table menaion_feedback_private.issue_receipts_callback_once(id integer)','drop table menaion_feedback_private.issue_receipts_callback_once'),
@@ -73,6 +97,21 @@ def run(pg_bin,migrations,policy11):
             f.query(repair)
             baseline(False,False)
         print('PASS altered checksum/history/future version, relation/type/index-name/RPC/policy collisions and predecessor ACL/role/RLS drift')
+        for change in [
+          'grant execute on function living_menaion.assert_liturgical_day_edition_complete(uuid) to anon',
+          'grant execute on function living_menaion.assert_liturgical_day_edition_complete(uuid) to service_role with grant option',
+          'revoke execute on function living_menaion.assert_liturgical_day_edition_complete(uuid) from service_role',
+          'alter function living_menaion.assert_liturgical_day_edition_complete(uuid) owner to postgres',
+          'grant execute on function living_menaion.guard_blockwise_edition_readiness() to anon']:
+            f.reset(False,True)
+            f.query(change)
+            f.query(inspected,False);f.query(applied,False);baseline(False,True)
+        print('PASS both policy11 functions reject owner/EXECUTE/grant-option drift before apply')
+        result=f.process('psql','-X','-qAt','-h','127.0.0.1','-p',f.port,'-U','supabase_admin',
+          '-d','living_menaion','-v','ON_ERROR_STOP=1',input=inspected)
+        assert result.returncode and builder.classify_database_error(result.stderr.encode())=='policy11_authority'
+        assert 'guard_blockwise' not in result.stderr and 'anon' not in result.stderr
+        print('PASS real PostgreSQL SQLSTATE-only output yields the fixed policy11_authority diagnostic')
         # Policy11 is optional, but when recorded its canonical code and exact trigger are mandatory.
         f.reset(False,True)
         f.query('alter table living_menaion.liturgical_day_editions disable trigger blockwise_edition_readiness')
@@ -94,6 +133,8 @@ def run(pg_bin,migrations,policy11):
           ('revoke usage on schema living_menaion from service_role','grant usage on schema living_menaion to service_role'),
           ('revoke usage on schema menaion_feedback_private from service_role','grant usage on schema menaion_feedback_private to service_role'),
           ('grant create on schema living_menaion to anon','revoke create on schema living_menaion from anon'),
+          ('grant execute on function menaion_feedback_private.submit_correction(text,text,text) to anon',
+           'revoke execute on function menaion_feedback_private.submit_correction(text,text,text) from anon'),
           ('grant select on menaion_feedback_private.issue_receipts to anon','revoke select on menaion_feedback_private.issue_receipts from anon'),
           ('grant update(payload) on menaion_feedback_private.issue_receipts to service_role','revoke update(payload) on menaion_feedback_private.issue_receipts from service_role'),
           ('grant service_role to anon','revoke service_role from anon'),
