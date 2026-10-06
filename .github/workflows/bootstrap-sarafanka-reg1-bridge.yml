@@ -1,3 +1,4 @@
+# Trigger note: 2026-10-06 isolated Sarafanka Supabase is ready; push to main intentionally starts REG1 bridge.
 name: Bootstrap Sarafanka Beget bridge
 
 on:
