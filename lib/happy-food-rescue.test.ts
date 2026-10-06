@@ -153,7 +153,10 @@ describe("Happy Food Rescue adapter", () => {
   });
 
   it("sends only to the fixed Happy integration endpoint with its own bearer token", async () => {
-    const fetchImpl = vi.fn(async () =>
+    const fetchImpl = vi.fn<
+      Parameters<typeof fetch>,
+      ReturnType<typeof fetch>
+    >(async () =>
       new Response(
         JSON.stringify({
           accepted: true,
@@ -262,8 +265,29 @@ describe("Happy Food Rescue adapter", () => {
     const client = createHappyFoodRescueClient({
       config: happyFoodRescueConfig({}),
     });
+    const event = buildDonationReservationUpsert({
+      eventId: "event_mercy_disabled_001",
+      occurredAt:
+        "2026-10-06T10:00:00.000Z",
+      region: "GE-AJ",
+      correlationId:
+        "corr_mercy_disabled_001",
+      idempotencyKey:
+        "idem_mercy_disabled_001",
+      reservationRevision: 1,
+      reservationId:
+        "reservation_mercy_disabled_001",
+      offerId:
+        "offer_lot_mercy_disabled_001",
+      quantity: 1,
+      unit: "meal",
+      expiresAt:
+        "2026-10-06T10:30:00.000Z",
+      mercyMissionRef:
+        "mission_mercy_disabled_001",
+    });
     await expect(
-      client.send(),
+      client.send(event),
     ).rejects.toThrow(/integration is disabled/);
   });
 });
