@@ -1,0 +1,497 @@
+name: Bootstrap Sarafanka Beget bridge
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bootstrap-sarafanka-reg1-bridge.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sarafanka-reg1-beget-bridge
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS }}
+      REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate production transports
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in REG_RU_HOST REG_RU_USER REG_RU_KNOWN_HOSTS REG_RU_SSH_KEY BEGET_SUPABASE_HOST BEGET_SUPABASE_USER BEGET_SUPABASE_SSH_KEY BEGET_SUPABASE_KNOWN_HOSTS; do
+            test -n "${!name:-}" || { echo "::error::Missing protected production configuration: $name"; exit 1; }
+          done
+          test "$REG_RU_HOST" = "95.163.223.68"
+          test "$REG_RU_USER" = "root"
+          test "$BEGET_SUPABASE_HOST" = "45.144.176.213"
+          test "$BEGET_SUPABASE_USER" = "supabase-deploy"
+
+      - name: Configure pinned SSH identities
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$REG_RU_SSH_KEY" > ~/.ssh/reg_ru
+          printf '%s\n' "$REG_RU_KNOWN_HOSTS" > ~/.ssh/reg_known_hosts
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/beget
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/beget_known_hosts
+          chmod 600 ~/.ssh/reg_ru ~/.ssh/reg_known_hosts ~/.ssh/beget ~/.ssh/beget_known_hosts
+          ssh-keygen -y -P '' -f ~/.ssh/reg_ru >/dev/null
+          ssh-keygen -y -P '' -f ~/.ssh/beget >/dev/null
+          ssh-keygen -F "$REG_RU_HOST" -f ~/.ssh/reg_known_hosts >/dev/null
+          ssh-keygen -F "$BEGET_SUPABASE_HOST" -f ~/.ssh/beget_known_hosts >/dev/null
+
+      - name: Generate dedicated Sarafanka tunnel key on REG.RU
+        id: tunnel
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          reg_opts=(-F /dev/null -i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+          pub="$(ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          key=/root/.ssh/sarafanka-beget-tunnel
+          mkdir -p /root/.ssh
+          chmod 700 /root/.ssh
+          if [ ! -s "$key" ]; then
+            ssh-keygen -t ed25519 -a 100 -f "$key" -C sarafanka-reg-ru1-to-beget-v1 -N '' >/dev/null
+          fi
+          chmod 600 "$key"
+          chmod 644 "$key.pub"
+          ssh-keygen -y -f "$key" | awk '{print $1 " " $2}'
+          REMOTE
+          )"
+          [[ "$pub" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+$ ]]
+          printf 'TUNNEL_PUBLIC_KEY=%s\n' "$pub" >> "$GITHUB_OUTPUT"
+          echo "Dedicated Sarafanka tunnel key is ready on REG.RU."
+
+      - name: Authorize forwarding-only Sarafanka key on Beget
+        shell: bash
+        env:
+          TUNNEL_PUBLIC_KEY: ${{ steps.tunnel.outputs.TUNNEL_PUBLIC_KEY }}
+        run: |
+          set -Eeuo pipefail
+          beget_opts=(-F /dev/null -i ~/.ssh/beget -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/beget_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          printf '%s\n' "$TUNNEL_PUBLIC_KEY" | ssh "${beget_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          IFS= read -r key
+          [[ "$key" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+$ ]]
+          key_body="$(printf '%s\n' "$key" | awk '{print $2}')"
+          line="from=\"95.163.223.68\",restrict,port-forwarding,permitopen=\"127.0.0.1:55432\",permitopen=\"127.0.0.1:58000\",command=\"/bin/false\" $key sarafanka-reg-ru1-to-beget-v1"
+
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          touch "$HOME/.ssh/authorized_keys"
+          chmod 700 "$HOME/.ssh"
+          chmod 600 "$HOME/.ssh/authorized_keys"
+
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          grep -Fv "sarafanka-reg-ru1-to-beget-v1" "$HOME/.ssh/authorized_keys" | grep -Fv "$key_body" > "$tmp" || true
+          printf '%s\n' "$line" >> "$tmp"
+          cat "$tmp" > "$HOME/.ssh/authorized_keys"
+          chmod 600 "$HOME/.ssh/authorized_keys"
+          grep -Fx "$line" "$HOME/.ssh/authorized_keys" >/dev/null
+          echo "Sarafanka forwarding-only key authorized on Beget."
+          REMOTE
+
+      - name: Install persistent Beget tunnel on REG.RU
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          reg_opts=(-F /dev/null -i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+          scp "${reg_opts[@]}" -q ~/.ssh/beget_known_hosts "$remote:/root/.ssh/sarafanka-beget-known-hosts"
+
+          ssh "${reg_opts[@]}" "$remote" "bash -s -- '$BEGET_SUPABASE_USER'" <<'REMOTE'
+          set -Eeuo pipefail
+          beget_user=$1
+          test "$beget_user" = "supabase-deploy"
+          chmod 600 /root/.ssh/sarafanka-beget-known-hosts /root/.ssh/sarafanka-beget-tunnel
+
+          gateway="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')"
+          [[ "$gateway" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$gateway" != "0.0.0.0"
+          test "$gateway" != "127.0.0.1"
+
+          if ss -ltnH '( sport = :55433 )' | grep -q .; then
+            existing="$(ss -ltnH '( sport = :55433 )' | awk '{print $4}')"
+            test "$existing" = "$gateway:55433" || {
+              echo "Port 55433 occupied by unexpected listener: $existing" >&2
+              exit 1
+            }
+          fi
+          if ss -ltnH '( sport = :58001 )' | grep -q .; then
+            existing="$(ss -ltnH '( sport = :58001 )' | awk '{print $4}')"
+            test "$existing" = "127.0.0.1:58001" || {
+              echo "Port 58001 occupied by unexpected listener: $existing" >&2
+              exit 1
+            }
+          fi
+
+          cat > /etc/systemd/system/peerivo-sarafanka-beget-tunnel.service <<UNIT
+          [Unit]
+          Description=Peerivo Sarafanka tunnel to isolated Beget Supabase
+          After=network-online.target docker.service
+          Wants=network-online.target
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/bin/ssh -NT -F /dev/null -i /root/.ssh/sarafanka-beget-tunnel -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/sarafanka-beget-known-hosts -o GlobalKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L $gateway:55433:127.0.0.1:55432 -L 127.0.0.1:58001:127.0.0.1:58000 $beget_user@45.144.176.213
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          sed -i 's/^          //' /etc/systemd/system/peerivo-sarafanka-beget-tunnel.service
+
+          systemctl daemon-reload
+          systemctl enable --now peerivo-sarafanka-beget-tunnel.service
+
+          ok=0
+          for _ in $(seq 1 20); do
+            if systemctl is-active --quiet peerivo-sarafanka-beget-tunnel.service               && ss -ltnH '( sport = :55433 )' | awk '{print $4}' | grep -Fx "$gateway:55433" >/dev/null               && ss -ltnH '( sport = :58001 )' | awk '{print $4}' | grep -Fx '127.0.0.1:58001' >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ok" = 1
+
+          docker run --rm --add-host=host.docker.internal:host-gateway postgres:17-alpine             pg_isready -h host.docker.internal -p 55433 -d sarafanka >/dev/null
+
+          api="$(curl -fsS --max-time 5 http://127.0.0.1:58001/)"
+          test "$api" = "Sarafanka Supabase"
+
+          public_db="$(ss -ltnH '( sport = :55433 )' | awk '{print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|95\.163\.223\.68):55433$' || true)"
+          test -z "$public_db"
+          public_api="$(ss -ltnH '( sport = :58001 )' | awk '{print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|95\.163\.223\.68):58001$' || true)"
+          test -z "$public_api"
+
+          echo "SARAFANKA_TUNNEL_OK"
+          echo "DB_BIND=$gateway:55433"
+          echo "API_BIND=127.0.0.1:58001"
+          REMOTE
+
+      - name: Transfer Sarafanka runtime secrets Beget to REG.RU without logging values
+        shell: bash
+        run: |
+          set +x
+          set +v
+          set -Eeuo pipefail
+          umask 077
+          beget_opts=(-F /dev/null -i ~/.ssh/beget -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/beget_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
+          reg_opts=(-F /dev/null -i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
+          beget="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          reg="$REG_RU_USER@$REG_RU_HOST"
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+
+          ssh "${beget_opts[@]}" "$beget" 'bash -s' > "$tmp" <<'REMOTE'
+          set -Eeuo pipefail
+          db_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' sarafanka-supabase-db)"
+          storage_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' sarafanka-supabase-storage)"
+          pgpass="$(printf '%s\n' "$db_env" | sed -n 's/^POSTGRES_PASSWORD=//p')"
+          service="$(printf '%s\n' "$storage_env" | sed -n 's/^SERVICE_KEY=//p')"
+          [[ "$pgpass" =~ ^[0-9a-f]{64}$ ]]
+          test -n "$service"
+          case "$service" in
+            *$'\n'*|*$'\r'*) exit 1 ;;
+          esac
+          printf 'DATABASE_URL=postgresql://postgres:%s@host.docker.internal:55433/sarafanka?sslmode=disable\n' "$pgpass"
+          printf 'NEXT_PUBLIC_SUPABASE_URL=https://sarafan.peerivo.net/supabase\n'
+          printf 'SUPABASE_SECRET_KEY=%s\n' "$service"
+          REMOTE
+
+          test "$(wc -l < "$tmp" | tr -d ' ')" = 3
+          grep -q '^DATABASE_URL=postgresql://postgres:[0-9a-f]\{64\}@host\.docker\.internal:55433/sarafanka?sslmode=disable$' "$tmp"
+          grep -qx 'NEXT_PUBLIC_SUPABASE_URL=https://sarafan.peerivo.net/supabase' "$tmp"
+          grep -q '^SUPABASE_SECRET_KEY=.' "$tmp"
+          chmod 600 "$tmp"
+          scp "${reg_opts[@]}" -q "$tmp" "$reg:/opt/peerivo/sarafanka/shared/beget-runtime.pending"
+          echo "SARAFANKA_RUNTIME_SECRET_TRANSFER_OK"
+
+      - name: Prepare candidate runtime and verify DB connectivity on REG.RU
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          reg_opts=(-F /dev/null -i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+          ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set +x
+          set +v
+          set -Eeuo pipefail
+          umask 077
+          base=/opt/peerivo/sarafanka/shared
+          current="$base/runtime.env"
+          incoming="$base/beget-runtime.pending"
+          candidate="$base/runtime.candidate.env"
+
+          test -s "$current"
+          test -s "$incoming"
+          test "$(wc -l < "$incoming" | tr -d ' ')" = 3
+
+          grep -Ev '^(DATABASE_URL|NEXT_PUBLIC_SUPABASE_URL|SUPABASE_SECRET_KEY)=' "$current" > "$candidate"
+          cat "$incoming" >> "$candidate"
+          chown root:root "$candidate"
+          chmod 600 "$candidate"
+
+          for key in DATABASE_URL NEXT_PUBLIC_SUPABASE_URL SUPABASE_SECRET_KEY; do
+            test "$(grep -c "^$key=" "$candidate")" = 1
+          done
+
+          dburl="$(sed -n 's/^DATABASE_URL=//p' "$candidate")"
+          pgpass="${dburl#postgresql://postgres:}"
+          pgpass="${pgpass%%@*}"
+          [[ "$pgpass" =~ ^[0-9a-f]{64}$ ]]
+
+          result="$(docker run --rm --add-host=host.docker.internal:host-gateway -e PGPASSWORD="$pgpass" postgres:17-alpine             psql -X -h host.docker.internal -p 55433 -U postgres -d sarafanka -Atc             "select current_database() || '|' || (select count(*) from public.profiles)::text")"
+          test "$result" = "sarafanka|0"
+          unset pgpass dburl
+          rm -f "$incoming"
+          echo "SARAFANKA_DB_CONNECTIVITY_OK"
+          REMOTE
+
+      - name: Start and validate Sarafanka candidate on REG.RU
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          reg_opts=(-F /dev/null -i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+          ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          candidate=/opt/peerivo/sarafanka/shared/runtime.candidate.env
+          image="$(docker inspect -f '{{.Config.Image}}' sarafanka)"
+          test -n "$image"
+
+          docker rm -f sarafanka-candidate >/dev/null 2>&1 || true
+          docker run -d             --name sarafanka-candidate             --env-file "$candidate"             --add-host=host.docker.internal:host-gateway             --publish 127.0.0.1:3401:3000             --memory 512m             --pids-limit 256             --cap-drop ALL             --security-opt no-new-privileges             "$image" >/dev/null
+
+          trap 'docker rm -f sarafanka-candidate >/dev/null 2>&1 || true' EXIT
+
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS --max-time 3 http://127.0.0.1:3401/api/health >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ok" = 1
+
+          auth="$(curl -fsS --max-time 10 http://127.0.0.1:3401/api/auth/status)"
+          printf '%s' "$auth" | grep -q '"applicationReady":true'
+          printf '%s' "$auth" | grep -q '"identityReady":true'
+          printf '%s' "$auth" | grep -q '"password":true'
+          printf '%s' "$auth" | grep -q '"google":true'
+          printf '%s' "$auth" | grep -q '"googleConfigured":true'
+
+          prepare_code="$(curl -sS -o /tmp/sarafanka-prepare.json -w '%{http_code}' --max-time 10             -X POST -H 'Origin: https://sarafan.peerivo.net' -H 'Content-Type: application/json'             --data '{"next":"/"}' http://127.0.0.1:3401/api/auth/prepare)"
+          test "$prepare_code" = 200
+          grep -q '"action":"https://auth.peerivo.net/' /tmp/sarafanka-prepare.json
+          rm -f /tmp/sarafanka-prepare.json
+
+          headers="$(mktemp)"
+          google_code="$(curl -sS -o /dev/null -D "$headers" -w '%{http_code}' --max-time 10             'http://127.0.0.1:3401/api/auth/login?provider=google&next=/')"
+          test "$google_code" = 303
+          grep -Eqi '^location: https://auth\.peerivo\.net/' "$headers"
+          rm -f "$headers"
+
+          echo "SARAFANKA_CANDIDATE_OK"
+          REMOTE
+
+      - name: Add same-origin Supabase reverse proxy to Sarafanka Nginx
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          reg_opts=(-F /dev/null -i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+          ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          conf=/etc/nginx/bx/site_ext_enabled/sarafan.peerivo.net.conf
+          backup="/root/sarafan-nginx-before-supabase-$(date +%Y%m%d-%H%M%S).conf"
+          cp -a "$conf" "$backup"
+
+          cat > "$conf" <<'EOF'
+          server {
+              listen 80;
+              server_name sarafan.peerivo.net;
+
+              include bx/conf/letsencrypt-challenge-tokens.conf;
+
+              location / {
+                  return 308 https://sarafan.peerivo.net$request_uri;
+              }
+          }
+
+          server {
+              listen 443 ssl;
+              http2 on;
+
+              server_name sarafan.peerivo.net;
+
+              ssl_certificate     /home/bitrix/dehydrated/certs/sarafan.peerivo.net/fullchain.pem;
+              ssl_certificate_key /home/bitrix/dehydrated/certs/sarafan.peerivo.net/privkey.pem;
+              ssl_trusted_certificate /home/bitrix/dehydrated/certs/sarafan.peerivo.net/chain.pem;
+
+              access_log /var/log/nginx/sarafan.peerivo.net.access.log;
+              error_log  /var/log/nginx/sarafan.peerivo.net.error.log;
+
+              location ^~ /supabase/ {
+                  proxy_pass http://127.0.0.1:58001/;
+                  proxy_http_version 1.1;
+
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Host $host;
+                  proxy_set_header X-Forwarded-Proto https;
+                  proxy_set_header X-Forwarded-Prefix /supabase;
+
+                  proxy_connect_timeout 5s;
+                  proxy_send_timeout 60s;
+                  proxy_read_timeout 60s;
+                  proxy_request_buffering off;
+                  client_max_body_size 12m;
+              }
+
+              location / {
+                  proxy_pass http://127.0.0.1:3400;
+                  proxy_http_version 1.1;
+
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto https;
+
+                  proxy_connect_timeout 5s;
+                  proxy_send_timeout 60s;
+                  proxy_read_timeout 60s;
+              }
+          }
+          EOF
+          sed -i 's/^          //' "$conf"
+
+          if ! nginx -t; then
+            cp -a "$backup" "$conf"
+            nginx -t
+            nginx -s reload
+            exit 1
+          fi
+          nginx -s reload
+          sleep 2
+
+          root_code="$(curl -sS -o /tmp/supa-root -w '%{http_code}' --max-time 10 https://sarafan.peerivo.net/supabase/)"
+          test "$root_code" = 200
+          grep -qx 'Sarafanka Supabase' /tmp/supa-root
+          rm -f /tmp/supa-root
+
+          storage_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10             https://sarafan.peerivo.net/supabase/storage/v1/status)"
+          test "$storage_code" = 200
+          echo "SARAFANKA_SUPABASE_PROXY_OK"
+          REMOTE
+
+      - name: Promote Sarafanka candidate runtime on REG.RU
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          reg_opts=(-F /dev/null -i ~/.ssh/reg_ru -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/reg_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
+          remote="$REG_RU_USER@$REG_RU_HOST"
+          ssh "${reg_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          base=/opt/peerivo/sarafanka/shared
+          current="$base/runtime.env"
+          candidate="$base/runtime.candidate.env"
+          ts="$(date +%Y%m%d-%H%M%S)"
+          env_backup="$base/runtime.env.before-db-$ts"
+          rollback="sarafanka-rollback-$ts"
+          image="$(docker inspect -f '{{.Config.Image}}' sarafanka)"
+          test -s "$candidate"
+          cp -a "$current" "$env_backup"
+
+          docker rm -f sarafanka-candidate >/dev/null 2>&1 || true
+          docker stop sarafanka >/dev/null
+          docker rename sarafanka "$rollback"
+          cp -a "$candidate" "$current"
+          chmod 600 "$current"
+
+          rollback_all() {
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              docker rm -f sarafanka >/dev/null 2>&1 || true
+              cp -a "$env_backup" "$current"
+              if docker inspect "$rollback" >/dev/null 2>&1; then
+                docker rename "$rollback" sarafanka
+                docker start sarafanka >/dev/null
+              fi
+            fi
+            exit "$rc"
+          }
+          trap rollback_all EXIT
+
+          docker run -d             --name sarafanka             --restart unless-stopped             --env-file "$current"             --add-host=host.docker.internal:host-gateway             --publish 127.0.0.1:3400:3000             --memory 512m             --pids-limit 256             --cap-drop ALL             --security-opt no-new-privileges             "$image" >/dev/null
+
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS --max-time 3 http://127.0.0.1:3400/api/health >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ok" = 1
+
+          auth="$(curl -fsS --max-time 10 https://sarafan.peerivo.net/api/auth/status)"
+          printf '%s' "$auth" | grep -q '"applicationReady":true'
+          printf '%s' "$auth" | grep -q '"identityReady":true'
+          printf '%s' "$auth" | grep -q '"password":true'
+          printf '%s' "$auth" | grep -q '"google":true'
+          printf '%s' "$auth" | grep -q '"googleConfigured":true'
+
+          prepare_code="$(curl -sS -o /tmp/sarafan-public-prepare.json -w '%{http_code}' --max-time 10             -X POST -H 'Origin: https://sarafan.peerivo.net' -H 'Content-Type: application/json'             --data '{"next":"/"}' https://sarafan.peerivo.net/api/auth/prepare)"
+          test "$prepare_code" = 200
+          grep -q '"action":"https://auth.peerivo.net/' /tmp/sarafan-public-prepare.json
+          rm -f /tmp/sarafan-public-prepare.json
+
+          key="$(sed -n 's/^SUPABASE_SECRET_KEY=//p' "$current")"
+          test -n "$key"
+          bucket_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10             -H "Authorization: Bearer $key" -H "apikey: $key"             https://sarafan.peerivo.net/supabase/storage/v1/bucket/documents)"
+          unset key
+          test "$bucket_code" = 200
+
+          test "$(docker inspect -f '{{.State.Health.Status}}' sarafanka)" = healthy
+          test "$(systemctl is-active peerivo-sarafanka-beget-tunnel.service)" = active
+          test "$(docker inspect -f '{{.State.Health.Status}}' mercy 2>/dev/null || echo healthy)" = healthy
+
+          rm -f "$candidate"
+          trap - EXIT
+          echo "SARAFANKA_PRODUCTION_DB_AUTH_STORAGE_OK"
+          echo "ROLLBACK_CONTAINER=$rollback"
+          echo "ENV_BACKUP=$env_backup"
+          REMOTE
+
+      - name: Cleanup runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/reg_ru ~/.ssh/reg_known_hosts ~/.ssh/beget ~/.ssh/beget_known_hosts
