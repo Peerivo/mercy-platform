@@ -1,6 +1,6 @@
 # Planned Happy Food Rescue integration
 
-Status: **contract only / not implemented**.
+Status: **runtime adapter implemented, disabled by default**.
 
 Mercy will be the social-help and last-mile side of the future Happy Food Rescue integration. Happy remains the owner of merchant surplus, paid rescue and food allocation.
 
@@ -10,13 +10,26 @@ Canonical semantic contract is owned by `Peerivo/happy`:
 - path: `contracts/food-rescue-mercy.v1.json`
 - contract: `peerivo.happy.food-rescue.mercy`
 - version: `1.0.0`
-- immutable contract pin: `734df94d8dc53ed46e97eec8abca0b95838340e9`
+- implementation pin: `540220e2c20c452583c67d45f9459f0442ac2a2e`
 
 The local planned consumer binding is `.peerivo/integrations/happy-food-rescue.v1.json`.
 
+## Implemented adapter
+
+`lib/happy-food-rescue.ts` now implements the Mercy -> Happy HTTPS event adapter for contract v1.
+
+It is **off unless `HAPPY_FOOD_RESCUE_ENABLED=true`**. When enabled it additionally requires:
+
+- `HAPPY_FOOD_RESCUE_URL` — HTTPS base URL for the Happy Food Rescue service;
+- `HAPPY_FOOD_RESCUE_TOKEN` — dedicated integration bearer token, separate from ordinary user/application auth.
+
+The adapter builds and sends privacy-safe, revisioned events for donation reservation upsert/release, donation outcome attestation, demand signals and rescue-mission disposition. It rejects known beneficiary/case/contact fields before network I/O.
+
+It does **not** yet add Mercy database tables, user-facing Food Rescue UI, automatic matching/mission orchestration or Happy -> Mercy inbound event persistence.
+
 ## What Mercy will eventually do
 
-When implemented in a later task, Mercy may:
+Mercy may:
 
 - match a donation tranche against an existing food-help request;
 - route food to a verified NGO or redistribution point;
@@ -43,7 +56,7 @@ This contract does not reinterpret existing public help requests or volunteer of
 
 Future implementation must add explicit adapters/workflows and preserve existing RLS, consent, assignment and privacy boundaries.
 
-No current Mercy table, RPC, route or user flow is modified by this contract.
+No current Mercy table, RPC or user flow is modified by this adapter. The only runtime surface added in this increment is the disabled-by-default outbound integration client.
 
 ## Organization identity
 
@@ -75,9 +88,9 @@ Before runtime integration:
 
 1. Happy Food Rescue must first prove its own lot lifecycle and quantity-conservation state machine;
 2. the canonical contract must remain pinned to an immutable Happy commit/release;
-3. Mercy adapters must be implemented in a separate reviewed increment;
+3. the Mercy adapter must remain disabled until cross-system staging verification is green;
 4. privacy, idempotency, reservation expiry and recall must be tested;
 5. the regional policy must permit the exact donation/transport flow;
 6. production enablement requires its own approvals.
 
-Nothing in this document enables the integration.
+Nothing in this document enables production integration.

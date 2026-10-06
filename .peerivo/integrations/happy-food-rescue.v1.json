@@ -4,7 +4,7 @@
   "metadata": {
     "id": "mercy.happy-food-rescue",
     "version": "1.0.0",
-    "status": "planned"
+    "status": "implemented-disabled"
   },
   "project": "Peerivo/mercy-platform",
   "canonicalContract": {
@@ -12,15 +12,16 @@
     "path": "contracts/food-rescue-mercy.v1.json",
     "id": "peerivo.happy.food-rescue.mercy",
     "version": "1.0.0",
-    "implementationPin": "734df94d8dc53ed46e97eec8abca0b95838340e9",
+    "implementationPin": "540220e2c20c452583c67d45f9459f0442ac2a2e",
     "pinRequiredBeforeRuntimeEnablement": true
   },
   "implementation": {
     "enabled": false,
-    "runtimeAdapterExists": false,
+    "runtimeAdapterExists": true,
     "databaseChangesExist": false,
-    "apiOrWebhookExists": false,
-    "productionPermissionExists": false
+    "apiOrWebhookExists": true,
+    "productionPermissionExists": false,
+    "transport": "HTTPS event POST to Happy"
   },
   "acceptedInboundEvents": [
     "happy.food_rescue.donation_offer.upserted",
