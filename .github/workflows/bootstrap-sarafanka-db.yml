@@ -1,3 +1,4 @@
+# Trigger note: 2026-10-06 Sarafanka isolated Beget stack is ready; push to main intentionally starts bootstrap.
 name: Bootstrap Sarafanka database
 
 on:
