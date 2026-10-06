@@ -1,0 +1,455 @@
+name: Bootstrap Sarafanka database
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bootstrap-sarafanka-db.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sarafanka-db-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: ${{ github.repository == 'Peerivo/mercy-platform' && github.ref == 'refs/heads/main' }}
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BEGET_SUPABASE_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_SUPABASE_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_SUPABASE_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+      BEGET_SUPABASE_KNOWN_HOSTS: ${{ secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate fixed Beget transport
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$BEGET_SUPABASE_HOST" = "45.144.176.213"
+          test "$BEGET_SUPABASE_USER" = "supabase-deploy"
+          test -n "$BEGET_SUPABASE_SSH_KEY"
+          test -n "$BEGET_SUPABASE_KNOWN_HOSTS"
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$BEGET_SUPABASE_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$BEGET_SUPABASE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+          ssh-keygen -y -P '' -f ~/.ssh/id_ed25519 >/dev/null
+          ssh-keygen -F "$BEGET_SUPABASE_HOST" -f ~/.ssh/known_hosts >/dev/null
+
+      - name: Materialize exact Sarafanka migrations
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          work=/tmp/sarafanka-migrations
+          install -d -m 700 "$work"
+          cat > "$work/20260922173000_core_domain.sql" <<'SQL'
+          create table profiles (
+            id uuid primary key default gen_random_uuid(),
+            peerivo_subject text not null unique,
+            customer_code uuid not null default gen_random_uuid() unique,
+            email text,
+            display_name text,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now()
+          );
+          
+          create table organizations (
+            id uuid primary key default gen_random_uuid(),
+            display_name text not null,
+            legal_name text,
+            category text not null,
+            city text not null,
+            status text not null default 'active' check (status in ('active', 'suspended', 'closed')),
+            created_at timestamptz not null default now()
+          );
+          
+          create table organization_members (
+            organization_id uuid not null references organizations(id) on delete cascade,
+            profile_id uuid not null references profiles(id) on delete cascade,
+            role text not null check (role in ('owner', 'admin', 'manager', 'staff')),
+            created_at timestamptz not null default now(),
+            primary key (organization_id, profile_id)
+          );
+          
+          create table partnerships (
+            id uuid primary key default gen_random_uuid(),
+            source_organization_id uuid not null references organizations(id),
+            target_organization_id uuid not null references organizations(id),
+            created_by_profile_id uuid not null references profiles(id),
+            commission_rate_bps integer not null default 1500 check (commission_rate_bps between 0 and 10000),
+            minimum_commission_base_bps integer not null default 5000 check (minimum_commission_base_bps between 0 and 10000),
+            terms_version integer not null default 1,
+            status text not null default 'proposed' check (status in ('proposed', 'active', 'paused', 'ended')),
+            created_at timestamptz not null default now(),
+            activated_at timestamptz,
+            check (source_organization_id <> target_organization_id)
+          );
+          
+          create unique index partnerships_open_pair_idx
+            on partnerships (source_organization_id, target_organization_id)
+            where status in ('proposed', 'active');
+          
+          create table documents (
+            id uuid primary key default gen_random_uuid(),
+            partnership_id uuid references partnerships(id) on delete cascade,
+            kind text not null,
+            version integer not null,
+            storage_path text not null unique,
+            content_sha256 text not null check (char_length(content_sha256) = 64),
+            content_type text not null,
+            created_at timestamptz not null default now(),
+            unique (partnership_id, kind, version)
+          );
+          
+          create table partnership_acceptances (
+            partnership_id uuid not null references partnerships(id) on delete cascade,
+            organization_id uuid not null references organizations(id),
+            profile_id uuid not null references profiles(id),
+            document_id uuid not null references documents(id),
+            accepted_at timestamptz not null default now(),
+            primary key (partnership_id, organization_id)
+          );
+          
+          create table partner_messages (
+            id uuid primary key default gen_random_uuid(),
+            partnership_id uuid not null references partnerships(id) on delete cascade,
+            author_profile_id uuid not null references profiles(id),
+            body text not null check (char_length(body) between 1 and 4000),
+            created_at timestamptz not null default now()
+          );
+          
+          create index partner_messages_thread_idx on partner_messages (partnership_id, created_at);
+          
+          create table campaigns (
+            id uuid primary key default gen_random_uuid(),
+            partnership_id uuid not null references partnerships(id),
+            source_organization_id uuid not null references organizations(id),
+            target_organization_id uuid not null references organizations(id),
+            title text not null,
+            description text,
+            full_price_minor bigint not null check (full_price_minor > 0),
+            currency text not null check (currency ~ '^[A-Z]{3}$'),
+            discount_bps integer not null check (discount_bps between 0 and 10000),
+            commission_rate_bps integer not null default 1500 check (commission_rate_bps between 0 and 10000),
+            minimum_commission_base_bps integer not null default 5000 check (minimum_commission_base_bps between 0 and 10000),
+            qualifying_purchases integer not null default 1 check (qualifying_purchases > 0),
+            minimum_purchase_minor bigint not null default 0 check (minimum_purchase_minor >= 0),
+            offer_valid_days integer not null default 30 check (offer_valid_days between 1 and 365),
+            capacity integer check (capacity is null or capacity > 0),
+            redeemed_count integer not null default 0 check (redeemed_count >= 0),
+            active_from timestamptz default now(),
+            active_until timestamptz,
+            status text not null default 'draft' check (status in ('draft', 'active', 'paused', 'ended')),
+            created_at timestamptz not null default now(),
+            check (source_organization_id <> target_organization_id)
+          );
+          
+          create index campaigns_source_active_idx on campaigns (source_organization_id, status);
+          create index campaigns_target_active_idx on campaigns (target_organization_id, status);
+          
+          create table reward_edges (
+            id uuid primary key default gen_random_uuid(),
+            from_campaign_id uuid not null references campaigns(id) on delete cascade,
+            to_campaign_id uuid not null references campaigns(id) on delete cascade,
+            status text not null default 'active' check (status in ('active', 'paused')),
+            created_at timestamptz not null default now(),
+            unique (from_campaign_id, to_campaign_id),
+            check (from_campaign_id <> to_campaign_id)
+          );
+          
+          create table purchase_events (
+            id uuid primary key default gen_random_uuid(),
+            organization_id uuid not null references organizations(id),
+            customer_profile_id uuid not null references profiles(id),
+            actor_profile_id uuid not null references profiles(id),
+            amount_paid_minor bigint not null check (amount_paid_minor >= 0),
+            currency text not null check (currency ~ '^[A-Z]{3}$'),
+            idempotency_key text not null,
+            evidence_type text not null,
+            occurred_at timestamptz not null default now(),
+            created_at timestamptz not null default now(),
+            unique (organization_id, idempotency_key)
+          );
+          
+          create index purchase_events_customer_idx on purchase_events (customer_profile_id, occurred_at desc);
+          
+          create table campaign_progress (
+            campaign_id uuid not null references campaigns(id) on delete cascade,
+            profile_id uuid not null references profiles(id) on delete cascade,
+            confirmed_purchase_count integer not null default 0 check (confirmed_purchase_count >= 0),
+            cycle_number integer not null default 1 check (cycle_number > 0),
+            qualified_at timestamptz,
+            updated_at timestamptz not null default now(),
+            primary key (campaign_id, profile_id)
+          );
+          
+          create table offers (
+            id uuid primary key default gen_random_uuid(),
+            offer_code uuid not null default gen_random_uuid() unique,
+            campaign_id uuid not null references campaigns(id),
+            profile_id uuid not null references profiles(id),
+            cycle_number integer not null check (cycle_number > 0),
+            full_price_minor bigint not null check (full_price_minor > 0),
+            currency text not null check (currency ~ '^[A-Z]{3}$'),
+            discount_bps integer not null check (discount_bps between 0 and 10000),
+            commission_rate_bps integer not null check (commission_rate_bps between 0 and 10000),
+            minimum_commission_base_bps integer not null check (minimum_commission_base_bps between 0 and 10000),
+            status text not null default 'issued' check (status in ('issued', 'redeemed', 'expired', 'void')),
+            issued_at timestamptz not null default now(),
+            expires_at timestamptz not null,
+            redeemed_at timestamptz,
+            unique (campaign_id, profile_id, cycle_number)
+          );
+          
+          create index offers_profile_status_idx on offers (profile_id, status, expires_at);
+          
+          create table redemptions (
+            id uuid primary key default gen_random_uuid(),
+            offer_id uuid not null unique references offers(id),
+            campaign_id uuid not null references campaigns(id),
+            customer_profile_id uuid not null references profiles(id),
+            organization_id uuid not null references organizations(id),
+            actor_profile_id uuid not null references profiles(id),
+            full_price_minor bigint not null check (full_price_minor > 0),
+            customer_paid_minor bigint not null check (customer_paid_minor >= 0),
+            commission_base_minor bigint not null check (commission_base_minor >= 0),
+            commission_amount_minor bigint not null check (commission_amount_minor >= 0),
+            currency text not null check (currency ~ '^[A-Z]{3}$'),
+            redeemed_at timestamptz not null default now(),
+            check (commission_base_minor >= customer_paid_minor)
+          );
+          
+          create table commission_ledger (
+            id uuid primary key default gen_random_uuid(),
+            redemption_id uuid not null unique references redemptions(id),
+            organization_id uuid not null references organizations(id),
+            amount_minor bigint not null check (amount_minor >= 0),
+            currency text not null check (currency ~ '^[A-Z]{3}$'),
+            status text not null check (status in ('due', 'paid', 'void')),
+            created_at timestamptz not null default now(),
+            settled_at timestamptz
+          );
+          
+          insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+          values (
+            'documents',
+            'documents',
+            false,
+            10485760,
+            array['application/pdf', 'text/plain', 'text/markdown']::text[]
+          )
+          on conflict (id) do update
+          set public = false,
+              file_size_limit = excluded.file_size_limit,
+              allowed_mime_types = excluded.allowed_mime_types;
+          
+          alter table profiles enable row level security;
+          alter table organizations enable row level security;
+          alter table organization_members enable row level security;
+          alter table partnerships enable row level security;
+          alter table documents enable row level security;
+          alter table partnership_acceptances enable row level security;
+          alter table partner_messages enable row level security;
+          alter table campaigns enable row level security;
+          alter table reward_edges enable row level security;
+          alter table purchase_events enable row level security;
+          alter table campaign_progress enable row level security;
+          alter table offers enable row level security;
+          alter table redemptions enable row level security;
+          alter table commission_ledger enable row level security;
+          
+          revoke all on table profiles, organizations, organization_members, partnerships, documents,
+            partnership_acceptances, partner_messages, campaigns, reward_edges, purchase_events,
+            campaign_progress, offers, redemptions, commission_ledger
+          from anon, authenticated;
+          
+          SQL
+          cat > "$work/20260922173500_campaign_acceptances.sql" <<'SQL'
+          create table campaign_acceptances (
+            campaign_id uuid not null references campaigns(id) on delete cascade,
+            organization_id uuid not null references organizations(id),
+            profile_id uuid not null references profiles(id),
+            accepted_at timestamptz not null default now(),
+            primary key (campaign_id, organization_id)
+          );
+          
+          alter table campaigns
+            drop constraint campaigns_status_check,
+            add constraint campaigns_status_check
+              check (status in ('draft', 'proposed', 'active', 'paused', 'ended'));
+          
+          alter table campaign_acceptances enable row level security;
+          
+          revoke all on table campaign_acceptances from anon, authenticated;
+          
+          SQL
+          cat > "$work/20260922180000_reward_authorization.sql" <<'SQL'
+          alter table reward_edges
+            add column created_by_profile_id uuid not null references profiles(id),
+            add column authorized_by_profile_id uuid references profiles(id);
+          
+          alter table reward_edges
+            drop constraint reward_edges_status_check,
+            add constraint reward_edges_status_check
+              check (status in ('proposed', 'active', 'paused'));
+          
+          alter table reward_edges
+            alter column status set default 'proposed';
+          
+          SQL
+          test -s "$work/20260922173000_core_domain.sql"
+          test -s "$work/20260922173500_campaign_acceptances.sql"
+          test -s "$work/20260922180000_reward_authorization.sql"
+
+      - name: Stage migrations on Beget
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          remote_dir="/tmp/sarafanka-migrate-$GITHUB_RUN_ID"
+          opts=(-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
+          ssh "${opts[@]}" "$remote" "install -d -m 700 '$remote_dir'"
+          scp -q "${opts[@]}" /tmp/sarafanka-migrations/*.sql "$remote:$remote_dir/"
+
+      - name: Apply exact Sarafanka migrations
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          remote_dir="/tmp/sarafanka-migrate-$GITHUB_RUN_ID"
+          opts=(-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
+          ssh "${opts[@]}" "$remote" "bash -s -- '$remote_dir'" <<'REMOTE'
+          set -Eeuo pipefail
+          umask 077
+          dir=$1
+          target=sarafanka-supabase-db
+          mercy=supabase-db
+          trap 'rm -rf -- "$dir"' EXIT
+
+          test "$(hostname)" = "grrgzczsyi"
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$target")" = healthy
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$mercy")" = healthy
+
+          mercy_id_before="$(docker inspect -f '{{.Id}}' "$mercy")"
+          mercy_started_before="$(docker inspect -f '{{.State.StartedAt}}' "$mercy")"
+
+          for f in             "$dir/20260922173000_core_domain.sql"             "$dir/20260922173500_campaign_acceptances.sql"             "$dir/20260922180000_reward_authorization.sql"
+          do
+            test -s "$f"
+          done
+
+          docker exec -i "$target" psql -X -v ON_ERROR_STOP=1 -U postgres -d sarafanka <<'SQL'
+          CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+          CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+            version text NOT NULL PRIMARY KEY
+          );
+          ALTER TABLE supabase_migrations.schema_migrations
+            ADD COLUMN IF NOT EXISTS statements text[];
+          ALTER TABLE supabase_migrations.schema_migrations
+            ADD COLUMN IF NOT EXISTS name text;
+          SQL
+
+          apply_one() {
+            version=$1
+            name=$2
+            file=$3
+            applied="$(docker exec "$target" psql -X -U postgres -d sarafanka -Atc               "select count(*) from supabase_migrations.schema_migrations where version='$version'")"
+            if [ "$applied" = 1 ]; then
+              echo "MIGRATION_ALREADY_APPLIED=$version"
+              return
+            fi
+            test "$applied" = 0
+            {
+              printf '%s\n' 'BEGIN;'
+              printf '%s\n' "SET LOCAL lock_timeout = '10s';"
+              printf '%s\n' "SET LOCAL statement_timeout = '120s';"
+              cat "$file"
+              printf "\nINSERT INTO supabase_migrations.schema_migrations(version,name,statements) VALUES ('%s','%s',NULL);\n" "$version" "$name"
+              printf '%s\n' 'COMMIT;'
+            } | docker exec -i "$target" psql -X -v ON_ERROR_STOP=1 -U postgres -d sarafanka
+            echo "MIGRATION_APPLIED=$version"
+          }
+
+          apply_one 20260922173000 core_domain "$dir/20260922173000_core_domain.sql"
+          apply_one 20260922173500 campaign_acceptances "$dir/20260922173500_campaign_acceptances.sql"
+          apply_one 20260922180000 reward_authorization "$dir/20260922180000_reward_authorization.sql"
+
+          versions="$(docker exec "$target" psql -X -U postgres -d sarafanka -Atc             "select string_agg(version, ',' order by version) from supabase_migrations.schema_migrations where version in ('20260922173000','20260922173500','20260922180000')")"
+          test "$versions" = "20260922173000,20260922173500,20260922180000"
+          echo "MIGRATION_HISTORY_OK=$versions"
+
+          tables="$(docker exec "$target" psql -X -U postgres -d sarafanka -Atc "
+            select count(*) from information_schema.tables
+            where table_schema='public' and table_name = any(array[
+              'profiles','organizations','organization_members','partnerships','documents',
+              'partnership_acceptances','partner_messages','campaigns','campaign_acceptances',
+              'reward_edges','purchase_events','campaign_progress','offers','redemptions',
+              'commission_ledger'
+            ]::text[])")"
+          test "$tables" = 15
+          echo "SARAFANKA_TABLES_OK=$tables"
+
+          rls="$(docker exec "$target" psql -X -U postgres -d sarafanka -Atc "
+            select count(*) from pg_class c
+            join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public'
+              and c.relname = any(array[
+                'profiles','organizations','organization_members','partnerships','documents',
+                'partnership_acceptances','partner_messages','campaigns','campaign_acceptances',
+                'reward_edges','purchase_events','campaign_progress','offers','redemptions',
+                'commission_ledger'
+              ]::text[])
+              and c.relrowsecurity")"
+          test "$rls" = 15
+          echo "SARAFANKA_RLS_OK=$rls"
+
+          reward_cols="$(docker exec "$target" psql -X -U postgres -d sarafanka -Atc "
+            select count(*) from information_schema.columns
+            where table_schema='public' and table_name='reward_edges'
+              and column_name in ('created_by_profile_id','authorized_by_profile_id')")"
+          test "$reward_cols" = 2
+          echo "REWARD_AUTH_COLUMNS_OK=$reward_cols"
+
+          bucket="$(docker exec "$target" psql -X -U postgres -d sarafanka -Atc             "select id || '|' || public::text from storage.buckets where id='documents'")"
+          test "$bucket" = "documents|false"
+          echo "DOCUMENT_BUCKET_OK=$bucket"
+
+          campaign_check="$(docker exec "$target" psql -X -U postgres -d sarafanka -Atc             "select pg_get_constraintdef(oid) from pg_constraint where conrelid='public.campaigns'::regclass and conname='campaigns_status_check'")"
+          printf '%s' "$campaign_check" | grep -q proposed
+          echo "CAMPAIGN_STATUS_PROPOSED_OK"
+
+          reward_check="$(docker exec "$target" psql -X -U postgres -d sarafanka -Atc             "select pg_get_constraintdef(oid) from pg_constraint where conrelid='public.reward_edges'::regclass and conname='reward_edges_status_check'")"
+          printf '%s' "$reward_check" | grep -q proposed
+          echo "REWARD_STATUS_PROPOSED_OK"
+
+          docker restart sarafanka-supabase-rest >/dev/null
+          sleep 2
+          test "$(docker inspect -f '{{.State.Status}}' sarafanka-supabase-rest)" = running
+          test "$(docker inspect -f '{{.State.Health.Status}}' sarafanka-supabase-storage)" = healthy
+
+          test "$(docker inspect -f '{{.Id}}' "$mercy")" = "$mercy_id_before"
+          test "$(docker inspect -f '{{.State.StartedAt}}' "$mercy")" = "$mercy_started_before"
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$mercy")" = healthy
+          echo "MERCY_UNCHANGED_OK"
+          echo "SARAFANKA_MIGRATIONS_OK"
+          REMOTE
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: |
+          rm -rf /tmp/sarafanka-migrations
+          rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
