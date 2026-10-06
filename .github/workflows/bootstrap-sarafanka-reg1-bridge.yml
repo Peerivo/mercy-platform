@@ -92,9 +92,11 @@ jobs:
           set -Eeuo pipefail
           beget_opts=(-F /dev/null -i ~/.ssh/beget -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/beget_known_hosts -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10)
           remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
-          printf '%s\n' "$TUNNEL_PUBLIC_KEY" | ssh "${beget_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          key_b64="$(printf '%s' "$TUNNEL_PUBLIC_KEY" | base64 -w0)"
+          ssh "${beget_opts[@]}" "$remote" "bash -s -- '$key_b64'" <<'REMOTE'
           set -Eeuo pipefail
-          IFS= read -r key
+          key_b64=$1
+          key="$(printf '%s' "$key_b64" | base64 -d)"
           [[ "$key" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+$ ]]
           key_body="$(printf '%s\n' "$key" | awk '{print $2}')"
           line="from=\"95.163.223.68\",restrict,port-forwarding,permitopen=\"127.0.0.1:55432\",permitopen=\"127.0.0.1:58000\",command=\"/bin/false\" $key sarafanka-reg-ru1-to-beget-v1"
