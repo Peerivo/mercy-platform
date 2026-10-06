@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APPROVED_BASE_SHA: 65c67b2161baca24f9a22944475c4ca0557a4512
+  APPROVED_BASE_SHA: 763b4787e5d29b6aa915e6ea50fd3812b3834906
   TARGET_WORKFLOW: deploy-reg-ru.yml
 
 jobs:

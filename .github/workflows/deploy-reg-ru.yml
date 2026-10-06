@@ -133,13 +133,22 @@ jobs:
           set -euo pipefail
 
           project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' supabase-db)"
-          test -n "${project}"
+          [[ -n "${project}" && "${project}" != '<no value>' && "${project}" != *[[:space:]]* ]]
           kong="$(
             docker ps -q \
               --filter "label=com.docker.compose.project=${project}" \
               --filter "label=com.docker.compose.service=kong"
           )"
-          test -n "${kong}"
+          auth="$(
+            docker ps -q \
+              --filter "label=com.docker.compose.project=${project}" \
+              --filter "label=com.docker.compose.service=auth"
+          )"
+          # An ambiguous container/address must never silently select a tenant.
+          [[ -n "${kong}" && "${kong}" != *[[:space:]]* ]]
+          [[ -n "${auth}" && "${auth}" != *[[:space:]]* ]]
+          auth_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' "${auth}" | awk 'NF')"
+          [[ -n "${auth_ip}" && "${auth_ip}" != *[[:space:]]* ]]
 
           live_kong_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${kong}")"
           candidates="$(
@@ -157,39 +166,51 @@ jobs:
             } | awk 'NF && !seen[$0]++'
           )"
 
+          accepted_key=""
+          accepted_count=0
+          candidate_count=0
           while IFS= read -r candidate; do
             [ -n "${candidate}" ] || continue
-            status="$(
+            candidate_count=$((candidate_count + 1))
+            # Resolve the live service-role key against Mercy GoTrue directly.
+            # The Beget host is the public API origin, so probing the public hostname
+            # from that same origin is a hairpin path and must not gate credential
+            # selection. The staged REG.RU candidate independently verifies the full
+            # public admin + public Auth path before promotion.
+            if ! status="$(
               curl --silent --show-error \
                 --output /dev/null \
                 --write-out '%{http_code}' \
                 --max-time 10 \
-                'https://api.mercy.peerivo.net/auth/v1/admin/users?page=1&per_page=1' \
-                -H "apikey: ${candidate}" \
-                -H "Authorization: Bearer ${candidate}" \
-                || true
-            )"
+                "http://${auth_ip}:9999/admin/users?page=1&per_page=1" \
+                -H "Authorization: Bearer ${candidate}"
+            )"; then
+              echo "Direct Mercy GoTrue candidate probe did not complete; refusing selection." >&2
+              exit 1
+            fi
             if [ "${status}" = "200" ]; then
-              printf '%s' "${candidate}"
-              exit 0
+              accepted_key="${candidate}"
+              accepted_count=$((accepted_count + 1))
             fi
           done <<< "${candidates}"
 
-          echo "No live Beget service-role candidate is accepted by Mercy GoTrue Admin." >&2
-          exit 1
+          if [ "${accepted_count}" -ne 1 ]; then
+            echo "Expected exactly one accepted live Beget service-role candidate for Mercy GoTrue Admin (candidates=${candidate_count}, accepted=${accepted_count})." >&2
+            exit 1
+          fi
+          printf '%s' "${accepted_key}"
           REMOTE
           )"
 
           test -n "${service_key}"
           echo "::add-mask::${service_key}"
 
-          # The live key was already verified against the public GoTrue Admin
-          # endpoint from the canonical Beget host. Do not repeat that probe
-          # from a GitHub-hosted runner: provider/network policy can reject
-          # runner egress even when the credential itself is valid.
+          # The live key was verified directly against Mercy GoTrue on Beget.
+          # Do not use a same-origin public hairpin as a credential gate here.
+          # The REG.RU candidate later proves the real public path before promotion.
           printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "${service_key}" >> "${GITHUB_ENV}"
           unset service_key
-          echo "LIVE_BEGET_SERVICE_ROLE_VERIFIED"
+          echo "LIVE_BEGET_SERVICE_ROLE_DIRECT_VERIFIED"
 
       - name: Verify configured public key against Beget before SSH
         shell: bash
@@ -200,6 +221,10 @@ jobs:
           curl --fail --silent --show-error --max-time 10             -H "apikey: ${client_key}"             "${EXPECTED_SUPABASE_URL}/auth/v1/health" >/dev/null
           unset client_key
 
+      - name: Verify exact public RPC before building or touching REG.RU
+        shell: bash
+        run: node scripts/probe-mercy-public-data.mjs
+
       - name: Build immutable production image
         shell: bash
         env:
@@ -208,6 +233,34 @@ jobs:
         run: |
           set -euo pipefail
           docker build             --build-arg NEXT_PUBLIC_SUPABASE_URL             --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY             --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY             --build-arg NEXT_PUBLIC_SITE_URL="${SITE_URL}"             --build-arg NEXT_PUBLIC_MAP_TILE_URL             --build-arg NEXT_PUBLIC_MAP_ATTRIBUTION             --build-arg GIT_SHA="${GITHUB_SHA}"             --label org.opencontainers.image.revision="${GITHUB_SHA}"             --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"             -t "${IMAGE_NAME}:${GITHUB_SHA}"             .
+
+          build_probe="mercy-build-probe-${GITHUB_RUN_ID}"
+          trap 'docker rm -f "${build_probe}" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "${build_probe}" --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            -e "GIT_SHA=${GITHUB_SHA}" \
+            -e NEXT_PUBLIC_SUPABASE_URL \
+            -e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY \
+            -e NEXT_PUBLIC_SUPABASE_ANON_KEY \
+            -e "NEXT_PUBLIC_SITE_URL=${SITE_URL}" \
+            -p 127.0.0.1:3101:3000 "${IMAGE_NAME}:${GITHUB_SHA}" >/dev/null
+          build_ready=0
+          for _ in $(seq 1 20); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:3101/health >/dev/null; then
+              build_ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "${build_ready}" -eq 1
+          if ! curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3101/health/data >/dev/null; then
+            echo "BUILD_DATA_READINESS=failed" >&2
+            docker exec -i -e NEXT_PUBLIC_SUPABASE_URL -e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY \
+              -e NEXT_PUBLIC_SUPABASE_ANON_KEY "${build_probe}" node --input-type=module - \
+              < scripts/probe-mercy-public-data.mjs || true
+            exit 1
+          fi
+          echo "BUILD_DATA_READINESS=verified"
 
           docker save "${IMAGE_NAME}:${GITHUB_SHA}" | gzip -1 > /tmp/mercy-image.tar.gz
           test -s /tmp/mercy-image.tar.gz
@@ -256,6 +309,10 @@ jobs:
           PREVIOUS_IMAGE_FILE="${REMOTE_DIR}/previous-image"
           NETWORK_NAME="mercy-reg-ru"
           NETWORK_MTU="1400"
+          CANDIDATE_NAME="${CONTAINER_NAME}-candidate-${IMAGE_TAG:0:12}"
+          ROLLBACK_NAME="${CONTAINER_NAME}-rollback-${IMAGE_TAG:0:12}"
+          DATA_PROBE="${REMOTE_DIR}/probe-mercy-public-data.mjs"
+          production_changed=0
 
           ensure_network() {
             if docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then
@@ -270,13 +327,21 @@ jobs:
           }
 
           start_container() {
-            local image="${1:?image required}"
-            local env_file="${2:?env file required}"
-            docker run -d               --name "${CONTAINER_NAME}"               --restart unless-stopped               --read-only               --tmpfs /tmp:rw,noexec,nosuid,size=64m               --network "${NETWORK_NAME}"               --env-file "${env_file}"               -p 127.0.0.1:3100:3000               "${image}" >/dev/null
+            local name="${1:?container name required}"
+            local image="${2:?image required}"
+            local env_file="${3:?env file required}"
+            local port="${4:?loopback port required}"
+            local restart="${5:-no}"
+            docker run -d --name "${name}" --label "peerivo.mercy.release=${IMAGE_TAG}" \
+              --restart "${restart}" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+              --network "${NETWORK_NAME}" --env-file "${env_file}" \
+              -p "127.0.0.1:${port}:3000" "${image}" >/dev/null
           }
 
           old_image=""
+          old_id=""
           if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+            old_id="$(docker inspect -f '{{.Id}}' "${CONTAINER_NAME}")"
             old_image="$(docker inspect -f '{{.Config.Image}}' "${CONTAINER_NAME}")"
           elif [ -s "${CURRENT_IMAGE_FILE}" ]; then
             old_image="$(cat "${CURRENT_IMAGE_FILE}")"
@@ -285,21 +350,58 @@ jobs:
           armed=0
           phase="candidate"
 
+          remove_owned_container() {
+            local name="$1"
+            local release
+            release="$(docker inspect -f '{{ index .Config.Labels "peerivo.mercy.release" }}' "${name}" 2>/dev/null || true)"
+            if [ "${release}" = "${IMAGE_TAG}" ]; then
+              docker rm -f "${name}" >/dev/null
+            fi
+          }
+
           rollback() {
             set +e
             trap - EXIT HUP INT TERM
-            echo "Deployment interrupted or failed; rolling back REG.RU candidate." >&2
-            docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+            echo "Deployment interrupted or failed; cleaning up the rejected candidate." >&2
+            remove_owned_container "${CANDIDATE_NAME}"
 
-            rollback_env="${PROD_ENV}"
-            if [ "${phase}" != "candidate" ] && [ -s "${PREVIOUS_ENV}" ]; then
-              rollback_env="${PREVIOUS_ENV}"
-              cp -f "${PREVIOUS_ENV}" "${PROD_ENV}" || true
-              chmod 600 "${PROD_ENV}" || true
-            fi
-
-            if [ -n "${old_image}" ] && [ -s "${rollback_env}" ]; then
-              start_container "${old_image}" "${rollback_env}" || true
+            if [ "${production_changed}" -eq 1 ]; then
+              current_id="$(docker inspect -f '{{.Id}}' "${CONTAINER_NAME}" 2>/dev/null || true)"
+              if [ "${current_id}" != "${old_id}" ]; then
+                remove_owned_container "${CONTAINER_NAME}"
+              fi
+              # Restore service before metadata: restarting the retained original
+              # container does not depend on writing an environment file.
+              if [ -n "${old_id}" ]; then
+                old_name="$(docker inspect -f '{{.Name}}' "${old_id}")" || return 1
+                if [ "${old_name}" = "/${ROLLBACK_NAME}" ]; then
+                  docker rename "${old_id}" "${CONTAINER_NAME}" || return 1
+                elif [ "${old_name}" != "/${CONTAINER_NAME}" ]; then
+                  echo "Rollback container identity changed; refusing another container." >&2
+                  return 1
+                fi
+                if [ "$(docker inspect -f '{{.State.Running}}' "${old_id}")" != "true" ]; then
+                  docker start "${old_id}" >/dev/null || return 1
+                fi
+              elif [ -n "${old_image}" ] && [ -s "${PROD_ENV}" ]; then
+                rollback_env="${PROD_ENV}"
+                if [ -s "${PREVIOUS_ENV}" ]; then rollback_env="${PREVIOUS_ENV}"; fi
+                start_container "${CONTAINER_NAME}" "${old_image}" "${rollback_env}" 3100 unless-stopped || return 1
+              fi
+              echo "REG_RU_ROLLBACK_CONTAINER_RESTORED"
+              metadata_ok=1
+              if [ -s "${PREVIOUS_ENV}" ]; then
+                cp -f "${PREVIOUS_ENV}" "${PROD_ENV}" || metadata_ok=0
+                chmod 600 "${PROD_ENV}" || metadata_ok=0
+              fi
+              if [ -n "${old_image}" ]; then
+                printf '%s\n' "${old_image}" > "${CURRENT_IMAGE_FILE}" || metadata_ok=0
+              fi
+              if [ "${metadata_ok}" -ne 1 ]; then
+                echo "REG_RU_ROLLBACK_METADATA_UNVERIFIED" >&2
+              fi
+            else
+              echo "REG_RU_CANDIDATE_REJECTED_PRODUCTION_UNCHANGED"
             fi
 
             rm -f "${NEXT_ENV}" "${IMAGE_ARCHIVE}"
@@ -311,7 +413,7 @@ jobs:
           on_exit() {
             code=$?
             if [ "${code}" -ne 0 ] && [ "${armed}" -eq 1 ]; then
-              rollback
+              rollback || echo "REG_RU_ROLLBACK_UNVERIFIED" >&2
             fi
             exit "${code}"
           }
@@ -324,6 +426,11 @@ jobs:
           cd "${REMOTE_DIR}"
           test -s "${IMAGE_ARCHIVE}"
           test -s "${NEXT_ENV}"
+          test -s "${DATA_PROBE}"
+          if docker inspect "${CANDIDATE_NAME}" >/dev/null 2>&1 || docker inspect "${ROLLBACK_NAME}" >/dev/null 2>&1; then
+            echo "Release-specific candidate or rollback container already exists; refusing to replace it." >&2
+            exit 1
+          fi
           if [ -n "${old_image}" ]; then
             test -s "${PROD_ENV}"
           fi
@@ -335,17 +442,16 @@ jobs:
           # global Docker/firewall configuration on the host.
           ensure_network
 
-          # Arm rollback before the first destructive production-host action.
+          # The temporary candidate never takes the live container's name or port.
           armed=1
-          if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
-            docker rm -f "${CONTAINER_NAME}" >/dev/null
-          fi
+          start_container "${CANDIDATE_NAME}" "${IMAGE}" "${NEXT_ENV}" 3101
 
-          start_container "${IMAGE}" "${NEXT_ENV}"
-
+          probe_application() {
+            local probe_container="$1"
+            local probe_origin="$2"
           healthy=false
           for _ in $(seq 1 45); do
-            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER_NAME}")"
+            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${probe_container}")"
             if [ "${status}" = "healthy" ]; then
               healthy=true
               break
@@ -357,17 +463,79 @@ jobs:
           done
 
           if [ "${healthy}" != "true" ]; then
-            docker logs --tail=120 "${CONTAINER_NAME}" >&2 || true
-            false
+            echo "REG_RU_APPLICATION_HEALTH=unhealthy" >&2
+            return 1
           fi
 
-          local_release="$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3100/health)"
+          local_release="$(curl --fail --silent --show-error --max-time 10 ${probe_origin}/health)"
           printf '%s' "${local_release}" | grep -F '"status":"ok"' >/dev/null
           printf '%s' "${local_release}" | grep -F "\"version\":\"${IMAGE_TAG}\"" >/dev/null
 
-          curl --fail --silent --show-error --max-time 10             http://127.0.0.1:3100/health/data >/dev/null
+          if ! curl --fail --silent --show-error --max-time 10 "${probe_origin}/health/data" >/dev/null; then
+            echo "REG_RU_ROUTE_DATA_READINESS=failed" >&2
+            docker exec -i "${probe_container}" node --input-type=module - < "${DATA_PROBE}" || true
+            return 1
+          fi
+          docker exec -i "${probe_container}" node --input-type=module - < "${DATA_PROBE}"
 
-          callback_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             'http://127.0.0.1:3100/auth/callback')"
+          auth_channels="$(
+            docker exec -i "${probe_container}" node - <<'NODE'
+          (async () => {
+            const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            const publicKey =
+              process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+              process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+            if (!url || !serviceKey || !publicKey) {
+              process.stdout.write("config_missing config_missing");
+              return;
+            }
+
+            const admin = await fetch(
+              new URL("/auth/v1/admin/users?page=1&per_page=1", url),
+              {
+                signal: AbortSignal.timeout(10000),
+                redirect: "error",
+                headers: {
+                  apikey: serviceKey,
+                  Authorization: `Bearer ${serviceKey}`,
+                },
+              },
+            );
+            const adminBody = await admin.json();
+            if (!adminBody || typeof adminBody !== "object" || !Array.isArray(adminBody.users)) {
+              throw new Error("Unexpected Admin response shape");
+            }
+            const settings = await fetch(new URL("/auth/v1/settings", url), {
+              signal: AbortSignal.timeout(10000),
+              redirect: "error",
+              headers: { apikey: publicKey },
+            });
+            const settingsBody = await settings.json();
+            if (!settingsBody || typeof settingsBody !== "object" ||
+                !settingsBody.external || typeof settingsBody.external !== "object" ||
+                Array.isArray(settingsBody.external)) {
+              throw new Error("Unexpected public Auth response shape");
+            }
+            process.stdout.write(`${admin.status} ${settings.status}`);
+          })().catch(() => {
+            process.stdout.write("fetch_error fetch_error");
+          });
+          NODE
+          )"
+          read -r admin_status public_status <<< "${auth_channels}"
+          test "${admin_status}" = "200" || {
+            echo "Candidate Mercy GoTrue Admin channel failed with HTTP ${admin_status}." >&2
+            false
+          }
+          test "${public_status}" = "200" || {
+            echo "Candidate Mercy public Auth channel failed with HTTP ${public_status}." >&2
+            false
+          }
+          echo "REG_RU_AUTH_CHANNELS_VERIFIED admin=200 public=200"
+
+          callback_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             "${probe_origin}/auth/callback")"
           printf '%s\n' "${callback_headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
           callback_location="$(printf '%s\n' "${callback_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
           test "${callback_location}" = 'https://mercy.peerivo.net/auth?error=callback' || {
@@ -375,17 +543,22 @@ jobs:
             false
           }
 
-          peerivo_headers="$(curl --silent --show-error --max-time 10 --dump-header - --output /dev/null 'http://127.0.0.1:3100/auth/start?next=%2Fcabinet')"
+          peerivo_headers="$(curl --silent --show-error --max-time 10 --dump-header - --output /dev/null "${probe_origin}/auth/start?next=%2Fcabinet")"
           printf '%s\n' "${peerivo_headers}" | head -n 1 | grep -E ' 30[78] ' >/dev/null
           peerivo_location="$(printf '%s\n' "${peerivo_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
           printf '%s' "${peerivo_location}" | grep -F 'https://auth.peerivo.net/authorize?' >/dev/null
           printf '%s' "${peerivo_location}" | grep -F 'client_id=mercy' >/dev/null
           printf '%s' "${peerivo_location}" | grep -F 'code_challenge_method=S256' >/dev/null
 
-          redirect_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             -H "Host: ${RUSSIAN_HOST}"             'http://127.0.0.1:3100/requests?cutover_probe=1')"
+          redirect_headers="$(curl --silent --show-error --max-time 10             --dump-header - --output /dev/null             -H "Host: ${RUSSIAN_HOST}"             "${probe_origin}/requests?cutover_probe=1")"
           printf '%s\n' "${redirect_headers}" | head -n 1 | grep -E ' 308 ' >/dev/null
           redirect_location="$(printf '%s\n' "${redirect_headers}" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2; exit}')"
           test "${redirect_location}" = 'https://mercy.peerivo.net/requests?cutover_probe=1'
+
+          }
+
+          probe_application "${CANDIDATE_NAME}" http://127.0.0.1:3101
+          echo "REG_RU_STAGED_CANDIDATE_VERIFIED sha=${IMAGE_TAG}"
 
           if [ -n "${old_image}" ]; then
             cp -f "${PROD_ENV}" "${PREVIOUS_ENV}"
@@ -395,11 +568,26 @@ jobs:
             rm -f "${PREVIOUS_ENV}" "${PREVIOUS_IMAGE_FILE}"
           fi
 
+          # Arm rollback before the first destructive production-host action.
+          phase="switching"
+          production_changed=1
+          if [ -n "${old_id}" ]; then
+            docker stop "${old_id}" >/dev/null
+            docker rename "${old_id}" "${ROLLBACK_NAME}"
+          fi
+          start_container "${CONTAINER_NAME}" "${IMAGE}" "${NEXT_ENV}" 3100 unless-stopped
+          probe_application "${CONTAINER_NAME}" http://127.0.0.1:3100
+
           phase="promoting"
           mv -f "${NEXT_ENV}" "${PROD_ENV}"
           chmod 600 "${PROD_ENV}"
           printf '%s\n' "${IMAGE}" > "${CURRENT_IMAGE_FILE}"
 
+          remove_owned_container "${CANDIDATE_NAME}"
+          if [ -n "${old_id}" ]; then
+            test "$(docker inspect -f '{{.Id}}' "${ROLLBACK_NAME}")" = "${old_id}"
+            echo "REG_RU_ROLLBACK_CONTAINER_RETAINED"
+          fi
           phase="promoted"
           armed=0
           trap - EXIT HUP INT TERM
@@ -440,6 +628,7 @@ jobs:
           scp -q /tmp/mercy-image.tar.gz "${remote}:${REMOTE_DIR}/mercy-image.tar.gz"
           scp -q /tmp/mercy.env "${remote}:${REMOTE_DIR}/.env.next"
           scp -q /tmp/deploy-mercy.sh "${remote}:${REMOTE_DIR}/deploy-mercy.sh"
+          scp -q scripts/probe-mercy-public-data.mjs "${remote}:${REMOTE_DIR}/probe-mercy-public-data.mjs"
 
       - name: Stage REG.RU candidate with rollback
         shell: bash

@@ -373,6 +373,42 @@ class MenaionActivationIntegration(unittest.TestCase):
         m.Activation(self.docker, self.home).rollback()
         self.assert_restored()
 
+    def test_unknown_history_cannot_start_activation(self):
+        version = "20261006123456"
+        fixture_sql("insert into public.living_menaion_schema_migrations values ('" + version + "','" + "0" * 64 + "');")
+        try:
+            runner = m.Activation(self.docker, self.home)
+            self.assertIs(m.inspection.database_facts()["migration_history_exact"], False)
+            with self.assertRaises(m.Refused):
+                runner.activate(PASSWORD)
+            self.assertEqual(m.shared_fingerprint(self.docker.inspect(m.NAME)), m.shared_fingerprint(self.old))
+            self.assertTrue(self.docker.inspect(m.NAME)["State"]["Running"])
+            self.assertIsNone(self.docker.inspect(m.CANDIDATE, missing=True))
+            self.assertIsNone(self.docker.inspect(m.BACKUP, missing=True))
+            self.assertEqual(self.env_path.read_bytes(), self.original_env)
+            self.assertEqual(list((self.home/".living-menaion").iterdir()), [self.env_path])
+            self.assertEqual(fixture_sql("select not rolcanlogin and rolpassword is null from pg_authid where rolname='menaion_rest_authenticator';"), b"t")
+            self.assert_unrelated_unchanged()
+        finally:
+            fixture_sql("delete from public.living_menaion_schema_migrations where version='" + version + "';")
+
+    def test_ten_row_activation_and_unknown_future_history_recovery(self):
+        version, checksum = m.inspection.MODERATION_MIGRATION
+        fixture_sql("insert into public.living_menaion_schema_migrations values ('" + version + "','" + checksum + "');")
+        try:
+            # This public fixture establishes ledger/activation compatibility;
+            # actual private migration10 schema is tested by the separate harness.
+            runner = m.Activation(self.docker, self.home)
+            runner.activate(PASSWORD)
+            self.assertEqual(runner.state["phase"], "verified")
+            fixture_sql("insert into public.living_menaion_schema_migrations values ('20261006123456','" + "0" * 64 + "');")
+            m.Activation(self.docker, self.home).rollback()
+            self.assert_restored()
+            m.Activation(self.docker, self.home).rollback()
+            self.assert_restored()
+        finally:
+            fixture_sql("delete from public.living_menaion_schema_migrations where version in ('" + version + "','20261006123456');")
+
     def test_failure_at_each_durable_checkpoint_automatically_restores(self):
         phases = ("creating", "created", "password", "login", "stopping", "renaming_old",
                   "renaming_new", "starting", "writing_env", "verified")

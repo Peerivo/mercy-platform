@@ -384,7 +384,7 @@ class Activation:
         require(old["HostConfig"]["RestartPolicy"] == {"Name": "unless-stopped", "MaximumRetryCount": 0})
         db_facts = inspection.database_facts()
         for key in inspection.DB_FIELDS:
-            require(db_facts[key])
+            require(db_facts[key] is True)
         network = next(iter(old["NetworkSettings"]["Networks"]))
         project = db["Config"]["Labels"]["com.docker.compose.project"]
         shared = service_container(self.docker, project, "rest")

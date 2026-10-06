@@ -88,6 +88,18 @@ class FakeDocker:
         del self.items[target]
 
 
+class PreparationDocker(FakeDocker):
+    def __init__(self):
+        super().__init__()
+        self.items[DB_ID] = f.fixture()[1]
+        self.items[DB_ID]['Id'] = DB_ID
+
+    def request(self, method, path, body=None, missing=False):
+        if method == 'GET' and path.startswith('/images/'):
+            return copy.deepcopy(f.fixture()[2])
+        return super().request(method, path, body, missing)
+
+
 class FixtureActivation(m.Activation):
     def prepare(self):
         if self.journal_path.exists():
@@ -258,6 +270,47 @@ class RecoveryTests(unittest.TestCase):
         recovered.rollback(); self.assert_restored(docker, recovered)
         with self.assertRaises(m.Refused):
             FixtureActivation(docker, self.home).activate(PASSWORD)
+
+    def test_unknown_history_refuses_before_runtime_or_credential_effects(self):
+        for result in (False, None, 0, 1, 'true'):
+            with self.subTest(value=result):
+                docker = PreparationDocker(); before = copy.deepcopy(docker.items)
+                runner = m.Activation(docker, self.home)
+                facts = f.db_fixture(); facts['migration_history_exact'] = result
+                with patch.object(m.inspection, 'database_facts', return_value=facts), patch.object(m, 'service_container') as service:
+                    with self.assertRaises(m.Refused):
+                        runner.activate(PASSWORD)
+                    service.assert_not_called()
+                self.assertEqual(docker.items, before)
+                self.assertEqual(docker.events, [])
+                self.assertIsNone(runner.state)
+                self.assertEqual(list(runner.directory.iterdir()), [runner.env_path])
+                self.assertEqual(self.env_path.read_bytes(), fixture()[3])
+                self.password.assert_not_called(); self.disabled.assert_not_called()
+
+    def test_nine_and_ten_histories_allow_prepare_and_recovery_ignores_future_history(self):
+        for history in m.inspection.APPROVED_HISTORIES:
+            with self.subTest(rows=len(history)), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory); (home/'.living-menaion').mkdir(mode=0o700)
+                path = home/'.living-menaion/postgrest.env'; path.write_bytes(fixture()[3]); path.chmod(0o600)
+                docker = PreparationDocker(); runner = m.Activation(docker, home)
+                raw = f.db_fixture(raw=True)
+                raw['migration_history'] = [{'version': v, 'checksum': c} for v,c in history]
+                facts = m.inspection.validate_db_facts(raw)
+                def service(_docker, _project, name):
+                    return docker.inspect(SHARED_ID if name == 'rest' else KONG_ID)
+                with patch.object(m.inspection, 'database_facts', return_value=facts), patch.object(m, 'service_container', side_effect=service), patch.object(m, 'sql', side_effect=lambda query, *args: b'42\n' if query.startswith('select oid from') else b't\n'):
+                    runner.activate(PASSWORD)
+                self.assertEqual(runner.state['phase'], 'verified')
+                # Recovery must revoke the role and restore the old runtime even
+                # if an unrelated future migration makes activation refuse.
+                with patch.object(m.inspection, 'database_facts', side_effect=AssertionError('Recovery must not gate on new activation history')):
+                    recovered = m.Activation(docker, home)
+                    recovered.rollback(); recovered.rollback()
+                self.assertEqual(recovered.state['phase'], 'rolled_back')
+                self.assertEqual(docker.inspect(OLD_ID), fixture()[0])
+                self.assertEqual(path.read_bytes(), fixture()[3])
+                self.assertNotIn(NEW_ID, docker.items)
 
     def test_failure_before_and_after_each_docker_effect(self):
         points = ['create', 'old:stop', 'old:rename:'+m.BACKUP, 'new:rename:'+m.NAME, 'new:start']

@@ -3,6 +3,22 @@
 ## Status
 
 Migration `20261002184929` is already applied; no migration is added or rerun here.
+The runtime preflight accepts only the exact complete nine-row historical ledger,
+or the same nine rows plus reviewed migration10 `20261005073345` with SHA-256
+`ee2bf27553ca0a71baa275ad607b7ddbf0893e9e64d5687d8029d94bf592b499`.
+The database read is bounded to eleven rows (an eleventh always rejects), with
+version/checksum fields capped one character beyond their allowed lengths.
+All predecessor versions/checksums are copied from the pinned moderation transport
+manifest, never recalculated from normalized source. Missing, changed, duplicate,
+reordered or extra rows fail the activation gate before runtime/credential effects.
+Unknown future policy migrations are not implicitly accepted. INSPECT exposes only
+`migration_history_exact`, not the internal row list; its `activation_ready` remains
+false because inspection is diagnostic. This compatibility permits the reviewed
+moderation schema step before credential activation without loosening the ledger.
+It neither applies that migration nor establishes its live production state.
+Recovery keeps its retained-container/role identity checks and does not require
+activation's historical ledger gate: it must remain able to revoke/restore after
+subsequent database changes.
 The October 2 read-only preflight passed at commit `0120c2f9` but did not activate
 credentials or the form. Its `activation_ready=false` and headline blockers are
 fixed diagnostic-only fields, not proof of a detected leak. The inspector stays
@@ -106,7 +122,10 @@ container/env restoration, and the legacy query. Repeated ROLLBACK is supported.
 
 Only after the draft is reviewed and explicitly authorized for production:
 
-1. Merge the reviewed change through the normal PR process.
+1. Merge the reviewed change through the normal PR process. Complete the separate
+   exact-main migration10 INSPECT/APPLY/INSPECT sequence when enabling moderation;
+   this runtime gate supports the verified nine- or ten-row history. Any new main
+   revision requires fresh exact-main inspection. No unknown migration is allowed.
 2. Save the dedicated password in Mercy's `production` GitHub Environment secret
    above. Personally start `Activate or roll back Menaion runtime` on `main`, choose
    `ACTIVATE`, and paste the exact current main commit SHA (not a password) into
@@ -138,3 +157,17 @@ References: [psql password command](https://www.postgresql.org/docs/15/app-psql.
 [PostgREST transactions](https://docs.postgrest.org/en/v12/references/transactions.html),
 [Docker Engine API](https://docs.docker.com/reference/api/engine/version/v1.45/),
 [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
+
+### October 6 compatibility verification
+
+The PR was reconciled with Mercy main `6e980c5b127fa8959395b2d87e6d6f7f786df0dc`,
+preserving all REG.RU, Auth and Notify changes. Before the correction, a real
+disposable PostgreSQL17 run passed the nine-row preflight, applied canonical
+migration10 transactionally, and reproduced the ten-row runtime refusal. The same
+scenario passes after the fix, including per-predecessor digest drift/omissions,
+unknown eleventh row, migration10 digest tamper, atomic rollback and no replay.
+Offline activation tests cover exact nine/ten histories, refusal before any effects,
+and recovery after future history drift. The Docker suite adds equivalent real
+runtime cases; those new cases still require a fresh secretless PR CI run.
+No production dispatch, credential entry, runtime activation or public-form success
+is established by this local preparation.

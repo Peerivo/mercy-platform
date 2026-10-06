@@ -87,9 +87,16 @@ as $$ select menaion_feedback_private.submit_correction(corrected_word, civil_da
 revoke all on function menaion_feedback.submit_pronunciation_correction(text, text, text) from public;
 grant execute on function menaion_feedback.submit_pronunciation_correction(text, text, text) to menaion_feedback_submit;
 
--- Synthetic ledger entry supports the real read-only inspector. It is not proof
--- of production predecessor history, which the separate migration workflow owns.
+-- Synthetic complete historical ledger supports the real read-only inspector.
+-- These pinned hashes are public test inputs, not proof of live deployment.
 create table public.living_menaion_schema_migrations (version text primary key, checksum text not null);
-insert into public.living_menaion_schema_migrations values (
-  '20261002184929', '15265e48dcbf87b24b7aed34c296c2a4a83cbba132a5e33bffc0cfdd9469444c'
-);
+insert into public.living_menaion_schema_migrations values
+  ('20260916193000', '3b34be574e02d0a15ad4c7e2d2b73dcc5b78b55b5bac8d303462eca299f31c9c'),
+  ('20260917094000', 'c2cabd0b8fed228e9214117a3fbfe768df1d96724dc0614f9dd4da38ba9704cf'),
+  ('20260917224000', '0c67674026043a80021df34bbbb824aee842afe37fb8eea88f21ff5d0e7c1e45'),
+  ('20260917231000', '0a3be17f25f9e423c773c232eafb8e036c42ff7ce82401dcb771c5a3a3ab5551'),
+  ('20260918022500', 'aa8be3c8305818638d6a77e5602adaf95ac8ed1ff5af6e1a10fd41ef8ab480e4'),
+  ('20260918213000', 'c93038b2dddfbf75b38374dca8c850f036874ed67248550a31848b17a2eddaf6'),
+  ('20260927140000', 'd6ffce4f79c96d24c88759edbff989373a96364871027f87e8c7bafff2905761'),
+  ('20260929193000', '6f945a29618a646d1f1e3d8c3be89fbbab1883fec8bc0e911b7494e9df19bddc'),
+  ('20261002184929', '15265e48dcbf87b24b7aed34c296c2a4a83cbba132a5e33bffc0cfdd9469444c');

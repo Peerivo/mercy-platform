@@ -8,6 +8,8 @@ on:
       - 'scripts/activate-menaion-runtime.py'
       - 'scripts/inspect-menaion-runtime-handoff.py'
       - 'tests/test_menaion_activation.py'
+      - 'tests/test_menaion_runtime_handoff.py'
+      - 'ops/living-menaion/moderation-predecessors.json'
       - 'tests/integration_menaion_activation.py'
       - 'tests/fixtures/menaion_activation.sql'
   workflow_dispatch:
