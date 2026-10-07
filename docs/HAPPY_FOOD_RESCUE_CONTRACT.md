@@ -48,6 +48,9 @@ Canonical invocation:
 npx vitest run tests/happy-food-rescue.staging-e2e.test.ts
 ```
 
+Repository execution path: `.github/workflows/happy-food-rescue-staging-e2e.yml` is protected by the GitHub `staging` environment. It supports an explicit `workflow_dispatch` bound to the exact current `main` SHA and a one-shot `push main` trigger scoped only to `.deploy/happy-food-rescue-staging-e2e`. The PR #229 merge adds that marker once so the first non-skipped staging run can be produced without turning ordinary pushes or CI into external-mutation events. The workflow accepts either the Mercy-prefixed staging secret names or the compatible Happy names, but never writes credential values to the repository, summaries or logs.
+
+
 A staging E2E claim is accepted only when all of the following are bound together: the exact Mercy head, the independently successful Happy staging deployment for the pinned origin/revision, a non-skipped harness run, both negative cross-surface `401` checks, and the successful create -> reserve -> replay -> partial-outcome -> quantity/accounting assertions. Harness presence, a skipped test, default CI, or a Vercel Preview must never be represented as completed staging E2E evidence.
 
 It does **not** yet add Mercy database tables, user-facing Food Rescue UI, automatic matching/mission orchestration or Happy -> Mercy inbound event persistence.
