@@ -1,0 +1,101 @@
+name: Happy Food Rescue Staging E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA to exercise
+        required: true
+        type: string
+      confirm:
+        description: Type RUN_HAPPY_STAGING_E2E
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".deploy/happy-food-rescue-staging-e2e"
+
+concurrency:
+  group: mercy-happy-food-rescue-staging-e2e
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  staging-e2e:
+    name: Exercise Mercy against Happy staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    env:
+      HAPPY_FOOD_RESCUE_STAGING_E2E: "true"
+      HAPPY_FOOD_RESCUE_ENABLED: "true"
+      HAPPY_FOOD_RESCUE_URL: "https://happy-food-staging-staging.up.railway.app"
+      HAPPY_FOOD_RESCUE_STAGING_REVISION: "0917bb8f7b43805f02242db8b70d1733da6c25f5"
+      HAPPY_FOOD_RESCUE_API_TOKEN: ${{ secrets.HAPPY_FOOD_RESCUE_API_TOKEN || secrets.FOOD_RESCUE_API_TOKEN }}
+      HAPPY_FOOD_RESCUE_TOKEN: ${{ secrets.HAPPY_FOOD_RESCUE_TOKEN || secrets.FOOD_RESCUE_MERCY_TOKEN }}
+
+    steps:
+      - name: Require bounded staging invocation
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          case "${GITHUB_EVENT_NAME}" in
+            workflow_dispatch)
+              test "${CONFIRM}" = "RUN_HAPPY_STAGING_E2E"
+              test "${EXPECTED_SHA}" = "${GITHUB_SHA}"
+              ;;
+            push)
+              ;;
+            *)
+              echo "Unsupported invocation" >&2
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify one-shot trigger and staging credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            grep -Fx 'happy_sha=0917bb8f7b43805f02242db8b70d1733da6c25f5' .deploy/happy-food-rescue-staging-e2e >/dev/null
+            grep -Fx 'purpose=mercy-pr-229-live-staging-e2e' .deploy/happy-food-rescue-staging-e2e >/dev/null
+          fi
+          test "${#HAPPY_FOOD_RESCUE_API_TOKEN}" -ge 32
+          test "${#HAPPY_FOOD_RESCUE_TOKEN}" -ge 32
+          test "${HAPPY_FOOD_RESCUE_API_TOKEN}" != "${HAPPY_FOOD_RESCUE_TOKEN}"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run non-skipped Happy staging E2E
+        run: ./node_modules/.bin/vitest run tests/happy-food-rescue.staging-e2e.test.ts
+
+      - name: Record safe staging evidence
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Happy Food Rescue staging E2E'
+            echo
+            echo "- Mercy SHA: \`${GITHUB_SHA}\`"
+            echo "- Happy staging SHA: \`${HAPPY_FOOD_RESCUE_STAGING_REVISION}\`"
+            echo '- Credential boundary: integration→merchant 401 and merchant→integration 401'
+            echo '- Scenario: create → reserve → replay → partial outcome → accounting'
+            echo '- Result: non-skipped live staging harness passed'
+          } >> "${GITHUB_STEP_SUMMARY}"

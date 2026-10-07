@@ -1,0 +1,46 @@
+{
+  "taskId": "happy-food-rescue-staging-e2e-boundary-20261006",
+  "repository": "Peerivo/mercy-platform",
+  "environment": "Mercy PR #229 code and Happy Food Rescue Railway staging",
+  "acceptedScope": "Harden PR #229 by separating merchant and Mercy integration credentials, proving negative cross-surface authorization before mutation, and documenting when the staging harness may count as E2E evidence.",
+  "authorizationSource": "Owner request in this chat on 2026-10-06.",
+  "global": {
+    "version": "1.12.0",
+    "gitSha": "5ac07019c004415ed8eb82222f6bdc51b6a270aa",
+    "artifactSha256": "9ff754408729013041a0e442ed30002a644df14bc1b390ebcb64ab86c3f0426b"
+  },
+  "beforeSha": "1518e0956b1011ff3310811ea18673af38d9189e",
+  "decisions": [
+    "Continue the existing current-main-based PR #229 branch rather than create a dependent PR.",
+    "Pin the live harness to https://happy-food-staging-staging.up.railway.app and expected Happy staging revision 0917bb8f7b43805f02242db8b70d1733da6c25f5.",
+    "Treat HAPPY_FOOD_RESCUE_API_TOKEN and HAPPY_FOOD_RESCUE_TOKEN as distinct least-privilege staging credentials and fail before mutation if they are equal.",
+    "Exercise integration-token-on-merchant using read-only GET_CAPABILITIES and merchant-token-on-integration using an invalid envelope so negative boundary checks cannot mutate state even when authorization is broken.",
+    "A skipped/default CI run, Vercel Preview, test-file presence, or declared revision variable is not cross-system E2E evidence.",
+    "Accept E2E only when the same Mercy head non-skipped run is paired with independent successful Happy staging deployment evidence for the exact pinned SHA and origin."
+  ],
+  "scenarios": [
+    {
+      "id": "credential-boundary",
+      "kind": "staging",
+      "acceptance": "Before mutation, tokens are distinct; integration credential is 401 on merchant surface and merchant credential is 401 on integration surface."
+    },
+    {
+      "id": "reservation-replay-outcome",
+      "kind": "staging",
+      "acceptance": "Create donation lot, reserve through Mercy, replay idempotently, attest partial delivery, and verify final version, availability, donated quantity, custody quantity and completed reservation."
+    },
+    {
+      "id": "evidence-integrity",
+      "kind": "delivery",
+      "acceptance": "Any E2E claim binds exact Mercy head, pinned Happy origin/revision, independent successful Happy deploy evidence and a non-skipped live run; skipped/default CI remains explicitly unverified."
+    }
+  ],
+  "excluded": [
+    "production enablement",
+    "production mutation",
+    "credential creation or rotation",
+    "database or schema changes",
+    "regional rollout approval"
+  ],
+  "completion": "Report implementation, PR/merge state, live staging execution and accepted E2E evidence as separate facts."
+}
