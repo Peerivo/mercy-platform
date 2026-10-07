@@ -1,0 +1,39 @@
+{
+  "taskId": "happy-food-rescue-staging-runner-20261007",
+  "repository": "Peerivo/mercy-platform",
+  "environment": "Peerivo Happy Food Rescue Railway staging",
+  "acceptedScope": "Provide a secret-preserving one-off execution path for the already-merged Mercy/Happy staging harness after the GitHub staging environment proved to have no Happy credentials.",
+  "authorizationSource": "Owner instruction 'Делай' in the continuing Mercy PR #229 task.",
+  "global": {
+    "version": "1.12.0",
+    "gitSha": "5ac07019c004415ed8eb82222f6bdc51b6a270aa",
+    "artifactSha256": "9ff754408729013041a0e442ed30002a644df14bc1b390ebcb64ab86c3f0426b"
+  },
+  "beforeSha": "8ea79ec100f4c027c2b69f7350210466d4d817ed",
+  "decisions": [
+    "Do not copy or reveal Happy staging secret values into GitHub, ChatGPT, logs or repository content.",
+    "Use Railway service-variable references from the temporary runner to the existing happy-food-staging credential variables.",
+    "Run the exact Mercy harness from an exact commit using a dedicated non-root test image rather than the production Next.js Dockerfile.",
+    "Treat the failed GitHub staging run as fail-closed preflight evidence only, not E2E success.",
+    "Delete the temporary Railway runner after evidence is collected."
+  ],
+  "scenarios": [
+    {
+      "id": "secret-reference",
+      "kind": "staging",
+      "acceptance": "Runner sees two distinct credentials through Railway references without values being copied or emitted."
+    },
+    {
+      "id": "live-harness",
+      "kind": "staging",
+      "acceptance": "Exact Mercy commit runs the non-skipped Vitest harness and passes cross-surface 401 plus reservation/replay/outcome/accounting assertions."
+    }
+  ],
+  "excluded": [
+    "production deployment",
+    "production credentials",
+    "database/schema changes",
+    "regional rollout approval"
+  ],
+  "completion": "Report runner build separately from actual Vitest outcome; only the latter can establish staging E2E evidence."
+}
