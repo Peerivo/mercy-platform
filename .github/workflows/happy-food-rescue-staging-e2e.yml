@@ -84,7 +84,7 @@ jobs:
       - run: npm ci
 
       - name: Run non-skipped Happy staging E2E
-        run: npx vitest run tests/happy-food-rescue.staging-e2e.test.ts
+        run: ./node_modules/.bin/vitest run tests/happy-food-rescue.staging-e2e.test.ts
 
       - name: Record safe staging evidence
         if: success()

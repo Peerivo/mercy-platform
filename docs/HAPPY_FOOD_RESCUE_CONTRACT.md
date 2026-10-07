@@ -45,7 +45,7 @@ The two bearer credentials must be different and least-privilege for their surfa
 Canonical invocation:
 
 ```sh
-npx vitest run tests/happy-food-rescue.staging-e2e.test.ts
+./node_modules/.bin/vitest run tests/happy-food-rescue.staging-e2e.test.ts
 ```
 
 Repository execution path: `.github/workflows/happy-food-rescue-staging-e2e.yml` is protected by the GitHub `staging` environment. It supports an explicit `workflow_dispatch` bound to the exact current `main` SHA and a one-shot `push main` trigger scoped only to `.deploy/happy-food-rescue-staging-e2e`. The PR #229 merge adds that marker once so the first non-skipped staging run can be produced without turning ordinary pushes or CI into external-mutation events. The workflow accepts either the Mercy-prefixed staging secret names or the compatible Happy names, but never writes credential values to the repository, summaries or logs.
