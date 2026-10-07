@@ -175,3 +175,12 @@ The harness has two separate runtime-only staging credentials: `HAPPY_FOOD_RESCU
 Live requests use a bounded abort timeout, successful external responses are schema-validated before consumption, and failures expose only status plus an allowlisted error code. The outcome timestamp is captured when attestation is actually sent rather than fabricated in the future.
 
 The current repository state documents and implements the harness; it does **not** by itself claim a completed cross-system E2E. Accepted E2E evidence must bind the exact Mercy head, the independent successful Happy deployment for the exact pinned origin/revision, and a non-skipped live harness run that passes both cross-surface authorization negatives plus the create -> reserve -> idempotent replay -> partial outcome -> final quantity/accounting scenario. Default CI, a skipped test, a Vercel Preview, an environment variable alone, or the presence of the test file is not sufficient evidence.
+
+
+## Happy Food Rescue Railway staging runner
+
+The first merged GitHub staging execution for PR #229 (run `37632671960`) failed closed before any Happy request because the Mercy GitHub `staging` environment did not contain either Happy credential. That run is not E2E evidence and performed no external mutation.
+
+To avoid duplicating or exposing Happy secrets, `Dockerfile.staging-e2e` defines a non-root one-shot runner that installs the repository lockfile exactly and executes only `tests/happy-food-rescue.staging-e2e.test.ts`. The runner must be built from an exact Mercy commit and receive `HAPPY_FOOD_RESCUE_API_TOKEN` and `HAPPY_FOOD_RESCUE_TOKEN` only through Railway variable references to the existing `happy-food-staging` service variables `FOOD_RESCUE_API_TOKEN` and `FOOD_RESCUE_MERCY_TOKEN`. Secret values must not be copied into GitHub, ChatGPT, logs, repository files or artifacts.
+
+A Railway build/deploy acknowledgement is not E2E evidence. Acceptance still requires the exact test process to run non-skipped and pass the two cross-surface 401 checks plus create -> reserve -> idempotent replay -> partial outcome -> final quantity/accounting assertions.
