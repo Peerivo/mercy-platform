@@ -4,14 +4,24 @@ import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 import { requestSchema } from "@/lib/validation";
 import { getRequestConsentVersion } from "@/lib/request-consent";
+import { helpRequestValidationMessage } from "@/lib/request-form-feedback";
 
-export async function createRequest(fd: FormData) {
+export type RequestActionState = {
+  ok: boolean;
+  message: string;
+};
+
+export const initialRequestActionState: RequestActionState = {
+  ok: false,
+  message: "",
+};
+
+export async function createRequest(
+  _previousState: RequestActionState,
+  fd: FormData,
+): Promise<RequestActionState> {
   const s = await serverSupabase();
-
-  const {
-    data: { user },
-  } = await s.auth.getUser();
-
+  const { data: { user } } = await s.auth.getUser();
   if (!user) redirect("/auth");
 
   const parsed = requestSchema.safeParse({
@@ -27,21 +37,26 @@ export async function createRequest(fd: FormData) {
     consent: fd.get("consent") === "on",
   });
 
-  if (!parsed.success) redirect("/help?error=validation");
+  if (!parsed.success) {
+    return { ok: false, message: helpRequestValidationMessage(parsed.error.issues) };
+  }
 
   const request = { ...parsed.data };
   delete (request as Partial<typeof request>).consent;
-
-  const consentVersion = getRequestConsentVersion(
-    parsed.data.country,
-  );
+  const consentVersion = getRequestConsentVersion(parsed.data.country);
 
   const { data, error } = await s.rpc("create_help_request", {
     payload: request,
     consent_version: consentVersion,
   });
 
-  if (error) redirect("/help?error=save");
+  // Keep form values in client state on storage failures, never redirect with user text.
+  if (error || typeof data !== "string") {
+    return {
+      ok: false,
+      message: "Не удалось сохранить просьбу. Ваш текст остался в форме. Повторите попытку чуть позже.",
+    };
+  }
 
   redirect(`/cabinet/requests/${data}`);
 }
