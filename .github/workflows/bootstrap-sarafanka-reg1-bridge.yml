@@ -137,10 +137,10 @@ jobs:
           test "$gateway" != "0.0.0.0"
           test "$gateway" != "127.0.0.1"
 
-          if ss -ltnH '( sport = :55433 )' | grep -q .; then
-            existing="$(ss -ltnH '( sport = :55433 )' | awk '{print $4}')"
-            test "$existing" = "$gateway:55433" || {
-              echo "Port 55433 occupied by unexpected listener: $existing" >&2
+          if ss -ltnH '( sport = :55434 )' | grep -q .; then
+            existing="$(ss -ltnH '( sport = :55434 )' | awk '{print $4}')"
+            test "$existing" = "$gateway:55434" || {
+              echo "Port 55434 occupied by unexpected listener: $existing" >&2
               exit 1
             }
           fi
@@ -161,7 +161,7 @@ jobs:
 
           [Service]
           Type=simple
-          ExecStart=/usr/bin/ssh -NT -F /dev/null -i /root/.ssh/sarafanka-beget-tunnel -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/sarafanka-beget-known-hosts -o GlobalKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L $gateway:55433:127.0.0.1:55432 -L 127.0.0.1:58001:127.0.0.1:58000 $beget_user@45.144.176.213
+          ExecStart=/usr/bin/ssh -NT -F /dev/null -i /root/.ssh/sarafanka-beget-tunnel -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/sarafanka-beget-known-hosts -o GlobalKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L $gateway:55434:127.0.0.1:55432 -L 127.0.0.1:58001:127.0.0.1:58000 $beget_user@45.144.176.213
           Restart=always
           RestartSec=3
 
@@ -175,7 +175,7 @@ jobs:
 
           ok=0
           for _ in $(seq 1 20); do
-            if systemctl is-active --quiet peerivo-sarafanka-beget-tunnel.service               && ss -ltnH '( sport = :55433 )' | awk '{print $4}' | grep -Fx "$gateway:55433" >/dev/null               && ss -ltnH '( sport = :58001 )' | awk '{print $4}' | grep -Fx '127.0.0.1:58001' >/dev/null; then
+            if systemctl is-active --quiet peerivo-sarafanka-beget-tunnel.service               && ss -ltnH '( sport = :55434 )' | awk '{print $4}' | grep -Fx "$gateway:55434" >/dev/null               && ss -ltnH '( sport = :58001 )' | awk '{print $4}' | grep -Fx '127.0.0.1:58001' >/dev/null; then
               ok=1
               break
             fi
@@ -195,18 +195,18 @@ jobs:
             exit 1
           fi
 
-          docker run --rm --add-host=host.docker.internal:host-gateway postgres:17-alpine             pg_isready -h host.docker.internal -p 55433 -d sarafanka >/dev/null
+          docker run --rm --add-host=host.docker.internal:host-gateway postgres:17-alpine             pg_isready -h host.docker.internal -p 55434 -d sarafanka >/dev/null
 
           api="$(curl -fsS --max-time 5 http://127.0.0.1:58001/)"
           test "$api" = "Sarafanka Supabase"
 
-          public_db="$(ss -ltnH '( sport = :55433 )' | awk '{print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|95\.163\.223\.68):55433$' || true)"
+          public_db="$(ss -ltnH '( sport = :55434 )' | awk '{print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|95\.163\.223\.68):55434$' || true)"
           test -z "$public_db"
           public_api="$(ss -ltnH '( sport = :58001 )' | awk '{print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|95\.163\.223\.68):58001$' || true)"
           test -z "$public_api"
 
           echo "SARAFANKA_TUNNEL_OK"
-          echo "DB_BIND=$gateway:55433"
+          echo "DB_BIND=$gateway:55434"
           echo "API_BIND=127.0.0.1:58001"
           REMOTE
 
@@ -235,13 +235,13 @@ jobs:
           case "$service" in
             *$'\n'*|*$'\r'*) exit 1 ;;
           esac
-          printf 'DATABASE_URL=postgresql://postgres:%s@host.docker.internal:55433/sarafanka?sslmode=disable\n' "$pgpass"
+          printf 'DATABASE_URL=postgresql://postgres:%s@host.docker.internal:55434/sarafanka?sslmode=disable\n' "$pgpass"
           printf 'NEXT_PUBLIC_SUPABASE_URL=https://sarafan.peerivo.net/supabase\n'
           printf 'SUPABASE_SECRET_KEY=%s\n' "$service"
           REMOTE
 
           test "$(wc -l < "$tmp" | tr -d ' ')" = 3
-          grep -q '^DATABASE_URL=postgresql://postgres:[0-9a-f]\{64\}@host\.docker\.internal:55433/sarafanka?sslmode=disable$' "$tmp"
+          grep -q '^DATABASE_URL=postgresql://postgres:[0-9a-f]\{64\}@host\.docker\.internal:55434/sarafanka?sslmode=disable$' "$tmp"
           grep -qx 'NEXT_PUBLIC_SUPABASE_URL=https://sarafan.peerivo.net/supabase' "$tmp"
           grep -q '^SUPABASE_SECRET_KEY=.' "$tmp"
           chmod 600 "$tmp"
@@ -282,7 +282,7 @@ jobs:
           pgpass="${pgpass%%@*}"
           [[ "$pgpass" =~ ^[0-9a-f]{64}$ ]]
 
-          result="$(docker run --rm --add-host=host.docker.internal:host-gateway -e PGPASSWORD="$pgpass" postgres:17-alpine             psql -X -h host.docker.internal -p 55433 -U postgres -d sarafanka -Atc             "select current_database() || '|' || (select count(*) from public.profiles)::text")"
+          result="$(docker run --rm --add-host=host.docker.internal:host-gateway -e PGPASSWORD="$pgpass" postgres:17-alpine             psql -X -h host.docker.internal -p 55434 -U postgres -d sarafanka -Atc             "select current_database() || '|' || (select count(*) from public.profiles)::text")"
           test "$result" = "sarafanka|0"
           unset pgpass dburl
           rm -f "$incoming"
