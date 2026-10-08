@@ -52,13 +52,13 @@ test("email-based admin roles and volunteer directory fit mobile/tablet/desktop"
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/staff/roles");
     await expect(page.getByRole("heading", { name: "Роли и доступ" })).toBeVisible();
-    await expect(page.locator("body").evaluate(e => e.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(await page.locator("body").evaluate(e => e.scrollWidth <= window.innerWidth)).toBe(true);
     await expect(page.getByLabel("Email пользователя")).toBeVisible();
 
     await page.goto("/staff/volunteers");
     await expect(page.getByRole("heading", { name: "Волонтёрская служба" })).toBeVisible();
     await expect(page.getByLabel("Город")).toBeVisible();
-    await expect(page.locator("body").evaluate(e => e.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(await page.locator("body").evaluate(e => e.scrollWidth <= window.innerWidth)).toBe(true);
   }
   await page.goto("/staff/volunteer-offers");
   await expect(page.getByRole("heading", { name: "Модерация предложений помощи" })).toBeVisible();
