@@ -196,7 +196,6 @@ as $$
           (r.role='ADMIN' and private.has_mercy_role('ADMIN'::public.mercy_role,uid))
           or (
             r.role='COORDINATOR'
-            and true
             and private.has_mercy_role('CURATOR'::public.mercy_role,uid)
           )
         )
@@ -231,7 +230,6 @@ as $$
               and a.completed_at is null
               and a.revoked_at is null
               and vp.service_status='ACTIVE'
-              and true
               and private.has_mercy_role('VOLUNTEER'::public.mercy_role,uid)
           )
         )
@@ -255,8 +253,7 @@ set search_path=''
 as $$
   select case
     when private.is_admin() then 'ADMIN'::public.staff_role
-    when true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,auth.uid())
+    when private.has_mercy_role('CURATOR'::public.mercy_role,auth.uid())
       then 'COORDINATOR'::public.staff_role
     else null
   end;
@@ -279,7 +276,6 @@ as $$
       (r.role='ADMIN' and private.has_mercy_role('ADMIN'::public.mercy_role,r.user_id))
       or (
         r.role='COORDINATOR'
-        and true
         and private.has_mercy_role('CURATOR'::public.mercy_role,r.user_id)
       )
     )
@@ -339,8 +335,7 @@ begin
   if not (
     private.has_mercy_role('ADMIN'::public.mercy_role,new_coordinator)
     or (
-      true
-      and private.has_mercy_role('CURATOR'::public.mercy_role,new_coordinator)
+      private.has_mercy_role('CURATOR'::public.mercy_role,new_coordinator)
     )
   ) then
     raise exception 'curator role required';
@@ -455,8 +450,7 @@ begin
 
   caller_admin := private.is_admin(caller);
   caller_curator :=
-    true
-    and private.has_mercy_role('CURATOR'::public.mercy_role,caller);
+    private.has_mercy_role('CURATOR'::public.mercy_role,caller);
 
   if not caller_admin
      and not (caller_curator and target_role in ('VOLUNTEER','PATRON')) then
@@ -604,8 +598,7 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then
     raise exception 'curator required';
@@ -635,7 +628,6 @@ begin
   join public.volunteer_profiles vp on vp.user_id=u.id
   left join public.profiles p on p.id=u.id
   where private.has_mercy_role('VOLUNTEER'::public.mercy_role,u.id)
-    and true
     and (clean_city is null or lower(coalesce(p.city,'')) like '%' || lower(clean_city) || '%')
     and (status_filter is null or vp.service_status=status_filter)
     and (clean_category is null or clean_category=any(vp.service_categories))
@@ -669,8 +661,7 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then raise exception 'curator required'; end if;
 
@@ -718,8 +709,7 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then raise exception 'curator required'; end if;
 
@@ -741,7 +731,6 @@ begin
   left join public.profiles p on p.id=u.id
   where u.id=target_user
     and private.has_mercy_role('VOLUNTEER'::public.mercy_role,u.id)
-    and true
   limit 1;
 end;
 $$;
@@ -766,8 +755,7 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then raise exception 'curator required'; end if;
   return query
@@ -803,8 +791,7 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then raise exception 'curator required'; end if;
   return query
@@ -838,8 +825,7 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then raise exception 'curator required'; end if;
   return query
@@ -867,8 +853,7 @@ as $$
 declare caller uuid := auth.uid();
 declare caller_admin boolean := private.is_admin(caller);
 declare caller_curator boolean :=
-  true
-  and private.has_mercy_role('CURATOR'::public.mercy_role,caller);
+  private.has_mercy_role('CURATOR'::public.mercy_role,caller);
 begin
   if caller is null or not (caller_admin or caller_curator) then raise exception 'curator required'; end if;
 
@@ -906,13 +891,11 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then raise exception 'curator required'; end if;
   if length(clean_reason) not between 3 and 500 then raise exception 'reason required'; end if;
-  if not private.has_mercy_role('VOLUNTEER'::public.mercy_role,target_user)
-     or not true then raise exception 'volunteer role required'; end if;
+  if not private.has_mercy_role('VOLUNTEER'::public.mercy_role,target_user) then raise exception 'volunteer role required'; end if;
   if categories is null or cardinality(categories)>12 then raise exception 'invalid categories'; end if;
   select c into invalid_category
   from unnest(categories) c
@@ -960,8 +943,7 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then raise exception 'curator required'; end if;
   if not private.has_mercy_role('VOLUNTEER'::public.mercy_role,target_user) then raise exception 'volunteer required'; end if;
@@ -1004,8 +986,7 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then raise exception 'curator required'; end if;
   if length(clean_reason) not between 3 and 500 then raise exception 'reason required'; end if;
@@ -1090,8 +1071,7 @@ begin
   if not (
     private.is_admin(caller)
     or (
-      true
-      and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+      private.has_mercy_role('CURATOR'::public.mercy_role,caller)
       and private.is_active_coordinator(case_id,caller)
     )
   ) then raise exception 'case curator required'; end if;
@@ -1128,8 +1108,7 @@ declare
   clean_summary text := trim(coalesce(incident_summary,''));
   caller_admin boolean := private.is_admin(caller);
   caller_curator boolean :=
-    true
-    and private.has_mercy_role('CURATOR'::public.mercy_role,caller);
+    private.has_mercy_role('CURATOR'::public.mercy_role,caller);
   result_id uuid;
 begin
   if caller is null or not (
@@ -1177,8 +1156,7 @@ begin
      or not (
        private.is_admin(caller)
        or (
-         true
-         and private.has_mercy_role('CURATOR'::public.mercy_role,caller)
+         private.has_mercy_role('CURATOR'::public.mercy_role,caller)
        )
      ) then raise exception 'curator required'; end if;
   if length(clean_resolution) not between 3 and 1000 then raise exception 'resolution required'; end if;
