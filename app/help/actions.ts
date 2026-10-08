@@ -11,11 +11,6 @@ export type RequestActionState = {
   message: string;
 };
 
-export const initialRequestActionState: RequestActionState = {
-  ok: false,
-  message: "",
-};
-
 export async function createRequest(
   _previousState: RequestActionState,
   fd: FormData,
