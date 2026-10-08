@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "taskId": "mercy-v1-email-roles-20261008",
+  "repository": "Peerivo/mercy-platform",
+  "baseRef": "main",
+  "baseSha": "649c2f2f4acff157efcd3827dc6893ef238ae6d3",
+  "environment": {
+    "name": "github-ci-disposable-supabase",
+    "kind": "local"
+  },
+  "scenarios": [
+    {
+      "id": "role-admin-grant",
+      "kind": "behavior",
+      "description": "Only admin assigns curator/admin; confirmed email is required and grants are audited"
+    },
+    {
+      "id": "role-curator-volunteer",
+      "kind": "behavior",
+      "description": "Curator grants volunteer/patron but cannot grant admin or self-elevate"
+    },
+    {
+      "id": "volunteer-activation",
+      "kind": "behavior",
+      "description": "Curator activates role holder and filters volunteers; outsiders cannot retrieve list or contacts"
+    },
+    {
+      "id": "case-owner-visitor",
+      "kind": "behavior",
+      "description": "Request submitter is functional VISITOR without any ESIA identity link"
+    },
+    {
+      "id": "case-assignment-private",
+      "kind": "behavior",
+      "description": "Only active assigned volunteer can view/message case without changing status or viewing other cases"
+    },
+    {
+      "id": "incident-suspension",
+      "kind": "behavior",
+      "description": "Incident suspends access; resolving without explicit curator reactivation does not restore access"
+    },
+    {
+      "id": "assignment-completion",
+      "kind": "behavior",
+      "description": "Finishing appointment revokes the volunteer private-case access"
+    },
+    {
+      "id": "moderation-preserved",
+      "kind": "behavior",
+      "description": "Admin volunteer-offer moderation remains separate from volunteer role grants"
+    },
+    {
+      "id": "roles-ui-320",
+      "kind": "browser",
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "description": "Role and volunteer directory forms fit width 320 without horizontal overflow; all actions remain accessible"
+    },
+    {
+      "id": "roles-ui-390",
+      "kind": "browser",
+      "viewport": {
+        "width": 390,
+        "height": 800
+      },
+      "description": "Role and volunteer directory forms fit width 390 without horizontal overflow; all actions remain accessible"
+    },
+    {
+      "id": "roles-ui-768",
+      "kind": "browser",
+      "viewport": {
+        "width": 768,
+        "height": 800
+      },
+      "description": "Role and volunteer directory forms fit width 768 without horizontal overflow; all actions remain accessible"
+    },
+    {
+      "id": "roles-ui-1440",
+      "kind": "browser",
+      "viewport": {
+        "width": 1440,
+        "height": 800
+      },
+      "description": "Role and volunteer directory forms fit width 1440 without horizontal overflow; all actions remain accessible"
+    }
+  ],
+  "regressions": [],
+  "decisions": [
+    {
+      "id": "scope-no-identity-integration",
+      "description": "Mercy MVP v1 does not integrate ESIA and privileged role activation uses confirmed account email plus role approval."
+    },
+    {
+      "id": "scope-no-alexandra-home-workflow",
+      "description": "Mercy MVP v1 does not implement Alexandra-specific home questionnaire, mandatory video call or pair visit requirements."
+    },
+    {
+      "id": "no-old-pr",
+      "description": "Do not merge PR #125; prepare distinct draft PR #243 branched from actual main. Do not merge without new user directive."
+    },
+    {
+      "id": "retain-privacy",
+      "description": "Maintain case-scoped audited access, contact privacy, consent and existing moderation."
+    }
+  ]
+}
