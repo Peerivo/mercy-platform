@@ -155,15 +155,23 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p1.getByLabel("Описание").fill("This anonymous submission must never be stored");
     await p1.getByLabel(/Я согласен/).check();
     await p1.getByRole("button", { name: "Опубликовать просьбу" }).click();
-    await expect(p1).toHaveURL(/\/auth/);
-    await p1.getByLabel("Email").fill(firstEmail);
-    await p1.getByRole("button", { name: "Получить ссылку для входа" }).click();
-    await expect(p1).toHaveURL(/\/auth\?sent=1/);
+    await expect(p1).toHaveURL(/\/help$/);
+    await expect(p1.getByRole("alert")).toContainText("Сессия завершилась");
+    await expect(p1.getByLabel("Описание")).toHaveValue("This anonymous submission must never be stored");
+    await expect(p1.getByLabel(/Я согласен/)).toBeChecked();
+    const popup = one.waitForEvent("page");
+    await p1.getByRole("link", { name: "Войти в новой вкладке" }).click();
+    const login = await popup;
+    await login.getByLabel("Email").fill(firstEmail);
+    await login.getByRole("button", { name: "Получить ссылку для входа" }).click();
+    await expect(login).toHaveURL(/\/auth\?sent=1/);
     const reloginLink = await getLatestMagicLink(firstEmail);
-    await p1.goto(reloginLink);
-    await expect(p1).toHaveURL(/\/cabinet$/);
-    await expect(p1.getByRole("link", { name: /№ .*PREGNANCY/ })).toHaveCount(1);
-    await expect(p1.getByText("This anonymous submission must never be stored")).toHaveCount(0);
+    await login.goto(reloginLink);
+    await expect(login).toHaveURL(/\/cabinet$/);
+    await expect(login.getByRole("link", { name: /№ .*PREGNANCY/ })).toHaveCount(1);
+    await expect(login.getByText("This anonymous submission must never be stored")).toHaveCount(0);
+    await expect(p1).toHaveURL(/\/help$/);
+    await expect(p1.getByLabel("Описание")).toHaveValue("This anonymous submission must never be stored");
   } finally {
     await Promise.all([one.close(), two.close()]);
   }
@@ -286,5 +294,63 @@ test("main pages share the responsive shell and Peerivo icon", async ({ page }) 
     await page.goto(route);
     await expect(page.locator("main .page-shell").first()).toBeVisible();
     expect(await page.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+});
+
+test("help draft survives transport failure and session expiry before explicit authenticated retry", async ({ browser }) => {
+  test.setTimeout(90_000);
+  const context = await browser.newContext({ viewport: { width: 390, height: 900 } });
+  try {
+    const page = await context.newPage();
+    const email = `draft-retention-${Date.now()}@mercy.invalid`;
+    await register(page, email);
+    await page.goto("/help");
+    await page.getByLabel("Категория", { exact: true }).selectOption("OTHER");
+    await page.getByLabel("Страна").fill("XX");
+    await page.getByLabel("Город").fill("Synthetic city");
+    await page.getByLabel("Описание").fill("Synthetic draft retained after a failed attempt");
+    await page.getByLabel("Срочность", { exact: true }).selectOption("URGENT");
+    await page.getByLabel("Можно писать").uncheck();
+    await page.getByLabel("Можно звонить").check();
+    await page.getByLabel("Подходящее время").fill("Synthetic evening");
+    await page.getByLabel("Внешний контакт").fill("synthetic@example.invalid");
+    await page.getByLabel(/Я согласен/).check();
+    const assertDraft = async () => {
+      await expect(page.getByLabel("Категория", { exact: true })).toHaveValue("OTHER");
+      await expect(page.getByLabel("Страна")).toHaveValue("XX");
+      await expect(page.getByLabel("Город")).toHaveValue("Synthetic city");
+      await expect(page.getByLabel("Описание")).toHaveValue("Synthetic draft retained after a failed attempt");
+      await expect(page.getByLabel("Срочность", { exact: true })).toHaveValue("URGENT");
+      await expect(page.getByLabel("Можно писать")).not.toBeChecked();
+      await expect(page.getByLabel("Можно звонить")).toBeChecked();
+      await expect(page.getByLabel("Подходящее время")).toHaveValue("Synthetic evening");
+      await expect(page.getByLabel("Внешний контакт")).toHaveValue("synthetic@example.invalid");
+      await expect(page.getByLabel(/Я согласен/)).toBeChecked();
+    };
+    let attempts = 0;
+    await page.route("**/help", async route => {
+      if (route.request().method() === "POST") { attempts++; await route.abort("failed"); }
+      else await route.continue();
+    });
+    await page.getByRole("button", { name: "Опубликовать просьбу" }).click();
+    await expect(page.getByRole("alert")).toContainText("Не удалось подтвердить отправку");
+    await assertDraft();
+    expect(attempts).toBe(1);
+    await page.unroute("**/help");
+    await context.clearCookies();
+    await page.getByRole("button", { name: "Опубликовать просьбу" }).click();
+    await expect(page.getByRole("alert")).toContainText("Сессия завершилась");
+    await assertDraft();
+    const popup = context.waitForEvent("page");
+    await page.getByRole("link", { name: "Войти в новой вкладке" }).click();
+    const login = await popup;
+    await register(login, email);
+    await expect(login.getByRole("link", { name: /№ .*OTHER/ })).toHaveCount(0);
+    await assertDraft();
+    await page.getByRole("button", { name: "Опубликовать просьбу" }).click();
+    await expect(page).toHaveURL(/\/cabinet\/requests\/[0-9a-f-]+$/);
+    await expect(page.getByText("Synthetic draft retained after a failed attempt")).toBeVisible();
+  } finally {
+    await context.close();
   }
 });
