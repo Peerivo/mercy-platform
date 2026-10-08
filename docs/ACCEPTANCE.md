@@ -184,3 +184,14 @@ The first merged GitHub staging execution for PR #229 (run `37632671960`) failed
 To avoid duplicating or exposing Happy secrets, `Dockerfile.staging-e2e` defines a non-root one-shot runner that installs the repository lockfile exactly and executes only `tests/happy-food-rescue.staging-e2e.test.ts`. The runner must be built from an exact Mercy commit and receive `HAPPY_FOOD_RESCUE_API_TOKEN` and `HAPPY_FOOD_RESCUE_TOKEN` only through Railway variable references to the existing `happy-food-staging` service variables `FOOD_RESCUE_API_TOKEN` and `FOOD_RESCUE_MERCY_TOKEN`. Secret values must not be copied into GitHub, ChatGPT, logs, repository files or artifacts.
 
 A Railway build/deploy acknowledgement is not E2E evidence. Acceptance still requires the exact test process to run non-skipped and pass the two cross-surface 401 checks plus create -> reserve -> idempotent replay -> partial outcome -> final quantity/accounting assertions.
+
+## Mercy v1 email-based roles and volunteer service — draft PR #243
+
+- After email registration and confirmation an account is a USER; after creating a help request it may be shown as VISITOR. Neither state implies an external identity check.
+- Admin can grant/revoke CURATOR/ADMIN (except the last admin) and manage other roles; CURATOR can grant/revoke VOLUNTEER/PATRON only. All role changes have nonempty audited reasons and reject unconfirmed account email. A volunteer offer by itself never grants any staff role.
+- CURATOR can configure directions/status, filter volunteers by city/status/category, connect contact persons with their consent, assign a volunteer to a case, complete/revoke assignments, and suspend/re-activate service around incidents.
+- A volunteer can access and message only an explicitly assigned active case, cannot change case status or gain curator privileges, and loses access after reassignment/role revocation/suspension/completion. Unauthorized users, unassigned curators and anonymous sessions receive no private data; contacts never appear in public cards.
+- Existing ADMIN volunteer-offer moderation remains available at `/staff/volunteer-offers`.
+- There is no ESIA requirement, no Alexandra-specific home safety survey, mandatory video, paired visit requirement or clearance feature in MVP.
+- CI must run lint, typecheck, unit tests, build, clean disposable Supabase migration replay and new `tests/roles.integration.test.ts`. Browser coverage at 320/390/768/1440 px (including no horizontal overflow) and actual end-user scenarios remain separate verification requirements.
+- Status: code proposed in **draft PR #243**; tests are not evidence until successful checks bind to its exact final head. No merge, production migration or production deployment is authorized by this draft.
