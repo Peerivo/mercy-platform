@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { signOut } from "@/app/auth/actions";
 import { getPublicRequestStatus } from "@/lib/request-status";
 import { serverSupabase } from "@/lib/supabase/server";
+import { ASSIGNMENT_MODE_LABELS, PATRON_KIND_LABELS, ROLE_LABELS } from "@/lib/mercy-roles";
 
 type Offer = {
   id: string;
@@ -15,6 +16,30 @@ type Offer = {
   created_at: string;
 };
 
+type Access = {
+  base_role: "USER";
+  identity_role: "USER" | "VISITOR";
+  is_visitor: boolean;
+  is_volunteer: boolean;
+  is_curator: boolean;
+  is_patron: boolean;
+  is_admin: boolean;
+  volunteer_status: string | null;
+  patron_kind: keyof typeof PATRON_KIND_LABELS | null;
+};
+
+type VolunteerAssignment = {
+  id: string;
+  help_request_id: string;
+  case_number: number;
+  category: string;
+  city: string;
+  assignment_mode: keyof typeof ASSIGNMENT_MODE_LABELS;
+  task_summary: string;
+  assigned_at: string;
+  access_active: boolean;
+};
+
 export default async function Cabinet() {
   const s = await serverSupabase();
   const {
@@ -23,22 +48,41 @@ export default async function Cabinet() {
 
   if (!user) redirect("/auth");
 
-  const [{ data: requests }, { data: offers }, { data: staffRole }] =
-    await Promise.all([
-      s
-        .from("help_requests")
-        .select("id,case_number,category,city,urgency,status,created_at")
-        .order("created_at", { ascending: false })
-        .limit(50),
-      s
-        .from("volunteer_offers")
-        .select(
-          "id,category,country,city,online,description,review_status,created_at"
-        )
-        .order("created_at", { ascending: false })
-        .limit(50),
-      s.rpc("current_staff_role"),
-    ]);
+  const [
+    { data: requests },
+    { data: offers },
+    { data: staffRole },
+    accessResult,
+    volunteerAssignmentsResult,
+  ] = await Promise.all([
+    s
+      .from("help_requests")
+      .select("id,case_number,category,city,urgency,status,created_at")
+      .eq("owner_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    s
+      .from("volunteer_offers")
+      .select(
+        "id,category,country,city,online,description,review_status,created_at"
+      )
+      .order("created_at", { ascending: false })
+      .limit(50),
+    s.rpc("current_staff_role"),
+    s.rpc("current_mercy_access"),
+    s.rpc("my_volunteer_assignments", { result_limit: 50 }),
+  ]);
+
+  const access = (accessResult.data?.[0] ?? null) as Access | null;
+  const volunteerAssignments = (volunteerAssignmentsResult.data ?? []) as VolunteerAssignment[];
+  const hasCuratorWorkspace = Boolean(staffRole || access?.is_curator || access?.is_admin);
+
+  const roleLabels = [
+    access?.is_volunteer ? ROLE_LABELS.VOLUNTEER : null,
+    access?.is_curator ? ROLE_LABELS.CURATOR : null,
+    access?.is_patron ? ROLE_LABELS.PATRON : null,
+    access?.is_admin ? ROLE_LABELS.ADMIN : null,
+  ].filter(Boolean);
 
   return (
     <section className="page-shell section cabinet-page">
@@ -50,19 +94,76 @@ export default async function Cabinet() {
             Ответы доступны внутри кабинета. Во внешних уведомлениях содержание
             обращений не отправляется.
           </p>
+          <p className="muted">
+            Статус:{" "}
+            {access?.is_visitor
+              ? "Посетитель — обращение о помощи создано"
+              : "Пользователь — выполнен вход по email"}
+            {roleLabels.length ? ` · ${roleLabels.join(", ")}` : ""}
+          </p>
+          {access?.is_patron && access.patron_kind && (
+            <p className="muted">
+              Меценат: {PATRON_KIND_LABELS[access.patron_kind]}
+            </p>
+          )}
         </div>
 
         <div className="cabinet-top-actions">
-          {staffRole && (
-            <Link className="btn secondary" href="/staff/cases">
-              Рабочее место
-            </Link>
+          {hasCuratorWorkspace && (
+            <>
+              <Link className="btn secondary" href="/staff/cases">
+                Рабочее место
+              </Link>
+              <Link className="btn secondary" href="/staff/volunteers">
+                Волонтёрская служба
+              </Link>
+              <Link className="btn secondary" href="/staff/roles">
+                Роли
+              </Link>
+            </>
           )}
           <form action={signOut}>
             <button className="btn secondary">Выйти из аккаунта</button>
           </form>
         </div>
       </header>
+
+      {access?.is_volunteer && (
+        <section className="cabinet-section" aria-labelledby="cabinet-volunteer-title">
+          <div className="cabinet-section-heading">
+            <div>
+              <span className="request-section-kicker">Волонтёр</span>
+              <h2 id="cabinet-volunteer-title">Мои назначения</h2>
+            </div>
+          </div>
+          {access.volunteer_status && (
+            <p className="muted">Статус службы: {access.volunteer_status}</p>
+          )}
+          <div className="cabinet-list">
+            {volunteerAssignments.length ? volunteerAssignments.map((assignment) => (
+              assignment.access_active ? (
+                <Link
+                  className="card cabinet-list-card"
+                  href={`/cabinet/requests/${assignment.help_request_id}`}
+                  key={assignment.id}
+                >
+                  <strong>Просьба № {assignment.case_number}</strong>
+                  <p>{assignment.city} · {assignment.category}</p>
+                  <p>{ASSIGNMENT_MODE_LABELS[assignment.assignment_mode]} · {assignment.task_summary}</p>
+                </Link>
+              ) : (
+                <article className="card cabinet-list-card" key={assignment.id}>
+                  <strong>Просьба № {assignment.case_number}</strong>
+                  <p>{assignment.city} · {assignment.category}</p>
+                  <p>Доступ временно приостановлен. Свяжитесь с куратором.</p>
+                </article>
+              )
+            )) : (
+              <div className="card cabinet-empty">Активных назначений пока нет.</div>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="cabinet-section" aria-labelledby="cabinet-requests-title">
         <div className="cabinet-section-heading">

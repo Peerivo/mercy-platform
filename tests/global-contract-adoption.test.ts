@@ -15,15 +15,15 @@ const adoption18 = readJson(
 );
 
 describe("Peerivo Global Contract adoption", () => {
-  it("pins Mercy to the exact canonical 1.10.0 contract with automatic propagation", () => {
+  it("pins Mercy to the latest published canonical 1.12.0 contract with automatic propagation", () => {
     expect(binding.project.repository).toBe("Peerivo/mercy-platform");
     expect(binding.globalRef).toEqual({
       repository: "Peerivo/global",
       id: "peerivo-global",
-      version: "1.10.0",
+      version: "1.12.0",
       digest:
-        "sha256:90b04165dc60a5ce3c2fa5aaeef329515dc85ae6d2d02a29b56d5dbe5cf037f9",
-      gitSha: "7ef6771ec51fdd8359d30aad25a12d1deb130835",
+        "sha256:9ff754408729013041a0e442ed30002a644df14bc1b390ebcb64ab86c3f0426b",
+      gitSha: "d622f79f776e6e8f870a55e6afc1830d859d64f8",
     });
     expect(binding.updatePolicy).toEqual({
       observeAllUpdates: true,

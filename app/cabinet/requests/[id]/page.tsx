@@ -37,6 +37,8 @@ type PrivateRequestAccess = {
   owner_id: string;
 };
 
+type CaseAccess = "OWNER" | "CURATOR" | "VOLUNTEER";
+
 export default async function Case({
   params,
 }: {
@@ -59,16 +61,14 @@ export default async function Case({
     notFound();
   }
 
-  let canAccessPrivate = false;
-  let isCoordinator = false;
-  let isOwner = false;
+  let accessRole: CaseAccess | null = null;
   let messages: ChatMessage[] = [];
   let steps: SupportStep[] = [];
   let responses: HelpResponse[] = [];
   let ownResponse: OwnResponse | null = null;
 
   if (user) {
-    const [privateAccessResult, ownResponseResult] = await Promise.all([
+    const [privateAccessResult, ownResponseResult, caseAccessResult] = await Promise.all([
       s
         .from("help_requests")
         .select("id,owner_id")
@@ -80,6 +80,7 @@ export default async function Case({
         .eq("help_request_id", id)
         .eq("responder_id", user.id)
         .maybeSingle(),
+      s.rpc("current_case_access", { case_id: id }),
     ]);
 
     const privateRequest =
@@ -87,18 +88,20 @@ export default async function Case({
         ? (privateAccessResult.data as PrivateRequestAccess)
         : null;
 
-    // The help_requests SELECT policy is the authorization source of truth:
-    // only the owner or the active coordinator can see this row.
-    canAccessPrivate = privateRequest !== null;
-    isOwner = privateRequest?.owner_id === user.id;
-    isCoordinator = canAccessPrivate && !isOwner;
+    if (!caseAccessResult.error && caseAccessResult.data) {
+      accessRole = caseAccessResult.data as CaseAccess;
+    } else if (privateRequest?.owner_id === user.id) {
+      // Compatibility while a preview is evaluated before the new migration is
+      // applied to production.
+      accessRole = "OWNER";
+    }
 
     ownResponse =
       ownResponseResult.data && !ownResponseResult.error
         ? (ownResponseResult.data as OwnResponse)
         : null;
 
-    if (canAccessPrivate) {
+    if (accessRole) {
       const [messagesResult, stepsResult, responsesResult] = await Promise.all([
         s
           .from("messages")
@@ -112,12 +115,14 @@ export default async function Case({
           .select("id,title,responsible,due_at,status,organization_id")
           .eq("help_request_id", id)
           .order("created_at"),
-        s
-          .from("help_request_responses")
-          .select("id,message,contact_method,status,created_at")
-          .eq("help_request_id", id)
-          .eq("status", "PENDING")
-          .order("created_at", { ascending: false }),
+        accessRole === "OWNER" || accessRole === "CURATOR"
+          ? s
+              .from("help_request_responses")
+              .select("id,message,contact_method,status,created_at")
+              .eq("help_request_id", id)
+              .eq("status", "PENDING")
+              .order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
       messages = (messagesResult.data ?? []) as ChatMessage[];
@@ -126,6 +131,9 @@ export default async function Case({
     }
   }
 
+  const isOwner = accessRole === "OWNER";
+  const isCurator = accessRole === "CURATOR";
+  const isVolunteer = accessRole === "VOLUNTEER";
   const publicStatus = getPublicRequestStatus(r.status);
   const completed = r.status === "RESOLVED" || r.status === "CLOSED";
 
@@ -133,8 +141,8 @@ export default async function Case({
     <section className="container section">
       <div className="nav">
         <h1>Просьба № {r.case_number}</h1>
-        {isCoordinator && <a href="/staff/cases">К назначенным обращениям</a>}
-        {canAccessPrivate && <QuickExit />}
+        {isCurator && <a href="/staff/cases">К назначенным обращениям</a>}
+        {accessRole && <QuickExit />}
       </div>
 
       <div className="card">
@@ -161,10 +169,17 @@ export default async function Case({
           <OwnerRequestActions caseId={id} />
         )}
 
-        {isCoordinator && <StatusForm caseId={id} status={r.status} />}
+        {isCurator && <StatusForm caseId={id} status={r.status} />}
+
+        {isVolunteer && (
+          <p className="muted">
+            Вы открыли просьбу как назначенный волонтёр. Статус обращения и
+            чужие отклики доступны только автору и куратору.
+          </p>
+        )}
       </div>
 
-      {!completed && !isOwner && !isCoordinator && (
+      {!completed && !accessRole && (
         <RequestResponse
           caseId={id}
           signedIn={Boolean(user)}
@@ -172,9 +187,9 @@ export default async function Case({
         />
       )}
 
-      {canAccessPrivate && user ? (
+      {accessRole && user ? (
         <>
-          {(isOwner || isCoordinator) && (
+          {(isOwner || isCurator) && (
             <section className="response-list-section">
               <h2>Отклики на просьбу</h2>
               <div className="grid">
@@ -214,7 +229,7 @@ export default async function Case({
                 </div>
               ))
             ) : (
-              <div className="card">Координатор пока не добавил шаги.</div>
+              <div className="card">Куратор пока не добавил шаги.</div>
             )}
           </div>
 
@@ -222,7 +237,8 @@ export default async function Case({
         </>
       ) : (
         <p>
-          Внутренний план и приватный чат доступны только автору обращения и назначенному координатору.
+          Внутренний план и приватный чат доступны автору обращения, назначенному
+          куратору и назначенному активному волонтёру.
         </p>
       )}
     </section>
