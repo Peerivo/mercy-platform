@@ -147,3 +147,9 @@ The standalone public RPC probe uses existing public config, rejects secret/serv
 
 ## Prepared GitHub issue moderation schema transport — 2026-10-06
 A new package-specific protected workflow prepares schema-only application of missing canonical moderation10 plus issue12 against the existing Beget Menaion target. It accepts only exact historical H9 with optional10/policy11, preserves policy11, and treats completed package histories as verification-only. Frozen encrypted sources, full historical checksums, live PostgreSQL17 catalog/ACL/RLS gates and atomic ledger updates are fixture-tested. It has no authentication/Notify infrastructure prerequisite and reports outstanding attempted legacy work as a separate issue-only activation blocker. See `docs/MENAION_ISSUE_PACKAGE_TRANSPORT.md`. No production application or runtime activation is claimed.
+
+## Accepted Mercy MVP scope revision — 2026-10-08 (draft PR #243)
+
+The user excluded ESIA from MVP v1 and explicitly excluded Alexandra's home-visit proposals from MVP requirements. Preserve existing data privacy, access rules and ordinary protections; do not introduce home safety questionnaires, mandatory video calls, required paired visits or identity-linked role activation. Old PR #125 must not be merged.
+
+Development proceeds only from actual `main` on branch `feat/mercy-v1-email-roles-20261008`, draft PR #243. Scope: email-confirmed USER; request-derived VISITOR; audited VOLUNTEER/CURATOR/PATRON/ADMIN grants; curator volunteers, contacts, assignments, stats and incident handling; limited access for active assigned volunteers. Keep volunteer offer moderation and public/private distinction. Code proposed, **not merged/deployed**, migration not applied. Verify on disposable stack and UI before accepting the release.
