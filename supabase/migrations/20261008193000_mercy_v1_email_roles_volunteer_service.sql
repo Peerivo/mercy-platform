@@ -1229,11 +1229,16 @@ create policy help_response_read on public.help_request_responses
 for select to authenticated
 using(
   responder_id=auth.uid()
-  or exists(
-    select 1 from public.help_requests h
-    where h.id=help_request_id and h.owner_id=auth.uid()
+  or (
+    private.can_access_case(help_request_id,auth.uid())
+    and (
+      exists(
+        select 1 from public.help_requests h
+        where h.id=help_request_id and h.owner_id=auth.uid()
+      )
+      or private.is_active_coordinator(help_request_id,auth.uid())
+    )
   )
-  or private.is_active_coordinator(help_request_id,auth.uid())
 );
 
 create or replace function public.change_case_status(
