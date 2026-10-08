@@ -1,10 +1,12 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { createRequest } from "./actions";
+import { startTransition, useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createRequest, type RequestActionState } from "./actions";
 import { getRequestJurisdiction } from "@/lib/request-consent";
 
 export function HelpForm() {
+  const router = useRouter();
   const [country, setCountry] = useState("Россия");
   // Sensitive user content stays in this component only: no localStorage, analytics,
   // URL parameters, session recording or server echo on validation errors.
@@ -19,13 +21,32 @@ export function HelpForm() {
     externalContact: "",
     consent: false,
   });
-  const [state, submit, pending] = useActionState(createRequest, { ok: false, message: "" });
+  const [state, submit, pending] = useActionState(async (previous: RequestActionState, formData: FormData): Promise<RequestActionState> => {
+    try {
+      return await createRequest(previous, formData);
+    } catch {
+      // A rejected browser/server transport must not unmount the private draft.
+      return { ok: false, outcomeUnknown: true, message: "Не удалось подтвердить отправку просьбы. Ваш текст остался в форме. Перед повторной отправкой проверьте личный кабинет в новой вкладке." };
+    }
+  }, { ok: false, message: "" });
+  useEffect(() => {
+    if (state.ok && state.requestId) router.push(`/cabinet/requests/${encodeURIComponent(state.requestId)}`);
+  }, [state.ok, state.requestId, router]);
 
   const jurisdiction = getRequestJurisdiction(country);
 
   return (
-    <form action={submit} className="card grid public-form-card help-form-card" aria-busy={pending}>
+    <form onSubmit={event => {
+      event.preventDefault();
+      if (pending) return;
+      const data = new FormData(event.currentTarget);
+      // Function-valued form actions reset selects/checkboxes even on returned errors.
+      // Dispatch the action explicitly so every field survives a failed attempt.
+      startTransition(() => submit(data));
+    }} className="card grid public-form-card help-form-card" aria-busy={pending}>
       {state.message ? <p className="form-alert" role="alert">{state.message}</p> : null}
+      {state.authRequired ? <a href="/auth" target="_blank" rel="noopener noreferrer">Войти в новой вкладке</a> : null}
+      {state.outcomeUnknown ? <a href="/cabinet" target="_blank" rel="noopener noreferrer">Проверить личный кабинет в новой вкладке</a> : null}
       <div className="form-section">
         <div className="form-section-heading">
           <span className="request-section-kicker">Просьба</span>
