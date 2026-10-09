@@ -147,3 +147,8 @@ The standalone public RPC probe uses existing public config, rejects secret/serv
 
 ## Prepared GitHub issue moderation schema transport — 2026-10-06
 A new package-specific protected workflow prepares schema-only application of missing canonical moderation10 plus issue12 against the existing Beget Menaion target. It accepts only exact historical H9 with optional10/policy11, preserves policy11, and treats completed package histories as verification-only. Frozen encrypted sources, full historical checksums, live PostgreSQL17 catalog/ACL/RLS gates and atomic ledger updates are fixture-tested. It has no authentication/Notify infrastructure prerequisite and reports outstanding attempted legacy work as a separate issue-only activation blocker. See `docs/MENAION_ISSUE_PACKAGE_TRANSPORT.md`. No production application or runtime activation is claimed.
+
+
+## Sarafanka workflow deduplication — 2026-10-09
+
+The repository keeps one Sarafanka REG.RU finalizer: `.github/workflows/finalize-sarafanka-reg1.yml`. The byte-identical `finalize-sarafanka-reg1-main.yml` copy was removed because both files listened to the same canonical-file push and could run the same production operation twice. The retained workflow, production environment, validation, candidate checks and rollback steps are unchanged. This repository-only cleanup does not run or verify a production operation.
