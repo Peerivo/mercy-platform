@@ -184,3 +184,8 @@ The first merged GitHub staging execution for PR #229 (run `37632671960`) failed
 To avoid duplicating or exposing Happy secrets, `Dockerfile.staging-e2e` defines a non-root one-shot runner that installs the repository lockfile exactly and executes only `tests/happy-food-rescue.staging-e2e.test.ts`. The runner must be built from an exact Mercy commit and receive `HAPPY_FOOD_RESCUE_API_TOKEN` and `HAPPY_FOOD_RESCUE_TOKEN` only through Railway variable references to the existing `happy-food-staging` service variables `FOOD_RESCUE_API_TOKEN` and `FOOD_RESCUE_MERCY_TOKEN`. Secret values must not be copied into GitHub, ChatGPT, logs, repository files or artifacts.
 
 A Railway build/deploy acknowledgement is not E2E evidence. Acceptance still requires the exact test process to run non-skipped and pass the two cross-surface 401 checks plus create -> reserve -> idempotent replay -> partial outcome -> final quantity/accounting assertions.
+
+
+## Sarafanka finalizer deduplication
+
+For a push to `main` changing `.github/workflows/finalize-sarafanka-reg1.yml`, the workflow inventory must select exactly one Sarafanka finalizer. The retained file must remain byte-identical to pre-cleanup blob `5c96700a6caabfbeccc7c0fa2c2b64b791006fb2`, including its production environment, validation and rollback gates. Other branches or documentation-only changes must not trigger this finalizer. Local YAML/trigger-model and shell-syntax checks establish the repository configuration only; they are not live deployment or cancellation evidence. Publication of this cleanup uses `[skip ci]` and must be followed by a read-only Actions check, without dispatching or rerunning workflows.
