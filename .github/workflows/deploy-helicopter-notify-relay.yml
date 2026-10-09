@@ -54,7 +54,7 @@ jobs:
           test "$REG_RU_HOST" = "95.163.223.68"
           test "$REG_RU_USER" = "root"
           test "$BEGET_SUPABASE_HOST" = "45.144.176.213"
-          test "$BEGET_SUPABASE_USER" = "root"
+          test "$BEGET_SUPABASE_USER" = "supabase-deploy"
           [[ "$NOTIFY_SHA" =~ ^[0-9a-f]{40}$ ]]
 
       - name: Configure pinned SSH transports
@@ -106,6 +106,7 @@ jobs:
             -o ConnectTimeout=10
           )
           remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
+          ssh "${beget_opts[@]}" "$remote" 'sudo -n true'
           remote_dir="$(ssh "${beget_opts[@]}" "$remote" 'umask 077; mktemp -d /tmp/helicopter-notify-relay.XXXXXXXX')"
 
           cleanup_remote() {
@@ -131,7 +132,7 @@ jobs:
           cp "$source_dir/migrations/postgres/0003_telegram_relays.sql" "$stage/0003_telegram_relays.sql"
           cp "$source_dir/scripts/helicopter-relay-rollout-root-remote.sh" "$stage/helicopter-relay-rollout-root-remote.sh"
 
-          exec bash "$stage/helicopter-relay-rollout-root-remote.sh" "$stage" "$tenant_id" "Дима"
+          exec sudo -n bash "$stage/helicopter-relay-rollout-root-remote.sh" "$stage" "$tenant_id" "Дима"
           REMOTE
 
       - name: Remove SSH and payload material
