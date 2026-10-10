@@ -540,7 +540,8 @@ describe.skipIf(!live)(
               reservation.reservationId ===
               reservationId,
           )?.status,
-        ).toBe("COMPLETED");
+        // Partial donations keep custody tracked separately; this reservation is attested, not a fully completed pickup.
+        ).toBe("ATTESTED");
       },
       60_000,
     );
