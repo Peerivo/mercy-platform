@@ -184,3 +184,12 @@ loopback staging are separate permitted outcomes. Keep the old public container
 running while WEB-OBS-009 remains open; do not falsify registry/evidence or invent
 provider IDs. Historical content-bound artifacts must be rebuilt against the
 merged SHA, and synthetic QA archives must never be promoted.
+
+
+### Disable unintended Vercel Git deployment — 2026-10-10
+
+Publishing PR #248 head `5cef09c317e0bd4644ffae4e52bc660086fb887d` created zero GitHub Actions runs, but the existing Vercel Git integration automatically built a preview despite `[skip ci]`. This is recorded as an unintended side effect, not a passed no-external-build check or canonical REG.RU release. The deployment metadata binds the preview to that head and the build entrypoint is the repository root (`.`).
+
+The root `vercel.json` now uses the documented `git.deploymentEnabled: false` policy to prevent subsequent Git-triggered Vercel deployments. It changes no existing deployment, domain, SSO/protection setting, credential or REG.RU runtime; manual Vercel deployments remain separate operations. A local regression requires this exact minimal configuration. Existing provider state must be read after publication to verify that no new build was created; local validation alone does not prove the provider accepted the policy. Restoring Git auto-deployment would require an explicitly authorized later configuration change, not an automatic rollback.
+
+Sources: https://vercel.com/docs/project-configuration/git-configuration#gitdeploymentenabled and https://vercel.com/kb/guide/can-you-deploy-based-on-tags-releases-on-vercel . The documented commit-config mechanism is used as supported; no undocumented guarantee about internal event ordering is asserted.

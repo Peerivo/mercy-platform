@@ -228,3 +228,12 @@ A separate Work production-config build passed using only fingerprint-verified e
 The separately approved two-upstream Kong repair passed 27 anonymous RPC and 39 data-health probes, plus complete Public/Admin Auth JSON checks. Fresh 11:07 UTC production probes returned five of five HTTP 200 for health and five of five for data health; the public runtime remains revision `733b3207444b96c3873433d70b4c9279be3bee09`. These are dependency/channel checks, not completed user login.
 
 Source publication and a private loopback candidate may proceed through the reviewed no-Actions route. Public promotion remains blocked by Global WEB-OBS-009 until valid observability evidence or an explicitly scoped applicable exception exists. Real-account Auth/RLS/write/email remain unverified; no invented account, public help request or real-recipient message is authorized by this checkpoint.
+
+
+### Disable unintended Vercel Git deployment — 2026-10-10
+
+Publishing PR #248 head `5cef09c317e0bd4644ffae4e52bc660086fb887d` created zero GitHub Actions runs, but the existing Vercel Git integration automatically built a preview despite `[skip ci]`. This is recorded as an unintended side effect, not a passed no-external-build check or canonical REG.RU release. The deployment metadata binds the preview to that head and the build entrypoint is the repository root (`.`).
+
+The root `vercel.json` now uses the documented `git.deploymentEnabled: false` policy to prevent subsequent Git-triggered Vercel deployments. It changes no existing deployment, domain, SSO/protection setting, credential or REG.RU runtime; manual Vercel deployments remain separate operations. A local regression requires this exact minimal configuration. Existing provider state must be read after publication to verify that no new build was created; local validation alone does not prove the provider accepted the policy. Restoring Git auto-deployment would require an explicitly authorized later configuration change, not an automatic rollback.
+
+Sources: https://vercel.com/docs/project-configuration/git-configuration#gitdeploymentenabled and https://vercel.com/kb/guide/can-you-deploy-based-on-tags-releases-on-vercel . The documented commit-config mechanism is used as supported; no undocumented guarantee about internal event ordering is asserted.
