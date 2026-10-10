@@ -4,7 +4,7 @@ test("Georgian language persists across navigation and reload, with complete pub
   test.setTimeout(120_000);
   await page.goto("/");
   await expect(page.locator("html")).toHaveAttribute("lang", "ru");
-  await page.getByRole("button", { name: "ქართული", exact: true }).click();
+  await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("ka");
   await expect(page.locator("html")).toHaveAttribute("lang", "ka");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("მარტო გამკლავება არ გევალებათ");
   await page.reload();
@@ -14,9 +14,11 @@ test("Georgian language persists across navigation and reload, with complete pub
     await page.goto(route);
     await expect(page.locator("html")).toHaveAttribute("lang", "ka");
     await expect(page.locator("main").first()).toBeVisible();
-    expect(await page.locator("body").innerText(), route).not.toMatch(/[А-Яа-яЁё]/);
+    // Native language names intentionally stay in their own languages.
+    const copy = (await page.locator("body").innerText()).replace("🇷🇺 Русский", "");
+    expect(copy, route).not.toMatch(/[А-Яа-яЁё]/);
   }
-  await page.getByRole("button", { name: "RU", exact: true }).click();
+  await page.getByRole("combobox", { name: "ენა", exact: true }).selectOption("ru");
   await expect(page.locator("html")).toHaveAttribute("lang", "ru");
 });
 
@@ -30,7 +32,7 @@ test("changing language and validation errors preserve all help fields without s
   await page.locator('[name="category"]').selectOption("FAMILY");
   await page.locator('[name="urgency"]').selectOption("SOON");
   await page.locator('[name="can_call"]').check();
-  await page.getByRole("button", { name: "ქართული", exact: true }).click();
+  await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("ka");
   await expect(page.locator("html")).toHaveAttribute("lang", "ka");
   await expect(page.locator('[name="city"]')).toHaveValue("თბილისი");
   await expect(page.locator('[name="category"]')).toHaveValue("FAMILY");
@@ -44,7 +46,7 @@ test("changing language and validation errors preserve all help fields without s
   await expect(page.locator('[name="contact_window"]')).toHaveValue("вечером");
   await expect(page.locator('[name="description"]')).toHaveAttribute("aria-invalid", "true");
   await expect(page.locator('#error-consent')).toContainText("დაადასტურეთ");
-  await page.getByRole("button", { name: "RU", exact: true }).click();
+  await page.getByRole("combobox", { name: "ენა", exact: true }).selectOption("ru");
   await expect(page.getByRole("alert")).toContainText("Проверьте отмеченные поля");
   await expect(page.locator('[name="external_contact"]')).toHaveValue("fictional private contact");
   const stored = await page.evaluate(() => `${document.cookie} ${JSON.stringify(localStorage)} ${JSON.stringify(sessionStorage)}`);
@@ -56,16 +58,26 @@ test("changing language and validation errors preserve all help fields without s
 test("Georgian mobile pages and keyboard language controls remain usable", async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto("/");
-  const switcher = page.getByRole("button", { name: "ქართული", exact: true });
+  const switcher = page.locator("select.language-switcher");
+  await expect(switcher).toHaveAccessibleName("Язык");
   await switcher.focus();
+  await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
+  await expect(page.locator("html")).toHaveAttribute("lang", "ka");
+  await expect(switcher).toBeFocused();
+  await expect(switcher).toHaveValue("ka");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+  await expect(switcher).toBeFocused();
+  await switcher.selectOption("ka");
   await expect(page.locator("html")).toHaveAttribute("lang", "ka");
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 900 });
     for (const route of ["/", "/help", "/volunteer", "/auth", "/nearby", "/requests", "/consent/request?country=ge"]) {
       await page.goto(route);
       expect(await page.locator("body").evaluate(element => element.scrollWidth <= window.innerWidth), `${width} ${route}`).toBe(true);
-      await expect(page.getByRole("button", { name: "ქართული", exact: true })).toBeVisible();
+      await expect(page.getByRole("combobox", { name: "ენა", exact: true })).toBeVisible();
     }
   }
   await page.setViewportSize({ width: 320, height: 900 });

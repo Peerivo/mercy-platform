@@ -193,11 +193,11 @@ For a push to `main` changing `.github/workflows/finalize-sarafanka-reg1.yml`, t
 
 ## Georgian locale acceptance — 2026-10-10
 
-Implemented scope: explicit `ru`/`ka` cookie/context localization, visible RU/ქართული switch at all widths, HTML language and metadata, home/public/search/nearby/volunteer/support/feedback/Auth/cabinet/request/chat/owner/report/share/staff UI, and both unchanged-version consent texts. Shared Peerivo ID and external sign-in email language are explicitly disclosed as outside Mercy's translated UI. User-authored content remains verbatim.
+Implemented scope: explicit `ru`/`ka` cookie/context localization, native flag-and-language dropdown at all widths, HTML language and metadata, home/public/search/nearby/volunteer/support/feedback/Auth/cabinet/request/chat/owner/report/share/staff UI, and both unchanged-version consent texts. Shared Peerivo ID and external sign-in email language are explicitly disclosed as outside Mercy's translated UI. User-authored content remains verbatim.
 
 Required regression checks:
 1. Switch RU → ქართული by keyboard; reload and navigate to another public page. `html[lang=ka]`, interface copy, controlled labels and dates remain Georgian. Switch back without a new history entry. Invalid locale cookies resolve to Russian. No dynamic DOM text rewriting is used.
-2. At 320/390/768 px, navigation, language buttons, long Georgian consent copy and forms do not overflow. Mobile menu closes on Escape and remains keyboard accessible.
+2. At 320/390/768 px, navigation, language dropdown, long Georgian consent copy and forms do not overflow. Mobile menu closes on Escape and remains keyboard accessible.
 3. Fill every `/help` field and checkbox, switch language both ways, submit invalid data, and switch language again. Values remain unchanged, field and summary errors localize, and sensitive strings never enter browser storage or URLs. Save/session errors likewise preserve in-memory form data. A successful submission still uses the user-JWT RPC and exact country-based consent version. Locale and country are independent.
 4. All known source interface literals/server-action notices have Georgian dictionary entries. User-provided descriptions, names, contacts and chat remain unmodified; enum option values remain database values even when labels are translated. Staff status changes retain explicit enum `value` attributes.
 5. No new migrations, permissions, credentials, production mutations or weakened security/CI gates accompany localization. Existing Quick Exit, RLS, ownership and staff-role boundaries remain unchanged.
@@ -259,3 +259,19 @@ The added toolchain regression fails against the pre-patch snapshot and passes o
 This chain is build/lint tooling and is absent from the prior rebuilt standalone; recheck final artifact membership. The application does not accept public glob patterns, but that reachability fact does not make a strict zero-high full-toolchain gate pass. Scheduled threat scanning remains suspended and no active Mercy lock was found in the bounded read-only registry/issues check. The remaining policy issue is recorded explicitly; a future upstream patch or a separately reviewed applicable mitigation is still needed.
 
 Primary source: https://github.com/advisories/GHSA-vfj7-8cjw-p6xm . New browser verification and the exact merged-source production artifact remain pending at this checkpoint.
+
+
+### Flagged language dropdown acceptance — 2026-10-10
+
+Base source: `7c0923b165e0e3579e19f0d509548ec077ac9597` (tree `d6d0efe5e091748d8c91415b290e61ffcc91cf18`). Scope is the header control and its CSS/tests/docs only.
+
+Required browser checks for the new candidate:
+- The closed native dropdown shows the current flag plus `Русский` or `ქართული`; both named options remain readable, including by assistive technology. Its accessible name is `Язык` / `ენა` and flags are never the only label.
+- Tab focus has a visible outline. Native keyboard selection works RU → KA → RU, preserves focus after refresh and adds no navigation/history entry. Repeat or unsupported selections have no cookie/refresh effect; pending changes are guarded without blurring the control.
+- Reload and navigation retain the selected language with the original cookie attributes. Russian remains the default for missing/invalid cookies.
+- At 320/390/768 px and desktop, the native control, header and mobile menu have no horizontal overflow; the selected language and arrow remain visible.
+- All help fields and checkboxes, other form drafts, country-based consent and existing auth boundaries survive changing language. No form submission or browser-storage write occurs from the dropdown.
+
+Local React DOM checks use mocked router refreshes, and therefore do not establish actual browser/mobile or live release acceptance. The repository Playwright checks were updated but were not run locally because of the previously established Chromium Unix-socket restriction. Fresh isolated browser evidence must be bound to this candidate. No Actions/CI, external writes, migration, server configuration or production deployment was performed by this local implementation task.
+
+Local candidate verification: `npm run check` passed with 292 unit tests passed and one existing opt-in staging skip (33 files), TypeScript clean, and lint exit 0 with the existing unused `_event` warning in `lib/happy-food-rescue.ts`. The eight new dropdown cases include actual selection handlers and all ten help controls with mocked refresh. The default-dropdown regression fails against an exact temporary copy of base `7c0923b` because no native select exists, and passes on this implementation. The build uses synthetic loopback public configuration only (`http://127.0.0.1:3101`, `http://127.0.0.1:54329`, `sb_publishable_local_ui_test_only`); it is not the production artifact. Native keyboard/mobile/browser, live Auth/data and production release evidence are separate and pending for this candidate.
