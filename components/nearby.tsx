@@ -1,4 +1,7 @@
 "use client";
+import { enumLabel } from "@/lib/i18n";
+import { useLocale } from "@/components/locale-provider";
+
 
 import { useState } from "react";
 import { browserSupabase } from "@/lib/supabase/client";
@@ -18,6 +21,8 @@ type Place = {
 };
 
 export function Nearby({ initial }: { initial: Place[] }) {
+  const { t } = useLocale();
+
   const [places, setPlaces] = useState(initial);
   const [status, setStatus] = useState("");
   const [map, setMap] = useState(false);
@@ -59,33 +64,25 @@ export function Nearby({ initial }: { initial: Place[] }) {
     <div className="nearby-results-block">
       <div className="request-section-heading nearby-results-heading">
         <div>
-          <span className="request-section-kicker">Точки помощи</span>
-          <h2>Доступные варианты</h2>
+          <span className="request-section-kicker">{t("Точки помощи")}</span>
+          <h2>{t("Доступные варианты")}</h2>
         </div>
-        <p>Можно использовать город или определить расстояние от текущего местоположения.</p>
+        <p>{t("Можно использовать город или определить расстояние от текущего местоположения.")}</p>
       </div>
 
       <div className="nav nearby-actions">
-        <button className="btn" onClick={locate}>
-          Найти рядом со мной
-        </button>
-        <button className="btn secondary" onClick={() => setMap(true)}>
-          Загрузить внешнюю карту
-        </button>
+        <button className="btn" onClick={locate}>{t("Найти рядом со мной")}</button>
+        <button className="btn secondary" onClick={() => setMap(true)}>{t("Загрузить внешнюю карту")}</button>
       </div>
 
       {status && (
         <p className="nearby-status" aria-live="polite">
-          {status}
+          {t(status)}
         </p>
       )}
 
       {map && (
-        <div className="notice nearby-map-notice">
-          Карта использует провайдера, указанного в настройках. В MVP точки
-          доступны списком даже при ошибке тайлов. Координаты посетителя не
-          сохраняются и не добавляются в URL.
-        </div>
+        <div className="notice nearby-map-notice">{t("Карта использует провайдера, указанного в настройках. В MVP точки доступны списком даже при ошибке тайлов. Координаты посетителя не сохраняются и не добавляются в URL.")}</div>
       )}
 
       <div className="grid cols2 nearby-list">
@@ -102,18 +99,17 @@ export function Nearby({ initial }: { initial: Place[] }) {
               </p>
 
               <p className="nearby-card-meta">
-                {place.formats.join(", ")} · {place.cost_type} ·{" "}
-                {place.languages.join(", ")}
+                {place.formats.map(value => enumLabel(t, value)).join(", ")} · {enumLabel(t, place.cost_type)} ·{" "}
+                {place.languages.map(value => enumLabel(t, value)).join(", ")}
               </p>
 
               {place.distance_meters != null && (
                 <p className="nearby-card-distance">
-                  {(place.distance_meters / 1000).toFixed(1)} км по прямой
-                </p>
+                  {(place.distance_meters / 1000).toFixed(1)}{" "}{t("км по прямой")}</p>
               )}
 
               <p className="nearby-card-hours">
-                {place.opening_hours || "Часы работы не уточнены"}
+                {place.opening_hours || t("Часы работы не уточнены")}
               </p>
 
               {place.contact_public && (
@@ -123,11 +119,8 @@ export function Nearby({ initial }: { initial: Place[] }) {
           ))
         ) : (
           <div className="empty-state nearby-empty">
-            <h2>Проверенных точек пока нет</h2>
-            <p>
-              Мы не показываем непроверенные контакты. Попробуйте другой город
-              или вернитесь позже.
-            </p>
+            <h2>{t("Проверенных точек пока нет")}</h2>
+            <p>{t("Мы не показываем непроверенные контакты. Попробуйте другой город или вернитесь позже.")}</p>
           </div>
         )}
       </div>

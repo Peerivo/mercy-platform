@@ -1,4 +1,6 @@
 "use client";
+import { useLocale } from "@/components/locale-provider";
+
 
 import { useState } from "react";
 
@@ -27,16 +29,18 @@ function fallbackCopy(text: string) {
 export function ShareRequest({
   caseNumber,
 }: ShareRequestProps) {
+  const { t } = useLocale();
+
   const [message, setMessage] = useState("");
 
   const getShareData = () => {
     const url = window.location.href;
-    const text = `Просьба о помощи № ${caseNumber}`;
+    const text = `${t("Просьба о помощи №")} ${caseNumber}`;
 
     return {
       url,
       text,
-      title: "Язык милосердия",
+      title: t("Язык милосердия"),
     };
   };
 
@@ -97,7 +101,7 @@ export function ShareRequest({
   return (
     <div className="share-request">
       <p>
-        <strong>Помогите распространить просьбу</strong>
+        <strong>{t("Помогите распространить просьбу")}</strong>
       </p>
 
       <div className="nav">
@@ -105,9 +109,7 @@ export function ShareRequest({
           className="btn"
           type="button"
           onClick={share}
-        >
-          Поделиться
-        </button>
+        >{t("Поделиться")}</button>
 
         <button
           className="btn secondary"
@@ -121,14 +123,12 @@ export function ShareRequest({
           className="btn secondary"
           type="button"
           onClick={copyLink}
-        >
-          Копировать ссылку
-        </button>
+        >{t("Копировать ссылку")}</button>
       </div>
 
       {message && (
         <p role="status" aria-live="polite">
-          {message}
+          {t(message)}
         </p>
       )}
     </div>

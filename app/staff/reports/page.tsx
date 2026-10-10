@@ -1,4 +1,6 @@
 import Link from "next/link";
+import {getTranslations} from "@/lib/i18n/server";
+import {dateLocale,enumLabel} from "@/lib/i18n";
 import { redirect } from "next/navigation";
 
 import { serverSupabase } from "@/lib/supabase/server";
@@ -33,6 +35,7 @@ export default async function ReportsPage({
     Record<string, string | undefined>
   >;
 }) {
+  const {t,locale}=await getTranslations();
   const query = await searchParams;
 
   const s = await serverSupabase();
@@ -71,38 +74,25 @@ export default async function ReportsPage({
     <section className="container section">
       <nav
         className="nav"
-        aria-label="Рабочее место"
+        aria-label={t("Рабочее место")}
       >
-        <Link href="/staff/cases">
-          Обращения
-        </Link>
+        <Link href="/staff/cases">{t("Обращения")}</Link>
 
-        <strong>Жалобы</strong>
+        <strong>{t("Жалобы")}</strong>
 
-        <Link href="/staff/volunteers">
-          Предложения помощи
-        </Link>
+        <Link href="/staff/volunteers">{t("Предложения помощи")}</Link>
       </nav>
 
-      <h1>Жалобы на просьбы</h1>
+      <h1>{t("Жалобы на просьбы")}</h1>
 
-      <p className="muted">
-        Здесь показываются только
-        публичные данные просьбы.
-        Данные автора и приватная
-        переписка не раскрываются.
-      </p>
+      <p className="muted">{t("Здесь показываются только публичные данные просьбы. Данные автора и приватная переписка не раскрываются.")}</p>
 
       {query.error && (
-        <p role="alert">
-          Решение не сохранено.
-        </p>
+        <p role="alert">{t("Решение не сохранено.")}</p>
       )}
 
       {query.reviewed && (
-        <p role="status">
-          Жалоба обработана.
-        </p>
+        <p role="status">{t("Жалоба обработана.")}</p>
       )}
 
       <div className="grid">
@@ -113,41 +103,34 @@ export default async function ReportsPage({
               key={report.report_id}
             >
               <h2>
-                Просьба №{" "}
+                {t("Просьба №")}{" "}
                 {report.case_number}
               </h2>
 
               <p>
-                {report.category}
+                {enumLabel(t,report.category)}
                 {" · "}
                 {report.city}
                 {" · "}
-                {report.request_status}
+                {enumLabel(t,report.request_status)}
               </p>
 
               <p>
-                <strong>
-                  Причина жалобы:
-                </strong>{" "}
-                {reasonLabels[
+                <strong>{t("Причина жалобы:")}</strong>{" "}
+                {t(reasonLabels[
                   report.reason
-                ] ?? report.reason}
+                ] ?? report.reason)}
               </p>
 
               {report.details && (
                 <p>
-                  <strong>
-                    Комментарий:
-                  </strong>{" "}
+                  <strong>{t("Комментарий:")}</strong>{" "}
                   {report.details}
                 </p>
               )}
 
               <p>
-                <strong>
-                  Публичный текст
-                  просьбы:
-                </strong>
+                <strong>{t("Публичный текст просьбы:")}</strong>
               </p>
 
               <p>
@@ -163,7 +146,7 @@ export default async function ReportsPage({
                   {new Date(
                     report.created_at
                   ).toLocaleString(
-                    "ru-RU"
+                    dateLocale(locale)
                   )}
                 </time>
               </p>
@@ -172,10 +155,7 @@ export default async function ReportsPage({
                 <Link
                   href={`/cabinet/requests/${report.help_request_id}`}
                   target="_blank"
-                >
-                  Открыть публичную
-                  карточку
-                </Link>
+                >{t("Открыть публичную карточку")}</Link>
               </p>
 
               <form
@@ -190,9 +170,7 @@ export default async function ReportsPage({
                   }
                 />
 
-                <label>
-                  Решение
-                  <select
+                <label>{t("Решение")}<select
                     name="status"
                     required
                     defaultValue=""
@@ -200,25 +178,15 @@ export default async function ReportsPage({
                     <option
                       value=""
                       disabled
-                    >
-                      Выберите
-                    </option>
+                    >{t("Выберите")}</option>
 
-                    <option value="RESOLVED">
-                      Жалоба обоснована /
-                      обработана
-                    </option>
+                    <option value="RESOLVED">{t("Жалоба обоснована / обработана")}</option>
 
-                    <option value="DISMISSED">
-                      Отклонить жалобу
-                    </option>
+                    <option value="DISMISSED">{t("Отклонить жалобу")}</option>
                   </select>
                 </label>
 
-                <label>
-                  Комментарий администратора
-
-                  <textarea
+                <label>{t("Комментарий администратора")}<textarea
                     name="note"
                     minLength={3}
                     maxLength={500}
@@ -230,16 +198,12 @@ export default async function ReportsPage({
                 <button
                   className="btn"
                   type="submit"
-                >
-                  Сохранить решение
-                </button>
+                >{t("Сохранить решение")}</button>
               </form>
             </article>
           ))
         ) : (
-          <div className="card">
-            Новых жалоб нет.
-          </div>
+          <div className="card">{t("Новых жалоб нет.")}</div>
         )}
       </div>
     </section>

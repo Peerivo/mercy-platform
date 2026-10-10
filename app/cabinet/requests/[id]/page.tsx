@@ -1,3 +1,6 @@
+import { enumLabel, dateLocale } from "@/lib/i18n";
+
+import { getTranslations } from "@/lib/i18n/server";
 import { notFound } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 import { Chat } from "@/components/chat";
@@ -42,6 +45,8 @@ export default async function Case({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const { t, locale } = await getTranslations();
+
   const { id } = await params;
   const s = await serverSupabase();
 
@@ -132,24 +137,24 @@ export default async function Case({
   return (
     <section className="container section">
       <div className="nav">
-        <h1>Просьба № {r.case_number}</h1>
-        {isCoordinator && <a href="/staff/cases">К назначенным обращениям</a>}
+        <h1>{t("Просьба №")} {r.case_number}</h1>
+        {isCoordinator && <a href="/staff/cases">{t("К назначенным обращениям")}</a>}
         {canAccessPrivate && <QuickExit />}
       </div>
 
       <div className="card">
         <p>
-          <strong>{r.category}</strong>
+          <strong>{enumLabel(t, r.category)}</strong>
           {" · "}
           {r.country}
           {" · "}
           {r.city}
           {" · "}
-          {r.urgency}
+          {enumLabel(t, r.urgency)}
         </p>
 
         <p>
-          <strong>Статус:</strong> {publicStatus}
+          <strong>{t("Статус:")}</strong> {t(publicStatus)}
         </p>
 
         <p>{r.description}</p>
@@ -176,31 +181,31 @@ export default async function Case({
         <>
           {(isOwner || isCoordinator) && (
             <section className="response-list-section">
-              <h2>Отклики на просьбу</h2>
+              <h2>{t("Отклики на просьбу")}</h2>
               <div className="grid">
                 {responses.length ? (
                   responses.map((response) => (
                     <article className="card" key={response.id}>
                       <p>{response.message}</p>
                       <p>
-                        <strong>Связаться:</strong> {response.contact_method}
+                        <strong>{t("Связаться:")}</strong> {response.contact_method}
                       </p>
                       <p className="muted">
-                        {new Date(response.created_at).toLocaleString("ru-RU")}
+                        {new Date(response.created_at).toLocaleString(dateLocale(locale))}
                       </p>
                     </article>
                   ))
                 ) : (
                   <div className="empty-state">
-                    <h3>Пока нет откликов</h3>
-                    <p>Когда кто-то предложит помощь, отклик появится здесь.</p>
+                    <h3>{t("Пока нет откликов")}</h3>
+                    <p>{t("Когда кто-то предложит помощь, отклик появится здесь.")}</p>
                   </div>
                 )}
               </div>
             </section>
           )}
 
-          <h2>Совместный план поддержки</h2>
+          <h2>{t("Совместный план поддержки")}</h2>
 
           <div className="grid">
             {steps.length ? (
@@ -208,22 +213,20 @@ export default async function Case({
                 <div className="card" key={x.id}>
                   <strong>{x.title}</strong>
                   <p>
-                    {x.responsible} · {x.status}
-                    {x.due_at ? ` · до ${x.due_at}` : ""}
+                    {x.responsible} · {enumLabel(t, x.status)}
+                    {x.due_at ? ` · ${t("до")} ${x.due_at}` : ""}
                   </p>
                 </div>
               ))
             ) : (
-              <div className="card">Координатор пока не добавил шаги.</div>
+              <div className="card">{t("Координатор пока не добавил шаги.")}</div>
             )}
           </div>
 
           <Chat requestId={id} initial={messages} userId={user.id} />
         </>
       ) : (
-        <p>
-          Внутренний план и приватный чат доступны только автору обращения и назначенному координатору.
-        </p>
+        <p>{t("Внутренний план и приватный чат доступны только автору обращения и назначенному координатору.")}</p>
       )}
     </section>
   );

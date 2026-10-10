@@ -1,4 +1,6 @@
 "use client";
+import { useLocale } from "@/components/locale-provider";
+
 import {useCallback,useEffect,useState} from "react";
 import {z} from "zod";
 import type {AuthChangeEvent,Session} from "@supabase/supabase-js";
@@ -10,6 +12,8 @@ const messageSchema=z.object({id:z.string().uuid(),body:z.string(),created_at:z.
 const messagesSchema=z.array(messageSchema);
 
 export function Chat({requestId,initial,userId}:{requestId:string;initial:ChatMessage[];userId:string}){
+  const { t } = useLocale();
+
   const [messages,setMessages]=useState(initial),[body,setBody]=useState(""),[state,setState]=useState("");
   const merge=useCallback((rows:ChatMessage[])=>setMessages(old=>Array.from(new Map([...old,...rows].map(x=>[x.id,x])).values()).sort(compareMessages)),[]);
   useEffect(()=>{
@@ -81,5 +85,5 @@ export function Chat({requestId,initial,userId}:{requestId:string;initial:ChatMe
     return()=>{current=false;removeEventListener("pagehide",onPageHide);removeEventListener("pageshow",onPageShow);disconnect();auth.data.subscription.unsubscribe()};
   },[requestId,initial,merge]);
   async function send(){if(!body.trim())return;setState("Отправка…");const nonce=crypto.randomUUID(),s=browserSupabase();const {data,error}=await s.rpc("send_message",{case_id:requestId,message_body:body.trim(),message_nonce:nonce});const parsed=messageSchema.safeParse(data);if(error||!parsed.success){setState("Не отправлено. Повторите попытку.");return}merge([parsed.data]);setBody("");setState("")}
-  return <div className="card"><h2>Приватный чат</h2><div aria-live="polite">{messages.map(m=><p key={m.id}><strong>{m.author_id===userId?"Вы":"Координатор"}:</strong> {m.body}</p>)}</div><label>Сообщение<textarea value={body} maxLength={4000} onChange={e=>setBody(e.target.value)}/></label><button className="btn" onClick={send}>Отправить</button> <span>{state}</span></div>
+  return <div className="card"><h2>{t("Приватный чат")}</h2><div aria-live="polite">{messages.map(m=><p key={m.id}><strong>{m.author_id===userId?t("Вы"):t("Координатор")}:</strong> {m.body}</p>)}</div><label>{t("Сообщение")}<textarea value={body} maxLength={4000} onChange={e=>setBody(e.target.value)}/></label><button className="btn" onClick={send}>{t("Отправить")}</button> <span>{t(state)}</span></div>
 }

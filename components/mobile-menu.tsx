@@ -1,4 +1,6 @@
 "use client";
+import { useLocale } from "@/components/locale-provider";
+
 
 import Link from "next/link";
 import { AuthEntry } from "@/components/auth-entry";
@@ -10,6 +12,8 @@ type NavigationItem = {
 };
 
 export function MobileMenu({ items }: { items: readonly NavigationItem[] }) {
+  const { t } = useLocale();
+
   const detailsRef = useRef<HTMLDetailsElement>(null);
 
   const closeMenu = useCallback(() => {
@@ -55,19 +59,19 @@ export function MobileMenu({ items }: { items: readonly NavigationItem[] }) {
 
   return (
     <details className="mobile-menu" ref={detailsRef}>
-      <summary aria-label="Открыть меню">
+      <summary aria-label={t("Открыть меню")}>
         <span className="mobile-menu-icon" aria-hidden="true">
           <span />
           <span />
           <span />
         </span>
-        <span>Меню</span>
+        <span>{t("Меню")}</span>
       </summary>
 
-      <nav className="mobile-menu-panel" aria-label="Мобильная навигация">
+      <nav className="mobile-menu-panel" aria-label={t("Мобильная навигация")}>
         {items.map((item) => (
           <Link href={item.href} key={item.href} onClick={closeMenu}>
-            {item.label}
+            {t(item.label)}
           </Link>
         ))}
         <AuthEntry onNavigate={closeMenu} />

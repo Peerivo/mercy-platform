@@ -1,4 +1,6 @@
 "use client";
+import { useLocale } from "@/components/locale-provider";
+
 
 import {
   useActionState,
@@ -44,6 +46,8 @@ export function ReportRequest({
 }: {
   caseId: string;
 }) {
+  const { t } = useLocale();
+
   const reporterTokenRef =
     useRef<HTMLInputElement>(null);
 
@@ -57,7 +61,7 @@ export function ReportRequest({
     return (
       <div className="card">
         <p role="status">
-          {state.message}
+          {t(state.message)}
         </p>
       </div>
     );
@@ -65,9 +69,7 @@ export function ReportRequest({
 
   return (
     <details>
-      <summary>
-        Пожаловаться на просьбу
-      </summary>
+      <summary>{t("Пожаловаться на просьбу")}</summary>
 
       <form
         action={action}
@@ -94,10 +96,7 @@ export function ReportRequest({
           defaultValue=""
         />
 
-        <label>
-          Причина
-
-          <select
+        <label>{t("Причина")}<select
             name="reason"
             required
             defaultValue=""
@@ -105,42 +104,25 @@ export function ReportRequest({
             <option
               value=""
               disabled
-            >
-              Выберите причину
-            </option>
+            >{t("Выберите причину")}</option>
 
-            <option value="FRAUD">
-              Возможное мошенничество
-            </option>
+            <option value="FRAUD">{t("Возможное мошенничество")}</option>
 
-            <option value="DANGEROUS">
-              Опасный или недопустимый
-              контент
-            </option>
+            <option value="DANGEROUS">{t("Опасный или недопустимый контент")}</option>
 
-            <option value="PERSONAL_DATA">
-              Опубликованы персональные
-              данные
-            </option>
+            <option value="PERSONAL_DATA">{t("Опубликованы персональные данные")}</option>
 
-            <option value="OUTDATED">
-              Просьба уже неактуальна
-            </option>
+            <option value="OUTDATED">{t("Просьба уже неактуальна")}</option>
 
-            <option value="OTHER">
-              Другая причина
-            </option>
+            <option value="OTHER">{t("Другая причина")}</option>
           </select>
         </label>
 
-        <label>
-          Комментарий
-
-          <textarea
+        <label>{t("Комментарий")}<textarea
             name="details"
             maxLength={1000}
             rows={3}
-            placeholder="Необязательно, кроме варианта «Другая причина»"
+            placeholder={t("Необязательно, кроме варианта «Другая причина»")}
           />
         </label>
 
@@ -150,13 +132,13 @@ export function ReportRequest({
           disabled={pending}
         >
           {pending
-            ? "Отправляем…"
-            : "Отправить жалобу"}
+            ? t("Отправляем…")
+            : t("Отправить жалобу")}
         </button>
 
         {state.message && (
           <p role="alert">
-            {state.message}
+            {t(state.message)}
           </p>
         )}
       </form>
