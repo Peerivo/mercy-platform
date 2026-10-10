@@ -1,22 +1,27 @@
+
+import { getTranslations } from "@/lib/i18n/server";
 import "./globals.css";
 import "./polish.css";
 import "./public-pages.css";
 import "./mobile-shell.css";
 import "./brand.css";
 import "./cabinet.css";
-import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
+import { LocaleProvider } from "@/components/locale-provider";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { AuthEntry } from "@/components/auth-entry";
 import { MobileMenu } from "@/components/mobile-menu";
 import { quickExitGuard } from "@/lib/quick-exit-guard";
 import { siteUrl } from "@/lib/config";
 
-export const metadata: Metadata = {
+export async function generateMetadata() {
+  const { t } = await getTranslations();
+  return {
   metadataBase: new URL(siteUrl()),
-  title: "Язык милосердия",
-  description: "Спокойная и практическая поддержка в трудной ситуации",
+  title: t("Язык милосердия"),
+  description: t("Спокойная и практическая поддержка в трудной ситуации"),
   robots: { index: true, follow: true },
   icons: {
     icon: "/icon.svg",
@@ -24,6 +29,7 @@ export const metadata: Metadata = {
     apple: "/mercy-m.png",
   },
 };
+}
 
 const navigation = [
   { href: "/requests", label: "Просьбы" },
@@ -32,33 +38,37 @@ const navigation = [
   { href: "/donate", label: "Поддержать" },
 ] as const;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const { t, locale } = await getTranslations();
+
   return (
-    <html lang="ru">
+    <html lang={locale}>
       <body>
+        <LocaleProvider locale={locale}>
         <Script id="mercy-quick-exit-guard" strategy="beforeInteractive">
           {quickExitGuard}
         </Script>
 
         <header className="site-header">
           <div className="page-shell site-header-inner">
-            <Link className="brand" href="/" aria-label="Язык милосердия — главная">
+            <Link className="brand" href="/" aria-label={t("Язык милосердия — главная")}>
               <Image className="brand-icon" src="/icon.svg" alt="" width={34} height={34} priority />
               <span className="brand-copy">
-                <strong>Язык милосердия</strong>
-                <small>люди помогают людям</small>
+                <strong>{t("Язык милосердия")}</strong>
+                <small>{t("люди помогают людям")}</small>
               </span>
             </Link>
 
-            <nav className="desktop-nav" aria-label="Основная навигация">
+            <nav className="desktop-nav" aria-label={t("Основная навигация")}>
               {navigation.map((item) => (
                 <Link href={item.href} key={item.href}>
-                  {item.label}
+                  {t(item.label)}
                 </Link>
               ))}
             </nav>
 
             <div className="site-header-actions">
+              <LanguageSwitcher />
               <AuthEntry className="btn secondary header-auth-entry" />
               <MobileMenu items={navigation} />
             </div>
@@ -70,19 +80,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <footer className="site-footer">
           <div className="page-shell site-footer-inner">
             <div>
-              <strong>Язык милосердия</strong>
-              <p>Добровольная и практическая помощь людей людям.</p>
+              <strong>{t("Язык милосердия")}</strong>
+              <p>{t("Добровольная и практическая помощь людей людям.")}</p>
               <p>
-                <Link href="/feedback">Обратная связь</Link>
+                <Link href="/feedback">{t("Обратная связь")}</Link>
                 {" · "}
-                <Link href="/donate">Поддержать проект</Link>
+                <Link href="/donate">{t("Поддержать проект")}</Link>
               </p>
             </div>
-            <p className="footer-safety">
-              При непосредственной угрозе жизни или безопасности обращайтесь в местную экстренную службу.
-            </p>
+            <p className="footer-safety">{t("При непосредственной угрозе жизни или безопасности обращайтесь в местную экстренную службу.")}</p>
           </div>
         </footer>
+              </LocaleProvider>
       </body>
     </html>
   );

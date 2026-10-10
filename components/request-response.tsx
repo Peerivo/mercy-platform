@@ -1,4 +1,6 @@
 "use client";
+import { useLocale } from "@/components/locale-provider";
+
 
 import Link from "next/link";
 import { useActionState } from "react";
@@ -24,6 +26,8 @@ export function RequestResponse({
     contact_method: string;
   } | null;
 }) {
+  const { t } = useLocale();
+
   const [state, action, pending] = useActionState(
     respondToRequest,
     initialState
@@ -32,78 +36,64 @@ export function RequestResponse({
   if (!signedIn) {
     return (
       <section className="request-response card" id="help-response">
-        <h2>Можете помочь?</h2>
-        <p>
-          Отклик видит только автор просьбы и, если назначен, координатор.
-        </p>
+        <h2>{t("Можете помочь?")}</h2>
+        <p>{t("Отклик видит только автор просьбы и, если назначен, координатор.")}</p>
         <Link
           className="btn"
           href={`/auth?next=${encodeURIComponent(
             `/cabinet/requests/${caseId}#help-response`
           )}`}
-        >
-          Хочу помочь
-        </Link>
-        <p className="muted response-auth-note">
-          Вход теперь простой: только email, без пароля.
-        </p>
+        >{t("Хочу помочь")}</Link>
+        <p className="muted response-auth-note">{t("Вход теперь простой: только email, без пароля.")}</p>
       </section>
     );
   }
 
   return (
     <section className="request-response card" id="help-response">
-      <h2>{existing ? "Ваш отклик" : "Хочу помочь"}</h2>
-      <p className="muted">
-        Напишите коротко, чем можете помочь и как с вами связаться. Эти данные не публикуются.
-      </p>
+      <h2>{existing ? t("Ваш отклик") : t("Хочу помочь")}</h2>
+      <p className="muted">{t("Напишите коротко, чем можете помочь и как с вами связаться. Эти данные не публикуются.")}</p>
 
       <form action={action} className="grid">
         <input type="hidden" name="caseId" value={caseId} />
 
-        <label>
-          Чем вы можете помочь
-          <textarea
+        <label>{t("Чем вы можете помочь")}<textarea
             name="message"
             minLength={10}
             maxLength={1500}
             rows={5}
             required
             defaultValue={existing?.message ?? ""}
-            placeholder="Например: могу привезти продукты вечером или помочь с документами онлайн."
+            placeholder={t("Например: могу привезти продукты вечером или помочь с документами онлайн.")}
           />
         </label>
 
-        <label>
-          Как с вами связаться
-          <input
+        <label>{t("Как с вами связаться")}<input
             name="contactMethod"
             minLength={2}
             maxLength={200}
             required
             defaultValue={existing?.contact_method ?? ""}
-            placeholder="Telegram, телефон или другой удобный способ"
+            placeholder={t("Telegram, телефон или другой удобный способ")}
           />
         </label>
 
         <label className="consent-row">
           <input name="consent" type="checkbox" required />
-          <span>
-            Я согласен(-на), что сообщение и указанный способ связи будут доступны автору этой просьбы и назначенному координатору.
-          </span>
+          <span>{t("Я согласен(-на), что сообщение и указанный способ связи будут доступны автору этой просьбы и назначенному координатору.")}</span>
         </label>
 
         <button className="btn" disabled={pending}>
           {pending
-            ? "Отправляем…"
+            ? t("Отправляем…")
             : existing
-              ? "Обновить отклик"
-              : "Отправить отклик"}
+              ? t("Обновить отклик")
+              : t("Отправить отклик")}
         </button>
       </form>
 
       {state.message && (
-        <p role={state.ok ? "status" : "alert"}>{state.message}</p>
+        <p role={state.ok ? "status" : "alert"}>{t(state.message)}</p>
       )}
     </section>
   );

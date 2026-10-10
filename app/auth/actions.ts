@@ -15,8 +15,10 @@ function safeNext(value: FormDataEntryValue | null) {
 }
 
 export async function sendLoginLink(fd: FormData) {
-  const email = emailSchema.parse(fd.get("email"));
   const next = safeNext(fd.get("next"));
+  const parsed = emailSchema.safeParse(fd.get("email"));
+  if (!parsed.success) redirect(`/auth?error=validation&next=${encodeURIComponent(next)}`);
+  const email = parsed.data;
   const s = await serverSupabase();
 
   const callback = new URL("/auth/callback", siteUrl());
@@ -40,7 +42,9 @@ export async function sendLoginLink(fd: FormData) {
 
 // Legacy password update remains valid for users already in a recovery session.
 export async function updatePassword(fd: FormData) {
-  const password = z.string().min(10).max(128).parse(fd.get("password"));
+  const parsed = z.string().min(10).max(128).safeParse(fd.get("password"));
+  if (!parsed.success) redirect("/auth/update-password?error=validation");
+  const password = parsed.data;
   const s = await serverSupabase();
   const {
     data: { user },

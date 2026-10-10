@@ -5,15 +5,23 @@ import { serverSupabase } from "@/lib/supabase/server";
 import { requestSchema } from "@/lib/validation";
 import { getRequestConsentVersion } from "@/lib/request-consent";
 
-export async function createRequest(fd: FormData) {
-  const s = await serverSupabase();
+export type RequestActionState = {
+  error?: "validation" | "save" | "auth";
+  fieldErrors?: Record<string, string>;
+};
 
-  const {
-    data: { user },
-  } = await s.auth.getUser();
+const fieldMessages: Record<string, string> = {
+  category: "Выберите категорию помощи.",
+  country: "Укажите страну: от 2 до 80 символов.",
+  city: "Укажите город: от 2 до 120 символов.",
+  description: "Опишите просьбу: от 20 до 5000 символов.",
+  urgency: "Выберите срочность.",
+  contact_window: "Не более 120 символов.",
+  external_contact: "Не более 200 символов.",
+  consent: "Подтвердите согласие на обработку данных.",
+};
 
-  if (!user) redirect("/auth");
-
+export async function createRequest(_: RequestActionState, fd: FormData): Promise<RequestActionState> {
   const parsed = requestSchema.safeParse({
     category: fd.get("category"),
     country: fd.get("country"),
@@ -27,7 +35,18 @@ export async function createRequest(fd: FormData) {
     consent: fd.get("consent") === "on",
   });
 
-  if (!parsed.success) redirect("/help?error=validation");
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      const field = String(issue.path[0]);
+      if (fieldMessages[field]) fieldErrors[field] = fieldMessages[field];
+    }
+    return { error: "validation", fieldErrors };
+  }
+
+  const s = await serverSupabase();
+  const { data: { user } } = await s.auth.getUser();
+  if (!user) return { error: "auth" };
 
   const request = { ...parsed.data };
   delete (request as Partial<typeof request>).consent;
@@ -41,7 +60,7 @@ export async function createRequest(fd: FormData) {
     consent_version: consentVersion,
   });
 
-  if (error) redirect("/help?error=save");
+  if (error) return { error: "save" };
 
   redirect(`/cabinet/requests/${data}`);
 }

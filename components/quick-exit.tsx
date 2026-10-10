@@ -1,6 +1,10 @@
 "use client";
+import { useLocale } from "@/components/locale-provider";
+
 
 export function QuickExit() {
+  const { t } = useLocale();
+
   function leave() {
     try {
       document.cookie.split(";").forEach((cookie) => {
@@ -25,9 +29,7 @@ export function QuickExit() {
     <button
       className="btn secondary"
       onClick={leave}
-      aria-label="Быстро скрыть приватную страницу"
-    >
-      Быстрый выход
-    </button>
+      aria-label={t("Быстро скрыть приватную страницу")}
+    >{t("Быстрый выход")}</button>
   );
 }

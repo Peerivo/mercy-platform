@@ -1,4 +1,6 @@
 "use client";
+import { useLocale } from "@/components/locale-provider";
+
 
 import Link from "next/link";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
@@ -11,6 +13,8 @@ type AuthEntryProps = {
 };
 
 export function AuthEntry({ className, onNavigate }: AuthEntryProps) {
+  const { t } = useLocale();
+
   const [signedIn, setSignedIn] = useState(false);
 
   useEffect(() => {
@@ -39,7 +43,7 @@ export function AuthEntry({ className, onNavigate }: AuthEntryProps) {
   }, []);
 
   const href = signedIn ? "/cabinet" : "/auth";
-  const label = signedIn ? "Кабинет" : "Вход";
+  const label = signedIn ? t("Кабинет") : t("Вход");
 
   return (
     <Link className={className} href={href} onClick={onNavigate}>

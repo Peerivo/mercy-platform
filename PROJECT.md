@@ -1,7 +1,7 @@
 # mercy-platform — CURRENT
 
 ## Назначение и границы
-«Язык милосердия» — русскоязычная платформа добровольной помощи и координации поддержки людям в сложной жизненной ситуации. MVP включает публичные просьбы о помощи с приватными контактами и действиями владельца, приватное предложение добровольной помощи, staff workspace и каталог проверенных организаций. Помощник не становится сотрудником и не получает доступ к обращениям автоматически.
+«Язык милосердия» — платформа с русским и грузинским интерфейсом добровольной помощи и координации поддержки людям в сложной жизненной ситуации. MVP включает публичные просьбы о помощи с приватными контактами и действиями владельца, приватное предложение добровольной помощи, staff workspace и каталог проверенных организаций. Помощник не становится сотрудником и не получает доступ к обращениям автоматически.
 
 Mercy не является медицинской организацией или 24/7 экстренной службой. Медицинские услуги, профессиональные медицинские исполнители, qualification/licence verification, booking, payments, commissions, ratings и medical marketplace не входят в Mercy и не должны возвращаться в его модель данных или UI.
 
@@ -34,7 +34,7 @@ Mercy связан с каноническим Peerivo Global Contract чере�
 
 ## PLANNED / POST-MVP
 - Happy Food Rescue ↔ Mercy: контрактный boundary v1 закреплён; Mercy владеет получателями/eligibility/НКО/волонтёрами/last-mile, а Happy — surplus/платной rescue-экономикой/донорскими tranche/safety/quantity authority. Outbound Mercy→Happy HTTPS adapter реализован и fail-closed выключен по умолчанию; он не добавляет Mercy DB/UI/автоматический matching и не даёт production permission. В PR #229 подготовлен opt-in live staging harness с раздельными merchant/pilot и Mercy-integration credentials, pre-mutation negative cross-surface `401` checks, точным staging-origin/revision pin и проверкой reservation/replay/outcome/accounting. Наличие harness, skipped/default CI или Preview не является staging E2E: доказательство признаётся только по non-skipped run на exact Mercy head, связанному с независимым успешным Happy staging deploy того же pinned SHA/origin. Production enablement по-прежнему требует общего подтверждённого staging E2E и региональной policy-проверки. Для запуска без копирования Happy-токенов в GitHub добавлен отдельный non-root `Dockerfile.staging-e2e`: одноразовый Railway runner строится из exact Mercy SHA и получает credentials только через Railway service-variable references на существующий `happy-food-staging`; значения секретов не читаются и не переносятся.
-Организационные кабинеты, deletion operations, abuse controls, безопасные вложения/уведомления, локализации, улучшения каталога организаций, volunteer assignment, Peerivo integration и AI assistance по versioned consent contract и с coordinator approval.
+Организационные кабинеты, deletion operations, abuse controls, безопасные вложения/уведомления, дополнительные языки сверх ru/ka, улучшения каталога организаций, volunteer assignment, Peerivo integration и AI assistance по versioned consent contract и с coordinator approval.
 
 Восстановление архивной database-level конфигурации запускается только через локального `supabase_admin` после проверки `SUPERUSER`; ошибки `pg_restore` не выводят SQL с чувствительными настройками. После неудачных recovery runs #8/#9 Beget target считался непроверенным до успешного recovery и read-only preflight; metadata частично восстановленной БД не используется как эталон для legacy backup run #7. Recovery-only mode `RECOVER` в том же защищённом GitHub Actions workflow принимает только проверенный terminal failed/interrupted run ID, восстанавливает baseline Beget, доказывает свежесть и завершается до source freeze. Новый `MIGRATE` требует отдельного свежего решения; read-only preflight проверяет также пустые Storage buckets/objects.
 
@@ -152,3 +152,61 @@ A new package-specific protected workflow prepares schema-only application of mi
 ## Sarafanka workflow deduplication — 2026-10-09
 
 The repository keeps one Sarafanka REG.RU finalizer: `.github/workflows/finalize-sarafanka-reg1.yml`. The byte-identical `finalize-sarafanka-reg1-main.yml` copy was removed because both files listened to the same canonical-file push and could run the same production operation twice. The retained workflow, production environment, validation, candidate checks and rollback steps are unchanged. This repository-only cleanup does not run or verify a production operation.
+
+
+## Georgian interface — local release preparation, 2026-10-10
+
+IMPLEMENTED in this branch:
+- Explicit Russian/Georgian (`ru`/`ka`) interface dictionaries, server cookie resolution and a client locale context. The header exposes keyboard-accessible RU/ქართული buttons on desktop and mobile. `mercy_locale` stores only the selected locale (one year, path `/`, SameSite=Lax and Secure on HTTPS); invalid values use Russian. HTML language, page metadata, date formatting and controlled enum labels follow the selected locale. A router refresh merges server content without a hard navigation.
+- Georgian copy covers the home page, public requests and filters, nearby catalog, volunteer offer form, support/donation and feedback pages, auth/email notices, password recovery, personal cabinet, public/private request card, response/report/share controls, owner completion, chat, Quick Exit and staff queues/forms. Both existing request-consent texts have Georgian translations with the same jurisdiction selection, scope and version identifiers (`request-ge-v2` / `request-ru-v2`). Display language never determines jurisdiction: the submitted country does. User-authored descriptions, contacts, city names, chat and organization data remain verbatim.
+- `/help` uses controlled in-memory fields and an action state. Validation, save failure and a missing session return localized messages without a redirect or loss of entered fields/checkboxes. Field errors have accessible descriptions; duplicate submission is disabled while pending. On an expired session a separate-tab sign-in link keeps the original form open. No draft is written to local/session storage, cookies or a URL. Successful submission still uses the existing user-JWT `create_help_request` RPC and unchanged consent version; no client owner identity is accepted.
+- Invalid email/password server submissions return existing localized error surfaces instead of throwing a Zod exception. Generic error/404 pages have Georgian copy. Shared Peerivo ID pages and externally generated sign-in emails are a separate service and may remain Russian; Mercy explains this boundary in Georgian and retains its language cookie on return. This branch does not translate or configure that service or its email templates.
+
+VERIFICATION / NOT YET VERIFIED:
+- Local npm dependencies installed from the unchanged lockfile. Lint and TypeScript pass (one pre-existing `_event` lint warning in `lib/happy-food-rescue.ts`). The local unit suite passes; final exact counts and browser results are recorded in `docs/ACCEPTANCE.md`.
+- A production bundle builds with explicitly synthetic loopback public configuration; it is not a deployable production artifact and is not proof of production configuration/data/Auth readiness.
+- At the 2026-10-10 pre-retest checkpoint, approved REG.RU synthetic-only Chromium QA passed 14 of 15 scenarios in a dedicated network-none container namespace with sandbox enabled and no published host ports. It exposed a native React reset of four help controls after invalid submission; the minimal reset-prevention fix and repeated actual-action regression now pass locally. The revised candidate still requires its own browser retest, recorded separately against its immutable artifact. The local Chromium Unix-socket restriction was not bypassed. No email, real request, external permission, migration, role/grant, shared-auth change, Actions run or deployment is performed by this UI task. Docker-backed migration/RLS/Realtime and real-account/email acceptance are not run here. Production deployment, full backend acceptance and Georgian native-speaker/legal copy review remain separate release evidence; local translation does not establish legal compliance.
+
+
+## Release candidate checkpoint — 2026-10-10 11:05 UTC
+
+The owner requests publication for launch on 2026-10-11 and explicitly classifies Mercy as not yet officially released. This updates product lifecycle intent; it does not classify the existing public canonical host as private or waive public-production observability/privacy gates.
+
+The final Georgian candidate passed all 16 isolated synthetic Chromium scenarios after the help-form native-reset correction. Six screenshots at 320/390/768 px were visually reviewed without P1/P2 findings. There were zero JavaScript errors and zero fixture writes. The runner used a dedicated network-none container namespace, existing nobody, a fresh synthetic profile and Chromium sandbox; production remained unchanged and owned runtime artifacts were cleaned. This is UI acceptance, not real Auth/RLS, persisted submission or email acceptance.
+
+A separate Work production-config build passed using only fingerprint-verified existing public client configuration extracted from canonical public assets. Build, standalone preparation, lint and typecheck passed; unit tests were 280 passed and one existing opt-in skip. The immutable content-bound archive SHA-256 is `5aaea79825a9ce3b0b1d0f65befe4c10bbf468c3bff48936f36403921c4332d0`, based on reviewed patch `a7a162596cc2f4aebefd3ab4953ae01e7a2ec8408ceb60310bbf3b46dd7f7b85`. This historical pre-publication artifact is not an exact remote-main artifact; rebuild with the approved merged SHA before staging. No service/mail secrets entered Work.
+
+The separately approved two-upstream Kong repair passed 27 anonymous RPC and 39 data-health probes, plus complete Public/Admin Auth JSON checks. Fresh 11:07 UTC production probes returned five of five HTTP 200 for health and five of five for data health; the public runtime remains revision `733b3207444b96c3873433d70b4c9279be3bee09`. These are dependency/channel checks, not completed user login.
+
+Source publication and a private loopback candidate may proceed through the reviewed no-Actions route. Public promotion remains blocked by Global WEB-OBS-009 until valid observability evidence or an explicitly scoped applicable exception exists. Real-account Auth/RLS/write/email remain unverified; no invented account, public help request or real-recipient message is authorized by this checkpoint.
+
+
+### Disable unintended Vercel Git deployment — 2026-10-10
+
+Publishing PR #248 head `5cef09c317e0bd4644ffae4e52bc660086fb887d` created zero GitHub Actions runs, but the existing Vercel Git integration automatically built a preview despite `[skip ci]`. This is recorded as an unintended side effect, not a passed no-external-build check or canonical REG.RU release. The deployment metadata binds the preview to that head and the build entrypoint is the repository root (`.`).
+
+The root `vercel.json` now uses the documented `git.deploymentEnabled: false` policy to prevent subsequent Git-triggered Vercel deployments. It changes no existing deployment, domain, SSO/protection setting, credential or REG.RU runtime; manual Vercel deployments remain separate operations. A local regression requires this exact minimal configuration. Existing provider state must be read after publication to verify that no new build was created; local validation alone does not prove the provider accepted the policy. Restoring Git auto-deployment would require an explicitly authorized later configuration change, not an automatic rollback.
+
+Sources: https://vercel.com/docs/project-configuration/git-configuration#gitdeploymentenabled and https://vercel.com/kb/guide/can-you-deploy-based-on-tags-releases-on-vercel . The documented commit-config mechanism is used as supported; no undocumented guarantee about internal event ordering is asserted.
+
+
+### Narrow runtime dependency hardening — 2026-10-10
+
+The release dependency audit identified advisories in Next 16.3.5 and sharp 0.35.4. Reachability review found no application ImageResponse/next-og route, remote image allowlist, Pages Router SSG/ISR, cache-components/Draft Mode, or dynamic metadata-image route. This is not a waiver of known-vulnerability policy. The release now pins Next and eslint-config-next 16.3.8 and overrides transitive sharp to 0.35.5; the installed native decoder reports librsvg 2.63.2. No application Auth/RLS/consent behavior or security settings were changed.
+
+The lock update changes only Next/sharp and their native packages, reconciles missing optional Tailwind WASM dependency entries, and removes unreachable orphan entries including tinypool. It is not a blanket audit fix. Two dependency-policy regressions fail against the exact pre-patch package/lock snapshot and pass after the update. Fresh local lint/typecheck pass; the suite is 283 passed with one existing optional skip. The audit count changed from 23 (21 high, 2 critical) to 9 (7 high, 2 moderate); Next/sharp/tinypool are absent from the new advisory list. Remaining build/test-tool findings are recorded debt, not claimed clear. Rebuilt standalone membership and provider checks remain required.
+
+The earlier 16/16 synthetic UI result and pre-patch artifacts are historical evidence. Dependency changes require a fresh exact-source build and isolated browser/candidate verification before their corresponding gates can pass. Canonical scheduled Threat Radar/automatic Reviewer remain suspended; read-only enumeration found no current Mercy threat lock, but local reachability analysis is not an authoritative scanner clearance. Public observability and real Auth/RLS/write/email acceptance remain open.
+
+Primary advisories: https://github.com/vercel/next.js/security/advisories/GHSA-vcvr-r3jv-pc5j and https://github.com/lovell/sharp/security/advisories/GHSA-wq5f-xc86-pv6w .
+
+
+### Available toolchain patches and residual advisory — 2026-10-10
+
+Vitest is pinned to 4.1.11; source-map-js to 1.2.2; brace-expansion to 1.1.21 and 5.0.12 using major-specific overrides. The final lock changes exactly eleven package nodes plus the root Vitest pin relative to the runtime-hardening checkpoint. Previously reviewed Vite 7.3.6, chai 6.2.2, tinyrainbow 3.1.0 and PostCSS 8.5.28 remain unchanged. The broad resolver output that proposed Vite 8 was rejected. The selected eleven lock entries use independently verified official tarball SHA-512 integrity metadata; clean npm ci validates the retained dependency closure without install scripts.
+
+The added toolchain regression fails against the pre-patch snapshot and passes on the new lock. Full local lint/typecheck pass; 284 tests passed and one existing opt-in test skipped. Fresh npm audit reports 5 high, 0 critical and 0 moderate findings, all from the same unpatched chain: eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch -> braces 3.0.3. GHSA-vfj7-8cjw-p6xm has no published patched version; braces 3.0.4 is not available. No fabricated pin, lint removal, audit suppression or policy waiver was used.
+
+This chain is build/lint tooling and is absent from the prior rebuilt standalone; recheck final artifact membership. The application does not accept public glob patterns, but that reachability fact does not make a strict zero-high full-toolchain gate pass. Scheduled threat scanning remains suspended and no active Mercy lock was found in the bounded read-only registry/issues check. The remaining policy issue is recorded explicitly; a future upstream patch or a separately reviewed applicable mitigation is still needed.
+
+Primary source: https://github.com/advisories/GHSA-vfj7-8cjw-p6xm . New browser verification and the exact merged-source production artifact remain pending at this checkpoint.

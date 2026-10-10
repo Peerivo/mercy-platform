@@ -1,3 +1,6 @@
+import { enumLabel, dateLocale } from "@/lib/i18n";
+
+import { getTranslations } from "@/lib/i18n/server";
 import Link from "next/link";
 
 import { serverSupabase } from "@/lib/supabase/server";
@@ -26,11 +29,6 @@ const categoryLabels: Record<string, string> = {
   OTHER: "Другое",
 };
 
-const urgencyLabels: Record<string, string> = {
-  NORMAL: "Обычная",
-  SOON: "Желательно скоро",
-  URGENT: "Срочно",
-};
 
 function one(value: string | string[] | undefined): string {
   if (Array.isArray(value)) {
@@ -73,12 +71,14 @@ export async function generateMetadata({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const { t } = await getTranslations();
+
   const filters = parseFilters(await searchParams);
   const canonical = filters.page > 1 ? `/requests?page=${filters.page}` : "/requests";
 
   return {
-    title: "Просьбы о помощи",
-    description: "Опубликованные просьбы о добровольной и практической помощи.",
+    title: t("Просьбы о помощи"),
+    description: t("Опубликованные просьбы о добровольной и практической помощи."),
     alternates: { canonical },
   };
 }
@@ -116,6 +116,8 @@ export default async function RequestsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const { t, locale } = await getTranslations();
+
   const raw = await searchParams;
 
   const filters = parseFilters(raw);
@@ -143,97 +145,79 @@ export default async function RequestsPage({
     <section className="page-shell section requests-page">
       <div className="nav requests-page-heading">
         <div>
-          <h1>Просьбы о помощи</h1>
-          <p className="muted requests-page-lead">
-            Здесь опубликованы просьбы людей, которым сейчас нужна помощь.
-          </p>
+          <h1>{t("Просьбы о помощи")}</h1>
+          <p className="muted requests-page-lead">{t("Здесь опубликованы просьбы людей, которым сейчас нужна помощь.")}</p>
         </div>
 
         <span className="spacer" />
 
-        <Link className="btn requests-primary-action" href="/help">
-          Мне нужна помощь
-        </Link>
+        <Link className="btn requests-primary-action" href="/help">{t("Мне нужна помощь")}</Link>
       </div>
 
       <form method="get" className="card grid request-filters-card">
         <div className="request-section-heading">
           <div>
-            <span className="request-section-kicker">Фильтр</span>
-            <h2>Найти подходящую просьбу</h2>
+            <span className="request-section-kicker">{t("Фильтр")}</span>
+            <h2>{t("Найти подходящую просьбу")}</h2>
           </div>
-          <p>Выберите только нужные параметры — остальные можно оставить как есть.</p>
+          <p>{t("Выберите только нужные параметры — остальные можно оставить как есть.")}</p>
         </div>
 
         <div className="grid cols2 request-filter-row">
-          <label>
-            Категория
-            <select name="category" defaultValue={filters.category}>
-              <option value="">Все категории</option>
+          <label>{t("Категория")}<select name="category" defaultValue={filters.category}>
+              <option value="">{t("Все категории")}</option>
               {Object.entries(categoryLabels).map(([value, label]) => (
                 <option key={value} value={value}>
-                  {label}
+                  {t(label)}
                 </option>
               ))}
             </select>
           </label>
 
-          <label>
-            Город
-            <input
+          <label>{t("Город")}<input
               name="city"
               maxLength={120}
               defaultValue={filters.city}
-              placeholder="Например, Москва"
+              placeholder={t("Например, Москва")}
             />
           </label>
         </div>
 
         <div className="grid cols2 request-filter-row">
-          <label>
-            Срочность
-            <select name="urgency" defaultValue={filters.urgency}>
-              <option value="">Любая</option>
-              <option value="URGENT">Срочно</option>
-              <option value="SOON">Желательно скоро</option>
-              <option value="NORMAL">Обычная</option>
+          <label>{t("Срочность")}<select name="urgency" defaultValue={filters.urgency}>
+              <option value="">{t("Любая")}</option>
+              <option value="URGENT">{t("Срочно")}</option>
+              <option value="SOON">{t("Желательно скоро")}</option>
+              <option value="NORMAL">{t("Обычная")}</option>
             </select>
           </label>
 
-          <label>
-            Актуальность
-            <select name="state" defaultValue={filters.state}>
-              <option value="ACTIVE">Только актуальные</option>
-              <option value="COMPLETED">Завершённые</option>
-              <option value="ALL">Все</option>
+          <label>{t("Актуальность")}<select name="state" defaultValue={filters.state}>
+              <option value="ACTIVE">{t("Только актуальные")}</option>
+              <option value="COMPLETED">{t("Завершённые")}</option>
+              <option value="ALL">{t("Все")}</option>
             </select>
           </label>
         </div>
 
         <div className="nav request-filter-actions">
-          <button className="btn" type="submit">
-            Найти
-          </button>
-          <Link className="btn secondary" href="/requests">
-            Сбросить
-          </Link>
+          <button className="btn" type="submit">{t("Найти")}</button>
+          <Link className="btn secondary" href="/requests">{t("Сбросить")}</Link>
         </div>
       </form>
 
       <div className="requests-results-block">
         <div className="request-section-heading requests-results-heading">
           <div>
-            <span className="request-section-kicker">Просьбы</span>
-            <h2>Запросы людей</h2>
+            <span className="request-section-kicker">{t("Просьбы")}</span>
+            <h2>{t("Запросы людей")}</h2>
           </div>
-          <p>Откройте карточку, чтобы увидеть подробности и способы помочь.</p>
+          <p>{t("Откройте карточку, чтобы увидеть подробности и способы помочь.")}</p>
         </div>
 
         {error ? (
           <div className="card requests-message-card">
-            <p role="alert">
-              Не удалось загрузить просьбы. Попробуйте обновить страницу.
-            </p>
+            <p role="alert">{t("Не удалось загрузить просьбы. Попробуйте обновить страницу.")}</p>
           </div>
         ) : rows.length ? (
           <div className="grid request-list">
@@ -247,64 +231,57 @@ export default async function RequestsPage({
                 <article className="card request-list-card" key={request.id}>
                   <div className="nav request-card-header">
                     <div>
-                      <h2>Просьба № {request.case_number}</h2>
+                      <h2>{t("Просьба №")} {request.case_number}</h2>
                       <p className="request-card-category">
-                        <strong>{categoryLabels[request.category] ?? request.category}</strong>
+                        <strong>{enumLabel(t, request.category)}</strong>
                       </p>
                     </div>
 
                     <span className="spacer" />
 
                     <strong className="request-card-status">
-                      {getPublicRequestStatus(request.status)}
+                      {t(getPublicRequestStatus(request.status))}
                     </strong>
                   </div>
 
                   <p className="request-card-meta">
-                    {request.country} · {request.city} · {urgencyLabels[request.urgency] ?? request.urgency}
+                    {request.country} · {request.city} · {enumLabel(t, request.urgency)}
                   </p>
 
                   <p className="request-card-description">{description}</p>
 
-                  <p className="muted request-card-date">
-                    Опубликовано{" "}
+                  <p className="muted request-card-date">{t("Опубликовано")}{" "}
                     <time dateTime={request.created_at}>
-                      {new Date(request.created_at).toLocaleDateString("ru-RU")}
+                      {new Date(request.created_at).toLocaleDateString(dateLocale(locale))}
                     </time>
                   </p>
 
                   <Link
                     className="btn secondary request-card-action"
                     href={`/cabinet/requests/${request.id}`}
-                  >
-                    Открыть просьбу
-                  </Link>
+                  >{t("Открыть просьбу")}</Link>
                 </article>
               );
             })}
           </div>
         ) : (
           <div className="card requests-message-card">
-            <h2>Просьб не найдено</h2>
-            <p>Попробуйте изменить фильтры.</p>
+            <h2>{t("Просьб не найдено")}</h2>
+            <p>{t("Попробуйте изменить фильтры.")}</p>
           </div>
         )}
       </div>
 
       {!error && (filters.page > 1 || hasNext) && (
-        <nav className="pagination" aria-label="Страницы просьб">
+        <nav className="pagination" aria-label={t("Страницы просьб")}>
           {filters.page > 1 && (
-            <Link className="btn secondary" href={requestsHref(filters, filters.page - 1)}>
-              Назад
-            </Link>
+            <Link className="btn secondary" href={requestsHref(filters, filters.page - 1)}>{t("Назад")}</Link>
           )}
 
-          <span>Страница {filters.page}</span>
+          <span>{t("Страница")} {filters.page}</span>
 
           {hasNext && (
-            <Link className="btn secondary" href={requestsHref(filters, filters.page + 1)}>
-              Далее
-            </Link>
+            <Link className="btn secondary" href={requestsHref(filters, filters.page + 1)}>{t("Далее")}</Link>
           )}
         </nav>
       )}

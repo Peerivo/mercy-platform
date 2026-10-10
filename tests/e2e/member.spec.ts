@@ -155,14 +155,17 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p1.getByLabel("Описание").fill("This anonymous submission must never be stored");
     await p1.getByLabel(/Я согласен/).check();
     await p1.getByRole("button", { name: "Опубликовать просьбу" }).click();
-    await expect(p1).toHaveURL(/\/auth/);
+    await expect(p1).toHaveURL(/\/help$/);
+    await expect(p1.getByRole("alert")).toContainText("Для публикации войдите в аккаунт");
+    await expect(p1.getByLabel("Описание")).toHaveValue("This anonymous submission must never be stored");
+    await p1.goto("/auth");
     await p1.getByLabel("Email").fill(firstEmail);
     await p1.getByRole("button", { name: "Получить ссылку для входа" }).click();
     await expect(p1).toHaveURL(/\/auth\?sent=1/);
     const reloginLink = await getLatestMagicLink(firstEmail);
     await p1.goto(reloginLink);
     await expect(p1).toHaveURL(/\/cabinet$/);
-    await expect(p1.getByRole("link", { name: /№ .*PREGNANCY/ })).toHaveCount(1);
+    await expect(p1.getByRole("link", { name: /№ .*Беременность и материнство/ })).toHaveCount(1);
     await expect(p1.getByText("This anonymous submission must never be stored")).toHaveCount(0);
   } finally {
     await Promise.all([one.close(), two.close()]);

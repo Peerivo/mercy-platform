@@ -1,4 +1,6 @@
 "use client";
+import { useLocale } from "@/components/locale-provider";
+
 
 import { useActionState } from "react";
 import {
@@ -16,6 +18,8 @@ export function OwnerRequestActions({
 }: {
   caseId: string;
 }) {
+  const { t } = useLocale();
+
   const [state, action, pending] = useActionState(
     closeOwnRequest,
     initialState
@@ -27,13 +31,13 @@ export function OwnerRequestActions({
 
       <button className="btn" type="submit" disabled={pending}>
         {pending
-          ? "Завершаем…"
-          : "Помощь получена — завершить просьбу"}
+          ? t("Завершаем…")
+          : t("Помощь получена — завершить просьбу")}
       </button>
 
       {state.message && (
         <p role={state.ok ? "status" : "alert"}>
-          {state.message}
+          {t(state.message)}
         </p>
       )}
     </form>
