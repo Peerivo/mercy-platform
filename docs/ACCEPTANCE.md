@@ -237,3 +237,25 @@ Publishing PR #248 head `5cef09c317e0bd4644ffae4e52bc660086fb887d` created zero 
 The root `vercel.json` now uses the documented `git.deploymentEnabled: false` policy to prevent subsequent Git-triggered Vercel deployments. It changes no existing deployment, domain, SSO/protection setting, credential or REG.RU runtime; manual Vercel deployments remain separate operations. A local regression requires this exact minimal configuration. Existing provider state must be read after publication to verify that no new build was created; local validation alone does not prove the provider accepted the policy. Restoring Git auto-deployment would require an explicitly authorized later configuration change, not an automatic rollback.
 
 Sources: https://vercel.com/docs/project-configuration/git-configuration#gitdeploymentenabled and https://vercel.com/kb/guide/can-you-deploy-based-on-tags-releases-on-vercel . The documented commit-config mechanism is used as supported; no undocumented guarantee about internal event ordering is asserted.
+
+
+### Narrow runtime dependency hardening — 2026-10-10
+
+The release dependency audit identified advisories in Next 16.3.5 and sharp 0.35.4. Reachability review found no application ImageResponse/next-og route, remote image allowlist, Pages Router SSG/ISR, cache-components/Draft Mode, or dynamic metadata-image route. This is not a waiver of known-vulnerability policy. The release now pins Next and eslint-config-next 16.3.8 and overrides transitive sharp to 0.35.5; the installed native decoder reports librsvg 2.63.2. No application Auth/RLS/consent behavior or security settings were changed.
+
+The lock update changes only Next/sharp and their native packages, reconciles missing optional Tailwind WASM dependency entries, and removes unreachable orphan entries including tinypool. It is not a blanket audit fix. Two dependency-policy regressions fail against the exact pre-patch package/lock snapshot and pass after the update. Fresh local lint/typecheck pass; the suite is 283 passed with one existing optional skip. The audit count changed from 23 (21 high, 2 critical) to 9 (7 high, 2 moderate); Next/sharp/tinypool are absent from the new advisory list. Remaining build/test-tool findings are recorded debt, not claimed clear. Rebuilt standalone membership and provider checks remain required.
+
+The earlier 16/16 synthetic UI result and pre-patch artifacts are historical evidence. Dependency changes require a fresh exact-source build and isolated browser/candidate verification before their corresponding gates can pass. Canonical scheduled Threat Radar/automatic Reviewer remain suspended; read-only enumeration found no current Mercy threat lock, but local reachability analysis is not an authoritative scanner clearance. Public observability and real Auth/RLS/write/email acceptance remain open.
+
+Primary advisories: https://github.com/vercel/next.js/security/advisories/GHSA-vcvr-r3jv-pc5j and https://github.com/lovell/sharp/security/advisories/GHSA-wq5f-xc86-pv6w .
+
+
+### Available toolchain patches and residual advisory — 2026-10-10
+
+Vitest is pinned to 4.1.11; source-map-js to 1.2.2; brace-expansion to 1.1.21 and 5.0.12 using major-specific overrides. The final lock changes exactly eleven package nodes plus the root Vitest pin relative to the runtime-hardening checkpoint. Previously reviewed Vite 7.3.6, chai 6.2.2, tinyrainbow 3.1.0 and PostCSS 8.5.28 remain unchanged. The broad resolver output that proposed Vite 8 was rejected. The selected eleven lock entries use independently verified official tarball SHA-512 integrity metadata; clean npm ci validates the retained dependency closure without install scripts.
+
+The added toolchain regression fails against the pre-patch snapshot and passes on the new lock. Full local lint/typecheck pass; 284 tests passed and one existing opt-in test skipped. Fresh npm audit reports 5 high, 0 critical and 0 moderate findings, all from the same unpatched chain: eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch -> braces 3.0.3. GHSA-vfj7-8cjw-p6xm has no published patched version; braces 3.0.4 is not available. No fabricated pin, lint removal, audit suppression or policy waiver was used.
+
+This chain is build/lint tooling and is absent from the prior rebuilt standalone; recheck final artifact membership. The application does not accept public glob patterns, but that reachability fact does not make a strict zero-high full-toolchain gate pass. Scheduled threat scanning remains suspended and no active Mercy lock was found in the bounded read-only registry/issues check. The remaining policy issue is recorded explicitly; a future upstream patch or a separately reviewed applicable mitigation is still needed.
+
+Primary source: https://github.com/advisories/GHSA-vfj7-8cjw-p6xm . New browser verification and the exact merged-source production artifact remain pending at this checkpoint.
