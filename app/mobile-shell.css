@@ -18,12 +18,10 @@
   }
 }
 
-/* Both languages remain keyboard-accessible at small widths. */
-.language-switcher { display: flex; gap: .15rem; align-items: center; flex-shrink: 0; }
-.language-switcher button { min-height: 44px; padding: .4rem .55rem; border: 1px solid transparent; border-radius: .5rem; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.language-switcher button[aria-pressed="true"] { border-color: currentColor; font-weight: 700; }
-.language-switcher button:focus-visible { outline: 3px solid #507fbc; outline-offset: 2px; }
-.language-switcher button:disabled { cursor: wait; }
+/* Native selection keeps keyboard and mobile-picker behavior. */
+.language-switcher { width: auto; max-width: 100%; min-height: 44px; flex-shrink: 0; padding: .4rem .55rem; border-radius: .5rem; font-size: .9rem; font-weight: 650; cursor: pointer; }
+.language-switcher:focus-visible { outline: 3px solid #507fbc; outline-offset: 2px; }
+.language-switcher[aria-disabled="true"] { cursor: wait; opacity: .65; }
 html[lang="ka"] { overflow-wrap: anywhere; }
 html[lang="ka"] .brand-copy strong { font-size: 1rem; }
 html[lang="ka"] .site-header-inner { flex-wrap: wrap; }
@@ -32,7 +30,7 @@ html[lang="ka"] .site-header-actions { margin-left: auto; }
   .site-header-inner { flex-wrap: wrap; gap: .5rem; }
   .site-header-actions { margin-left: auto; }
   html[lang="ka"] .brand-copy small { font-size: .65rem; }
-  .language-switcher button { padding-inline: .4rem; font-size: .85rem; }
+  .language-switcher { padding-inline: .4rem; font-size: .85rem; }
 }
 .field-error { color: #9b2525; font-size: .9rem; }
 .help-form-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 1.5rem; }
