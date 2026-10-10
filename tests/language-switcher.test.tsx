@@ -53,15 +53,15 @@ describe("native language dropdown", () => {
     vi.unstubAllGlobals();
   });
 
-  it("defaults to Russian with a named native select and two flag-plus-language options", async () => {
+  it("defaults to Russian with a named native select and two readable language options", async () => {
     await act(async () => root.render(<LanguageSwitcher />));
     expect(selector()).not.toBeNull();
     expect(selector().getAttribute("aria-label")).toBe("Язык");
     expect(selector().getAttribute("lang")).toBe("ru");
     expect(selector().value).toBe("ru");
-    expect(selector().selectedOptions[0].textContent).toBe("🇷🇺 Русский");
+    expect(selector().selectedOptions[0].textContent).toBe("Русский");
     expect(Array.from(selector().options).map(option => [option.value, option.textContent, option.lang])).toEqual([
-      ["ru", "🇷🇺 Русский", "ru"], ["ka", "🇬🇪 ქართული", "ka"],
+      ["ru", "Русский", "ru"], ["ka", "ქართული", "ka"],
     ]);
     expect(selector().disabled).toBe(false);
     expect(selector().getAttribute("aria-busy")).toBe("false");
@@ -73,11 +73,43 @@ describe("native language dropdown", () => {
   it("shows the current Georgian label and follows provider changes in both directions", async () => {
     await render("ka");
     expect(selector().value).toBe("ka");
-    expect(selector().selectedOptions[0].textContent).toBe("🇬🇪 ქართული");
+    expect(selector().selectedOptions[0].textContent).toBe("ქართული");
     expect(selector().getAttribute("aria-label")).toBe("ენა");
     expect(selector().lang).toBe("ka");
     await render("ru");
-    expect(selector().selectedOptions[0].textContent).toBe("🇷🇺 Русский");
+    expect(selector().selectedOptions[0].textContent).toBe("Русский");
+    expect(router.refresh).not.toHaveBeenCalled();
+  });
+
+  it.each(["ru", "ka"] as const)("renders a font-independent decorative %s flag beside the native select", async locale => {
+    await render(locale);
+    const flag = container.querySelector<SVGSVGElement>("svg.language-flag");
+    expect(flag).not.toBeNull();
+    expect(flag!.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(flag!.getAttribute("data-locale")).toBe(locale);
+    expect(flag!.getAttribute("viewBox")).toBe("0 0 36 24");
+    expect(flag!.getAttribute("width")).toBe("24");
+    expect(flag!.getAttribute("height")).toBe("16");
+    expect(flag!.getAttribute("aria-hidden")).toBe("true");
+    expect(flag!.getAttribute("focusable")).toBe("false");
+    expect(flag!.parentElement).toBe(selector().parentElement);
+    expect(flag!.querySelector("text, image, use, foreignObject, [href], [filter]")).toBeNull();
+    expect(container.textContent).not.toMatch(/[\u{1F1E6}-\u{1F1FF}]/u);
+    expect(flag!.querySelector('rect[fill="#fff"][width="36"][height="24"]')).not.toBeNull();
+    if (locale === "ru") {
+      expect(flag!.querySelectorAll("rect")).toHaveLength(3);
+      expect(flag!.querySelector('rect[y="8"][width="36"][height="8"][fill="#0039a6"]')).not.toBeNull();
+      expect(flag!.querySelector('rect[y="16"][width="36"][height="8"][fill="#d52b1e"]')).not.toBeNull();
+      expect(flag!.querySelector("path")).toBeNull();
+    } else {
+      expect(flag!.querySelectorAll('g[fill="#e8112d"] path')).toHaveLength(5);
+      expect(flag!.querySelector("path")!.getAttribute("d")).toBe("M16 0h4v10h16v4H20v10h-4V14H0v-4h16z");
+      expect(Array.from(flag!.querySelectorAll("path[transform]")).map(path => path.getAttribute("transform"))).toEqual([
+        "translate(8 5)", "translate(28 5)", "translate(8 19)", "translate(28 19)",
+      ]);
+    }
+    selector().focus();
+    expect(document.activeElement).toBe(selector());
     expect(router.refresh).not.toHaveBeenCalled();
   });
 
@@ -164,6 +196,7 @@ describe("native language dropdown", () => {
     for (const locale of ["ka", "ru"] as const) {
       await act(async () => change(locale));
       expect(selector().value).toBe(locale);
+      expect(container.querySelector("svg.language-flag")!.getAttribute("data-locale")).toBe(locale);
       expect(container.querySelector("form")).toBe(form);
       expect(snapshot()).toEqual(draft);
       expect(form.querySelector('a[href="/consent/request?country=ru"]')).not.toBeNull();

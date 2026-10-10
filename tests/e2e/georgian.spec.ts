@@ -4,8 +4,12 @@ test("Georgian language persists across navigation and reload, with complete pub
   test.setTimeout(120_000);
   await page.goto("/");
   await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+  await expect(page.locator("svg.language-flag")).toHaveAttribute("data-locale", "ru");
+  await expect(page.locator("select.language-switcher option")).toHaveText(["Русский", "ქართული"]);
   await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("ka");
   await expect(page.locator("html")).toHaveAttribute("lang", "ka");
+  await expect(page.locator("svg.language-flag")).toHaveAttribute("data-locale", "ka");
+  await expect(page.locator("svg.language-flag")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("მარტო გამკლავება არ გევალებათ");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("lang", "ka");
@@ -15,7 +19,7 @@ test("Georgian language persists across navigation and reload, with complete pub
     await expect(page.locator("html")).toHaveAttribute("lang", "ka");
     await expect(page.locator("main").first()).toBeVisible();
     // Native language names intentionally stay in their own languages.
-    const copy = (await page.locator("body").innerText()).replace("🇷🇺 Русский", "");
+    const copy = (await page.locator("body").innerText()).split("\n").filter(line => line.trim() !== "Русский").join("\n");
     expect(copy, route).not.toMatch(/[А-Яа-яЁё]/);
   }
   await page.getByRole("combobox", { name: "ენა", exact: true }).selectOption("ru");
@@ -62,12 +66,10 @@ test("Georgian mobile pages and keyboard language controls remain usable", async
   await expect(switcher).toHaveAccessibleName("Язык");
   await switcher.focus();
   await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveAttribute("lang", "ka");
   await expect(switcher).toBeFocused();
   await expect(switcher).toHaveValue("ka");
   await page.keyboard.press("ArrowUp");
-  await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveAttribute("lang", "ru");
   await expect(switcher).toBeFocused();
   await switcher.selectOption("ka");
