@@ -1,16 +1,52 @@
 "use client";
 
-import { useState } from "react";
-import { createRequest } from "./actions";
+import { startTransition, useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createRequest, type RequestActionState } from "./actions";
 import { getRequestJurisdiction } from "@/lib/request-consent";
 
 export function HelpForm() {
+  const router = useRouter();
   const [country, setCountry] = useState("Россия");
+  // Sensitive user content stays in this component only: no localStorage, analytics,
+  // URL parameters, session recording or server echo on validation errors.
+  const [draft, setDraft] = useState({
+    category: "PREGNANCY",
+    city: "",
+    description: "",
+    urgency: "NORMAL",
+    canMessage: true,
+    canCall: false,
+    contactWindow: "",
+    externalContact: "",
+    consent: false,
+  });
+  const [state, submit, pending] = useActionState(async (previous: RequestActionState, formData: FormData): Promise<RequestActionState> => {
+    try {
+      return await createRequest(previous, formData);
+    } catch {
+      // A rejected browser/server transport must not unmount the private draft.
+      return { ok: false, outcomeUnknown: true, message: "Не удалось подтвердить отправку просьбы. Ваш текст остался в форме. Перед повторной отправкой проверьте личный кабинет в новой вкладке." };
+    }
+  }, { ok: false, message: "" });
+  useEffect(() => {
+    if (state.ok && state.requestId) router.push(`/cabinet/requests/${encodeURIComponent(state.requestId)}`);
+  }, [state.ok, state.requestId, router]);
 
   const jurisdiction = getRequestJurisdiction(country);
 
   return (
-    <form action={createRequest} className="card grid public-form-card help-form-card">
+    <form onSubmit={event => {
+      event.preventDefault();
+      if (pending) return;
+      const data = new FormData(event.currentTarget);
+      // Function-valued form actions reset selects/checkboxes even on returned errors.
+      // Dispatch the action explicitly so every field survives a failed attempt.
+      startTransition(() => submit(data));
+    }} className="card grid public-form-card help-form-card" aria-busy={pending}>
+      {state.message ? <p className="form-alert" role="alert">{state.message}</p> : null}
+      {state.authRequired ? <a href="/auth" target="_blank" rel="noopener noreferrer">Войти в новой вкладке</a> : null}
+      {state.outcomeUnknown ? <a href="/cabinet" target="_blank" rel="noopener noreferrer">Проверить личный кабинет в новой вкладке</a> : null}
       <div className="form-section">
         <div className="form-section-heading">
           <span className="request-section-kicker">Просьба</span>
@@ -19,7 +55,7 @@ export function HelpForm() {
 
         <label>
           Категория
-          <select name="category" required>
+          <select name="category" required value={draft.category} onChange={e => setDraft(current => ({ ...current, category: e.target.value }))}>
             <option value="PREGNANCY">Беременность и материнство</option>
             <option value="FAMILY">Семья</option>
             <option value="HOUSING">Жильё</option>
@@ -35,6 +71,7 @@ export function HelpForm() {
             Страна
             <input
               name="country"
+              autoComplete="country-name"
               required
               maxLength={80}
               value={country}
@@ -46,6 +83,9 @@ export function HelpForm() {
             Город
             <input
               name="city"
+              autoComplete="address-level2"
+              value={draft.city}
+              onChange={e => setDraft(current => ({ ...current, city: e.target.value }))}
               required
               maxLength={120}
               placeholder="Например, Москва"
@@ -57,6 +97,9 @@ export function HelpForm() {
           Описание
           <textarea
             name="description"
+            value={draft.description}
+            onChange={e => setDraft(current => ({ ...current, description: e.target.value }))}
+            autoComplete="off"
             required
             minLength={20}
             maxLength={5000}
@@ -72,7 +115,7 @@ export function HelpForm() {
 
         <label>
           Срочность
-          <select name="urgency">
+          <select name="urgency" value={draft.urgency} onChange={e => setDraft(current => ({ ...current, urgency: e.target.value }))}>
             <option value="NORMAL">Обычная</option>
             <option value="SOON">Желательно скоро</option>
             <option value="URGENT">Срочно</option>
@@ -88,12 +131,12 @@ export function HelpForm() {
 
         <div className="compact-choice-grid">
           <label className="compact-choice">
-            <input name="can_message" type="checkbox" defaultChecked />
+            <input name="can_message" type="checkbox" checked={draft.canMessage} onChange={e => setDraft(current => ({ ...current, canMessage: e.target.checked }))} />
             Можно писать
           </label>
 
           <label className="compact-choice">
-            <input name="can_call" type="checkbox" />
+            <input name="can_call" type="checkbox" checked={draft.canCall} onChange={e => setDraft(current => ({ ...current, canCall: e.target.checked }))} />
             Можно звонить
           </label>
         </div>
@@ -101,19 +144,21 @@ export function HelpForm() {
         <div className="grid cols2 compact-form-grid">
           <label>
             Подходящее время
-            <input name="contact_window" maxLength={120} />
+            <input name="contact_window" maxLength={120} value={draft.contactWindow} autoComplete="off"
+              onChange={e => setDraft(current => ({ ...current, contactWindow: e.target.value }))} />
           </label>
 
           <label>
             Внешний контакт (необязательно)
-            <input name="external_contact" maxLength={200} />
+            <input name="external_contact" maxLength={200} value={draft.externalContact} autoComplete="off"
+              onChange={e => setDraft(current => ({ ...current, externalContact: e.target.value }))} />
           </label>
         </div>
       </div>
 
       <div className="form-section form-section-consent">
         <label className="consent-row">
-          <input name="consent" type="checkbox" required />
+          <input name="consent" type="checkbox" checked={draft.consent} onChange={e => setDraft(current => ({ ...current, consent: e.target.checked }))} required />
 
           <span>
             Я согласен(-на) на обработку данных обращения в соответствии с{" "}
@@ -130,7 +175,9 @@ export function HelpForm() {
       </div>
 
       <div className="form-submit-row">
-        <button className="btn">Опубликовать просьбу</button>
+        <button className="btn" type="submit" disabled={pending}>
+          {pending ? "Сохраняем…" : "Опубликовать просьбу"}
+        </button>
       </div>
     </form>
   );
