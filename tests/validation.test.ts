@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   assignmentSchema,
+  mercyRoleChangeSchema,
+  roleDirectorySearchSchema,
+  volunteerDirectorySearchSchema,
+  volunteerAssignmentSchema,
+  volunteerContactSchema,
+  volunteerProfileSchema,
   caseStatusSchema,
   feedbackSchema,
   offerSchema,
@@ -153,5 +159,53 @@ describe("staff workspace validation", () => {
     expect(caseStatusSchema.safeParse({ caseId, status: "NEW" }).success).toBe(
       false
     );
+  });
+});
+
+describe("Mercy MVP email-based role validation", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+
+  it("requires a valid account, explicit enabled flag and reason", () => {
+    const valid = {
+      targetUser: id, role: "VOLUNTEER", enabled: true,
+      reason: "Назначен куратором", patronKind: "",
+    };
+    expect(mercyRoleChangeSchema.safeParse(valid).success).toBe(true);
+    expect(mercyRoleChangeSchema.safeParse({ ...valid, enabled: null }).success).toBe(false);
+    expect(mercyRoleChangeSchema.safeParse({ ...valid, enabled: "true" }).success).toBe(false);
+    expect(mercyRoleChangeSchema.safeParse({ ...valid, reason: "x" }).success).toBe(false);
+    expect(mercyRoleChangeSchema.safeParse({ ...valid, role: "USER" }).success).toBe(false);
+    expect(mercyRoleChangeSchema.safeParse({ ...valid, targetUser: "not-a-uuid" }).success).toBe(false);
+  });
+
+  it("requires legal form of patron and exact email lookup", () => {
+    const patron = { targetUser: id, role: "PATRON", enabled: true, reason: "Поддерживает проект" };
+    expect(mercyRoleChangeSchema.safeParse({ ...patron, patronKind: "" }).success).toBe(false);
+    expect(mercyRoleChangeSchema.safeParse({ ...patron, patronKind: "SOLE_PROPRIETOR" }).success).toBe(true);
+    expect(roleDirectorySearchSchema.safeParse({ email: "volunteer@example.org" }).success).toBe(true);
+    expect(roleDirectorySearchSchema.safeParse({ email: "name prefix%" }).success).toBe(false);
+  });
+
+  it("rejects malformed status, category or assignment mode", () => {
+    expect(volunteerDirectorySearchSchema.safeParse({ status: "ACTIVE", page: "2" }).success).toBe(true);
+    expect(volunteerDirectorySearchSchema.safeParse({ status: "UNVERIFIED" }).success).toBe(false);
+    const profile = {
+      targetUser: id, status: "ACTIVE", categories: ["FOOD"], availableOnline: true,
+      reason: "Обучение завершено",
+    };
+    expect(volunteerProfileSchema.safeParse(profile).success).toBe(true);
+    expect(volunteerProfileSchema.safeParse({ ...profile, status: "SUPERUSER" }).success).toBe(false);
+    const assignment = { caseId: id, targetUser: id, mode: "HOME", task: "Доставить продукты" };
+    expect(volunteerAssignmentSchema.safeParse(assignment).success).toBe(true);
+    expect(volunteerAssignmentSchema.safeParse({ ...assignment, mode: "HOME_PAIRED" }).success).toBe(false);
+  });
+
+  it("contact persons require confirmation and bounded private fields", () => {
+    const contact = {
+      targetUser: id, name: "Иван Иванов", relationship: "Родственник",
+      contact: "ivan@example.org", linkedUser: "", consentConfirmed: true,
+    };
+    expect(volunteerContactSchema.safeParse(contact).success).toBe(true);
+    expect(volunteerContactSchema.safeParse({ ...contact, consentConfirmed: false }).success).toBe(false);
   });
 });
