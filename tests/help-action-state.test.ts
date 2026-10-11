@@ -39,6 +39,38 @@ describe("help action preserves retry without exposing submitted data", () => {
     expect(await createRequest({}, validForm())).toEqual({ error: "save" });
     expect(mocks.redirect).not.toHaveBeenCalled();
   });
+  it("keeps the draft on pre-write client initialization failure without calling RPC", async () => {
+    mocks.server.mockRejectedValue(new Error("private server details"));
+    const response = await createRequest({}, validForm());
+    expect(response).toEqual({ error: "save" });
+    expect(JSON.stringify(response)).not.toContain("private");
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+  it("handles thrown auth lookup as an expired-session state without writing", async () => {
+    mocks.getUser.mockRejectedValue(new Error("private auth details"));
+    expect(await createRequest({}, validForm())).toEqual({ error: "auth" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+  it("handles returned Auth errors without writing a request", async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: null }, error: { message: "private auth details" } });
+    expect(await createRequest({}, validForm())).toEqual({ error: "auth" });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("treats a thrown RPC result as uncertain, not a safe retry", async () => {
+    mocks.rpc.mockRejectedValue(new Error("the private description was submitted"));
+    const state = await createRequest({}, validForm());
+    expect(state).toEqual({ error: "unknown" });
+    expect(JSON.stringify(state)).not.toContain("private");
+    expect(mocks.rpc).toHaveBeenCalledOnce();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+  it("treats an accepted RPC response without a case id as uncertain", async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    expect(await createRequest({}, validForm())).toEqual({ error: "unknown" });
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
   it("passes unchanged Georgian consent version to the existing user-JWT RPC", async () => {
     const form = validForm(); form.set("owner_id", "forged");
     await expect(createRequest({}, form)).rejects.toThrow("REDIRECT:/cabinet/requests/case-id");
