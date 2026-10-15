@@ -467,6 +467,10 @@ article.card h2 {
     line-height: 1.2;
   }
 
+  .request-filters-card select {
+    padding-right: 40px;
+  }
+
   .requests-page .request-filter-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

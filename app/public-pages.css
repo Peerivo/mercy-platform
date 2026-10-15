@@ -265,6 +265,10 @@ label.compact-choice {
     line-height: 1.2;
   }
 
+  .public-form-card select {
+    padding-right: 40px;
+  }
+
   .public-form-card textarea {
     min-height: 116px;
     padding: 9px 10px;
