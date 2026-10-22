@@ -156,7 +156,7 @@ test("two browser contexts stay isolated; create, message, refresh and Quick Exi
     await p1.getByLabel(/Я согласен/).check();
     await p1.getByRole("button", { name: "Опубликовать просьбу" }).click();
     await expect(p1).toHaveURL(/\/help$/);
-    await expect(p1.getByRole("alert")).toContainText("Для публикации войдите в аккаунт");
+    await expect(p1.locator(".form-alert")).toContainText("Для публикации войдите в аккаунт");
     await expect(p1.getByLabel("Описание")).toHaveValue("This anonymous submission must never be stored");
     await p1.goto("/auth");
     await p1.getByLabel("Email").fill(firstEmail);
