@@ -9,6 +9,7 @@ const messages: Record<string, string> = {
   invalid: "Проверьте идентификатор и количество.",
   reserve: "Food не подтвердил резерв. Проверьте доступный остаток и срок выдачи.",
   attest: "Подтверждение передачи отклонено. Проверьте исходный резерв и количество.",
+  evidence: "Требуется разрешённый журнал подтверждающих документов Mercy.",
 };
 
 export default async function FoodRescueStaff({
@@ -28,6 +29,7 @@ export default async function FoodRescueStaff({
     /^reservation_mercy_staff_[a-f0-9]{32}$/.test(params.reservation)
     ? params.reservation : null;
   const enabled = happyFoodRescueConfig().enabled;
+  const canAttest = process.env.HAPPY_FOOD_RESCUE_EVIDENCE_ATTESTATION_ENABLED === "true";
 
   return (
     <section className="container section">
@@ -67,6 +69,7 @@ export default async function FoodRescueStaff({
               <button type="submit" className="btn">{t("Зарезервировать")}</button>
             </form>
           </div>
+          {canAttest ? (
           <div className="card">
             <h2>{t("2. Подтвердить результат")}</h2>
             <p className="muted">{t("Подтверждайте только фактическую передачу. Переданное и остающееся на ответственном хранении учитываются отдельно.")}</p>
@@ -82,6 +85,12 @@ export default async function FoodRescueStaff({
               <button type="submit" className="btn">{t("Подтвердить передачу")}</button>
             </form>
           </div>
+          ) : (
+            <div className="card">
+              <h2>{t("Подтверждение передачи недоступно")}</h2>
+              <p>{t("До подключения проверяемых свидетельств выдачи Mercy не разрешает проводить окончательное списание продуктов.")}</p>
+            </div>
+          )}
         </div>
       )}
       <p className="muted">{t("Данные Food:")}<a href="https://food.peerivo.net" target="_blank" rel="noreferrer">food.peerivo.net ↗</a>{t(". Реальные платежи и публичный подбор получателя здесь не выполняются.")}</p>
