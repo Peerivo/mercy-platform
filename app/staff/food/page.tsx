@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
+import { getTranslations } from "@/lib/i18n/server";
 import { happyFoodRescueConfig } from "@/lib/happy-food-rescue";
 import { reserveFoodDonation, attestFoodDonation } from "./actions";
 
@@ -15,13 +16,14 @@ export default async function FoodRescueStaff({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
+  const { t } = await getTranslations();
   const supabase = await serverSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth");
   const { data: role } = await supabase.rpc("current_staff_role");
   if (role !== "ADMIN" && role !== "COORDINATOR") redirect("/cabinet");
   const params = await searchParams;
-  const error = typeof params.error === "string" ? messages[params.error] : null;
+  const error = typeof params.error === "string" && Object.hasOwn(messages, params.error) ? t(messages[params.error]) : null;
   const reservation = typeof params.reservation === "string" &&
     /^reservation_mercy_staff_[a-f0-9]{32}$/.test(params.reservation)
     ? params.reservation : null;
