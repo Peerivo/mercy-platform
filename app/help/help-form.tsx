@@ -49,8 +49,11 @@ export function HelpForm() {
           ? "Проверьте отмеченные поля. Введённые данные сохранены в этой форме."
           : state.error === "auth"
             ? "Для публикации войдите в аккаунт. Не закрывайте эту форму: введённые данные останутся здесь."
-            : "Не удалось сохранить просьбу. Ваш текст остался в форме. Попробуйте ещё раз.")}
+            : state.error === "unknown"
+              ? "Не удалось подтвердить сохранение просьбы. Перед повторной отправкой проверьте кабинет. Введённые данные остались в форме."
+              : "Не удалось сохранить просьбу. Ваш текст остался в форме. Попробуйте ещё раз.")}
         {state.error === "auth" && <p><a href="/auth?next=%2Fhelp" target="_blank" rel="noopener noreferrer">{t("Войти в новой вкладке")}</a></p>}
+        {state.error === "unknown" && <p><a href="/cabinet" target="_blank" rel="noopener noreferrer">{t("Проверить кабинет в новой вкладке")}</a></p>}
       </div>}
       <fieldset disabled={pending} className="help-form-fields">
       <div className="form-section">
