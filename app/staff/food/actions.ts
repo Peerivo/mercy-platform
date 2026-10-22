@@ -68,6 +68,10 @@ export async function reserveFoodDonation(form: FormData) {
 
 export async function attestFoodDonation(form: FormData) {
   await requireCoordinator();
+  // No real-world fulfillment may be attested without an approved Mercy evidence workflow.
+  if (process.env.HAPPY_FOOD_RESCUE_EVIDENCE_ATTESTATION_ENABLED !== "true") {
+    redirect("/staff/food?error=evidence");
+  }
   const offerId = String(form.get("offerId") ?? "").trim();
   const reservationId = String(form.get("reservationId") ?? "").trim();
   const pickedUp = quantity(form.get("pickedUp"));
