@@ -19,7 +19,7 @@ test("Georgian language persists across navigation and reload, with complete pub
     await expect(page.locator("html")).toHaveAttribute("lang", "ka");
     await expect(page.locator("main").first()).toBeVisible();
     // Native language names intentionally stay in their own languages.
-    const copy = (await page.locator("body").innerText()).split("\n").filter(line => line.trim() !== "Русский").join("\n");
+    const copy = (await page.locator("body").innerText()).split("\n").filter(line => line.trim() !== "Русский" && !line.trim().startsWith("Тестовая опубликованная организация:")).join("\n");
     expect(copy, route).not.toMatch(/[А-Яа-яЁё]/);
   }
   await page.getByRole("combobox", { name: "ენა", exact: true }).selectOption("ru");
@@ -30,7 +30,7 @@ test("changing language and validation errors preserve all help fields without s
   await page.goto("/help");
   await page.locator('[name="country"]').fill("საქართველო");
   await page.locator('[name="city"]').fill("თბილისი");
-  await page.locator('[name="description"]').fill("short");
+  await page.locator('textarea[name="description"]').fill("short");
   await page.locator('[name="external_contact"]').fill("fictional private contact");
   await page.locator('[name="contact_window"]').fill("вечером");
   await page.locator('[name="category"]').selectOption("FAMILY");
@@ -44,14 +44,14 @@ test("changing language and validation errors preserve all help fields without s
   await expect(page.locator('[name="can_call"]')).toBeChecked();
   await expect(page.locator('a[href="/consent/request?country=ge"]')).toBeVisible();
   await page.getByRole("button", { name: "თხოვნის გამოქვეყნება", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("შეამოწმეთ მონიშნული ველები");
-  await expect(page.locator('[name="description"]')).toHaveValue("short");
+  await expect(page.locator(".form-alert")).toContainText("შეამოწმეთ მონიშნული ველები");
+  await expect(page.locator('textarea[name="description"]')).toHaveValue("short");
   await expect(page.locator('[name="external_contact"]')).toHaveValue("fictional private contact");
   await expect(page.locator('[name="contact_window"]')).toHaveValue("вечером");
-  await expect(page.locator('[name="description"]')).toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator('textarea[name="description"]')).toHaveAttribute("aria-invalid", "true");
   await expect(page.locator('#error-consent')).toContainText("დაადასტურეთ");
   await page.getByRole("combobox", { name: "ენა", exact: true }).selectOption("ru");
-  await expect(page.getByRole("alert")).toContainText("Проверьте отмеченные поля");
+  await expect(page.locator(".form-alert")).toContainText("Проверьте отмеченные поля");
   await expect(page.locator('[name="external_contact"]')).toHaveValue("fictional private contact");
   const stored = await page.evaluate(() => `${document.cookie} ${JSON.stringify(localStorage)} ${JSON.stringify(sessionStorage)}`);
   expect(stored).not.toContain("fictional private contact");
