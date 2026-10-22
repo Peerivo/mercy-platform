@@ -1,0 +1,76 @@
+name: Food Rescue REG.RU PostgreSQL migrations
+on:
+  workflow_dispatch:
+    inputs:
+      migration:
+        type: choice
+        required: true
+        options: [both, snapshots, mercy-events]
+      confirm:
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: peerivo-food-reg1-postgresql-migrations
+  cancel-in-progress: false
+jobs:
+  migrate:
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'MIGRATE_FOOD_REG1'
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 12
+    env:
+      REG_RU_HOST: ${{ vars.REG_RU_HOST || secrets.REG_RU_HOST }}
+      REG_RU_USER: ${{ vars.REG_RU_USER || secrets.REG_RU_USER }}
+      REG_RU_KNOWN_HOSTS: ${{ vars.REG_RU_KNOWN_HOSTS || secrets.REG_RU_KNOWN_HOSTS }}
+      REQUESTED_MIGRATION: ${{ inputs.migration }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH trust
+        env:
+          REG_RU_SSH_KEY: ${{ secrets.REG_RU_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test -n "$REG_RU_HOST" && test -n "$REG_RU_USER" && test -n "$REG_RU_KNOWN_HOSTS" && test -n "$REG_RU_SSH_KEY"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          umask 077
+          printf '%s\n' "$REG_RU_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$REG_RU_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$REG_RU_USER@$REG_RU_HOST" true
+      - name: Verify pinned migration sources and apply
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$REG_RU_USER@$REG_RU_HOST" bash -s -- "$REQUESTED_MIGRATION" <<'REMOTE'
+          set -euo pipefail
+          migration="$1"
+          base=/opt/peerivo/happy-food/source/migrations/food-rescue
+          one="$base/001_create_food_rescue_snapshots.sql"
+          two="$base/002_create_food_rescue_mercy_events.sql"
+          printf '%s  %s\n' '688c548a2e41b3e976c2c40b87bf78b2e6b589c4b94f272056adefcdca26aa43' "$one" '714c8cab7a70227c113dc72020371c20d747276f6d2a53be3255f40d90c58bcd' "$two" | sha256sum --check --status
+          db=peerivo-food-postgres
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$db")" = healthy
+          case "$migration" in
+            both|snapshots) docker exec -i "$db" psql -U food_owner -d food_rescue -v ON_ERROR_STOP=1 < "$one";;
+            mercy-events) ;;
+            *) exit 1;;
+          esac
+          case "$migration" in
+            both|mercy-events) docker exec -i "$db" psql -U food_owner -d food_rescue -v ON_ERROR_STOP=1 < "$two";;
+            snapshots) ;;
+            *) exit 1;;
+          esac
+          found="$(docker exec "$db" psql -U food_owner -d food_rescue -Atc "SELECT (to_regclass('public.food_rescue_snapshots') IS NOT NULL)::int || '|' || (to_regclass('public.food_rescue_mercy_events') IS NOT NULL)::int")"
+          case "$migration" in
+            both) test "$found" = '1|1';;
+            snapshots) test "$(printf %s "$found" | cut -c1)" = 1;;
+            mercy-events) test "$(printf %s "$found" | cut -c3)" = 1;;
+          esac
+          echo "FOOD_MIGRATIONS_VERIFIED $found"
+          REMOTE
+      - name: Remove SSH credentials
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
