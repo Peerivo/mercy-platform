@@ -66,49 +66,8 @@ export async function reserveFoodDonation(form: FormData) {
   redirect("/staff/food?reservation=" + encodeURIComponent(reservationId));
 }
 
-export async function attestFoodDonation(form: FormData) {
+export async function attestFoodDonation(_form: FormData) {
   await requireCoordinator();
-  // No real-world fulfillment may be attested without an approved Mercy evidence workflow.
-  if (process.env.HAPPY_FOOD_RESCUE_EVIDENCE_ATTESTATION_ENABLED !== "true") {
-    redirect("/staff/food?error=evidence");
-  }
-  const offerId = String(form.get("offerId") ?? "").trim();
-  const reservationId = String(form.get("reservationId") ?? "").trim();
-  const pickedUp = quantity(form.get("pickedUp"));
-  const delivered = quantity(form.get("delivered"));
-  if (!valid(offerId) || !offerId.startsWith("offer_lot_") || !valid(reservationId) ||
-      pickedUp === null || delivered === null || delivered > pickedUp) {
-    redirect("/staff/food?error=invalid");
-  }
-  const now = new Date().toISOString();
-  const outcome = pickedUp === 0 ? "FAILED"
-    : delivered === 0 ? "PICKED_UP_NOT_DELIVERED"
-    : delivered < pickedUp ? "PARTIALLY_DELIVERED" : "DELIVERED";
-  try {
-    const client = createHappyFoodRescueClient({ config: happyFoodRescueConfig() });
-    const event = buildDonationOutcomeAttestation({
-      eventId: id("event_mercy_staff_"),
-      occurredAt: now,
-      region,
-      correlationId: id("correlation_mercy_staff_"),
-      idempotencyKey: id("idempotency_mercy_staff_"),
-      revision: 1,
-      attestationId: id("attestation_mercy_staff_"),
-      offerId,
-      reservationId,
-      quantityPickedUp: pickedUp,
-      quantityDelivered: delivered,
-      unit: "meal",
-      outcome,
-      evidenceRef: "evidence_fulfillment_" + randomBytes(16).toString("hex"),
-      attestedAt: now,
-    });
-    const response = await client.send(event);
-    if (response.accepted !== true || response.effect !== "DONATION_OUTCOME_ATTESTED") {
-      throw new Error("Outcome not confirmed by Food");
-    }
-  } catch {
-    redirect("/staff/food?error=attest");
-  }
-  redirect("/staff/food?success=attested");
+  // Legacy path cannot attest without the private document workflow.
+  redirect("/staff/food/evidence");
 }
