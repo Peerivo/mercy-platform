@@ -62,13 +62,15 @@ jobs:
           remote="$BEGET_USER@$BEGET_HOST"
           ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$remote" \
             "docker exec -i supabase-db psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -At" <<'SQL'
-          select case when
+          do $verification$ begin
+            if not (
             to_regclass('public.food_donation_evidence') is not null
             and (select relrowsecurity from pg_class where oid='public.food_donation_evidence'::regclass)
             and not has_table_privilege('anon','public.food_donation_evidence','SELECT')
             and not has_table_privilege('authenticated','public.food_donation_evidence','SELECT')
             and (select public=false from storage.buckets where id='mercy-food-evidence')
-          then 'MERCY_FOOD_EVIDENCE_SCHEMA_VERIFIED' else 1/0::text end;
+            ) then raise exception 'Food evidence database verification failed'; end if;
+          end $verification$;
           SQL
       - name: Remove temporary SSH credentials
         if: always()
