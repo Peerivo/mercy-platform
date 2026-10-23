@@ -8,6 +8,9 @@ const russianHosts = [
 const config: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  experimental: {
+    serverActions: { bodySizeLimit: "6mb" },
+  },
   async redirects() {
     return russianHosts.map((host) => ({
       source: "/:path*",
