@@ -102,6 +102,19 @@ describe("help draft stays in memory across locale refresh and server errors", (
     await render("ru");
     expect(snapshot()).toEqual(secondDraft);
   });
+  it("keeps private inputs on an uncertain write and points to the existing cabinet", async () => {
+    action.mockResolvedValue({ error: "unknown" });
+    await render("ka");
+    await fill("city", "თბილისი");
+    await fill("description", "კონფიდენციალური საცდელი ტექსტი");
+    await fill("external_contact", "private fixture");
+    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("თხოვნის შენახვა ვერ დადასტურდა");
+    expect(container.querySelector('a[href="/cabinet"][target="_blank"]')).not.toBeNull();
+    expect(input("description").value).toBe("კონფიდენციალური საცდელი ტექსტი");
+    expect(input("external_contact").value).toBe("private fixture");
+    expect(container.querySelector('[role="alert"]')?.textContent).not.toContain("private fixture");
+  });
   it("starts in Georgia only for a fresh Georgian form, without deriving consent from language", async () => {
     await render("ka");
     expect(input("country").value).toBe("საქართველო");
