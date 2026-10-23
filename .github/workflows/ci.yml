@@ -72,6 +72,8 @@ jobs:
             'http://127.0.0.1:54321/rest/v1/published_service_locations?select=id&limit=1' >/dev/null
       - name: PostgreSQL access contract (pgTAP)
         run: supabase test db supabase/tests/access.sql
+      - name: Food evidence private access contract (pgTAP)
+        run: supabase test db supabase/tests/food_evidence.sql
       - name: Obtain ephemeral local keys and run API/Auth/Realtime tests
         shell: bash
         run: |
