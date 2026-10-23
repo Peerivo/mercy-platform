@@ -2,7 +2,7 @@
 import { getTranslations } from "@/lib/i18n/server";
 
 // Keep translated legal copy intact while presenting the approved public product name.
-const publicBrand = (value: string) => value.replaceAll("Mercy", "«Язык милосердия»");
+const publicBrand = (value: string) => value.replaceAll("Mercy", /[\u10A0-\u10FF]/.test(value) ? "«მოწყალების ენა»" : "«Язык милосердия»");
 export async function generateMetadata() {
   const { t } = await getTranslations();
   return {
