@@ -6,7 +6,7 @@ on conflict (id) do update
   set public=false, file_size_limit=5242880,
       allowed_mime_types=ARRAY['application/pdf','image/jpeg','image/png'];
 
-create table public.food_donation_evidence (
+create table if not exists public.food_donation_evidence (
   id uuid primary key default gen_random_uuid(),
   offer_id text not null check (offer_id ~ '^offer_lot_[a-z0-9_-]{3,80}$'),
   reservation_id text not null unique check (reservation_id ~ '^reservation_[a-z0-9_-]{3,100}$'),
@@ -31,7 +31,7 @@ create table public.food_donation_evidence (
   )
 );
 
-create index food_donation_evidence_status_created_idx on public.food_donation_evidence(status, submitted_at);
+create index if not exists food_donation_evidence_status_created_idx on public.food_donation_evidence(status, submitted_at);
 alter table public.food_donation_evidence enable row level security;
 revoke all on public.food_donation_evidence from public, anon, authenticated;
 grant select, insert, update on public.food_donation_evidence to service_role;
