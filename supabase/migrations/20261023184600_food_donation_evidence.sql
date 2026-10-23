@@ -10,7 +10,7 @@ create table public.food_donation_evidence (
   id uuid primary key default gen_random_uuid(),
   offer_id text not null check (offer_id ~ '^offer_lot_[a-z0-9_-]{3,80}$'),
   reservation_id text not null unique check (reservation_id ~ '^reservation_[a-z0-9_-]{3,100}$'),
-  document_path text not null unique check (document_path ~ '^evidence/[a-f0-9-]{36}\\.(pdf|png|jpg)$'),
+  document_path text not null unique check (document_path ~ '^evidence/[a-f0-9-]{36}[.](pdf|png|jpg)$'),
   document_sha256 text not null check (document_sha256 ~ '^[a-f0-9]{64}$'),
   document_mime text not null check (document_mime in ('application/pdf','image/jpeg','image/png')),
   evidence_ref text not null unique check (evidence_ref ~ '^evidence_fulfillment_[a-f0-9]{32}$'),
