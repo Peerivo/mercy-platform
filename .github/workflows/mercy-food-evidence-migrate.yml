@@ -1,0 +1,75 @@
+name: Mercy Food evidence schema migration
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact 40-character main SHA
+        type: string
+        required: true
+      confirm:
+        description: Type MIGRATE_MERCY_FOOD_EVIDENCE
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercy-food-evidence-production-schema
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm == 'MIGRATE_MERCY_FOOD_EVIDENCE' }}
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      BEGET_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_KNOWN_HOSTS: ${{ vars.BEGET_SUPABASE_KNOWN_HOSTS || secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Pin immutable reviewed main and credentials
+        env:
+          BEGET_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.expected_sha }}" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_SHA" = "${{ inputs.expected_sha }}"
+          git fetch --quiet --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
+          test -n "$BEGET_HOST" && test -n "$BEGET_USER" && test -n "$BEGET_KNOWN_HOSTS" && test -n "$BEGET_SSH_KEY"
+          test -s supabase/migrations/20261023184600_food_donation_evidence.sql
+          umask 077
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$BEGET_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$BEGET_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$BEGET_USER@$BEGET_HOST" true
+      - name: Apply only the reviewed evidence migration to Beget
+        run: |
+          set -euo pipefail
+          remote="$BEGET_USER@$BEGET_HOST"
+          sql=supabase/migrations/20261023184600_food_donation_evidence.sql
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$remote" \
+            "docker exec -i supabase-db psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 --single-transaction" < "$sql"
+      - name: Verify evidence relation, strict privacy and bucket
+        run: |
+          set -euo pipefail
+          remote="$BEGET_USER@$BEGET_HOST"
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$remote" \
+            "docker exec -i supabase-db psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -At" <<'SQL'
+          select case when
+            to_regclass('public.food_donation_evidence') is not null
+            and (select relrowsecurity from pg_class where oid='public.food_donation_evidence'::regclass)
+            and not has_table_privilege('anon','public.food_donation_evidence','SELECT')
+            and not has_table_privilege('authenticated','public.food_donation_evidence','SELECT')
+            and (select public=false from storage.buckets where id='mercy-food-evidence')
+          then 'MERCY_FOOD_EVIDENCE_SCHEMA_VERIFIED' else 1/0::text end;
+          SQL
+      - name: Remove temporary SSH credentials
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
