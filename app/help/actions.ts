@@ -6,7 +6,7 @@ import { requestSchema } from "@/lib/validation";
 import { getRequestConsentVersion } from "@/lib/request-consent";
 
 export type RequestActionState = {
-  error?: "validation" | "save" | "auth";
+  error?: "validation" | "save" | "auth" | "unknown";
   fieldErrors?: Record<string, string>;
 };
 
@@ -44,9 +44,19 @@ export async function createRequest(_: RequestActionState, fd: FormData): Promis
     return { error: "validation", fieldErrors };
   }
 
-  const s = await serverSupabase();
-  const { data: { user } } = await s.auth.getUser();
-  if (!user) return { error: "auth" };
+  // These checks happen before the write. Do not expose private values in errors.
+  let s: Awaited<ReturnType<typeof serverSupabase>>;
+  try {
+    s = await serverSupabase();
+  } catch {
+    return { error: "save" };
+  }
+  try {
+    const { data, error } = await s.auth.getUser();
+    if (error || !data.user) return { error: "auth" };
+  } catch {
+    return { error: "auth" };
+  }
 
   const request = { ...parsed.data };
   delete (request as Partial<typeof request>).consent;
@@ -55,12 +65,22 @@ export async function createRequest(_: RequestActionState, fd: FormData): Promis
     parsed.data.country,
   );
 
-  const { data, error } = await s.rpc("create_help_request", {
-    payload: request,
-    consent_version: consentVersion,
-  });
+  let createdId: string;
+  try {
+    const { data, error } = await s.rpc("create_help_request", {
+      payload: request,
+      consent_version: consentVersion,
+    });
+    if (error) return { error: "save" };
+    // A response without an ID could be a committed request. Never suggest an
+    // automatic retry when the outcome cannot be established.
+    if (typeof data !== "string" || !data) return { error: "unknown" };
+    createdId = data;
+  } catch {
+    // The network can fail after the database committed the request.
+    return { error: "unknown" };
+  }
 
-  if (error) return { error: "save" };
-
-  redirect(`/cabinet/requests/${data}`);
+  // Keep the Next.js redirect outside catch; redirect itself throws by design.
+  redirect(`/cabinet/requests/${createdId}`);
 }
