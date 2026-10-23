@@ -57,6 +57,7 @@ jobs:
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL || secrets.RESEND_FROM_EMAIL }}
       FEEDBACK_TO_EMAIL: ${{ vars.FEEDBACK_TO_EMAIL || secrets.FEEDBACK_TO_EMAIL }}
+      HAPPY_FOOD_RESCUE_TOKEN: ${{ secrets.HAPPY_FOOD_RESCUE_TOKEN }}
 
     steps:
       - name: Checkout reviewed main
@@ -285,6 +286,13 @@ jobs:
             printf 'RESEND_API_KEY=%s\n' "${RESEND_API_KEY}"
             printf 'RESEND_FROM_EMAIL=%s\n' "${RESEND_FROM_EMAIL}"
             printf 'FEEDBACK_TO_EMAIL=%s\n' "${FEEDBACK_TO_EMAIL}"
+            if [ -n "${HAPPY_FOOD_RESCUE_TOKEN:-}" ]; then
+              printf 'HAPPY_FOOD_RESCUE_ENABLED=true\n'
+              printf 'HAPPY_FOOD_RESCUE_URL=https://food.peerivo.net\n'
+              printf 'HAPPY_FOOD_RESCUE_TOKEN=%s\n' "${HAPPY_FOOD_RESCUE_TOKEN}"
+            else
+              printf 'HAPPY_FOOD_RESCUE_ENABLED=false\n'
+            fi
           } > /tmp/mercy.env
 
       - name: Prepare transactional remote deployment script
