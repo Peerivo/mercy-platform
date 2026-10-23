@@ -29,7 +29,7 @@ export default async function FoodRescueStaff({
     /^reservation_mercy_staff_[a-f0-9]{32}$/.test(params.reservation)
     ? params.reservation : null;
   const enabled = happyFoodRescueConfig().enabled;
-  const canAttest = process.env.HAPPY_FOOD_RESCUE_EVIDENCE_ATTESTATION_ENABLED === "true";
+  const canAttest = false; // legacy form blocked; use verified evidence workflow
 
   return (
     <section className="container section">
@@ -39,6 +39,7 @@ export default async function FoodRescueStaff({
         <strong>Food Rescue</strong>
       </nav>
       <h1>{t("Передача продуктов через Food Rescue")}</h1>
+      <p><Link href="/staff/food/evidence" className="btn">{t("Документы выдачи")}</Link></p>
       <p className="muted">{t("Операции доступны только администратору и координатору Mercy. Пилотный регион: GE-AJ. Данные получателей и дела Mercy в Food не отправляются.")}</p>
       {error ? <p role="alert" className="form-alert">{error}</p> : null}
       {reservation ? (
