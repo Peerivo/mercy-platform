@@ -4,7 +4,6 @@ import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 import {
-  buildDonationOutcomeAttestation,
   buildDonationReservationUpsert,
   createHappyFoodRescueClient,
   happyFoodRescueConfig,
