@@ -112,7 +112,7 @@ export function AnalyticsConsent() {
       {(choice === null || showPanel) && (
         <aside role="region" aria-label={copy.heading} className="analytics-consent">
           <strong>{copy.heading}</strong>
-          <p>{copy.description}</p>
+          <p>{copy.description} <a href="https://yandex.ru/legal/confidential/" target="_blank" rel="noopener noreferrer">{copy.policy}</a></p>
           <div className="analytics-consent-actions">
             <button className="btn secondary" type="button" onClick={() => decide("denied")}>{copy.reject}</button>
             <button className="btn" type="button" onClick={() => decide("granted")}>{copy.accept}</button>
