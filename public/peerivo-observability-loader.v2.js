@@ -51,8 +51,8 @@
         window.ym = window.ym || function () { (window.ym.a = window.ym.a || []).push(arguments); };
         window.ym.l = window.ym.l || Date.now();
         // Yandex Tag Manager is activated in this particular Metrica counter's UI.
-        window.ym(id, "init", { clickmap: false, trackLinks: false, accurateTrackBounce: false, webvisor: false });
-        inject("https://mc.yandex.ru/metrika/tag.js", "ytm_load_failed");
+        window.ym(id, "init", { ssr: true, clickmap: false, trackLinks: false, trackHash: false, accurateTrackBounce: false, webvisor: false, sendTitle: false });
+        inject("https://mc.yandex.ru/metrika/tag.js?id=" + encodeURIComponent(m.manager.counterId), "ytm_load_failed");
       } else {
         window.dataLayer = window.dataLayer || [];
         window.dataLayer.push({ event: "peerivo_analytics_consent_granted" });
