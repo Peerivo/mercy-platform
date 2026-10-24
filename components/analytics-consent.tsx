@@ -86,7 +86,7 @@ export function AnalyticsConsent() {
       const target = event.target;
       if (!(target instanceof Element)) return;
       const anchor = target.closest("a[href]");
-      if (!anchor || anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return;
+      if (!(anchor instanceof HTMLAnchorElement) || anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return;
       const url = new URL(anchor.href, window.location.href);
       if (url.origin !== window.location.origin || safe(url.pathname)) return;
       event.preventDefault();

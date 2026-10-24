@@ -8,8 +8,7 @@ Implementation: `lib/analytics-config.ts`, `app/site-observability.json/route.ts
 ```json
 {
   "sites": [
-    {"siteId":"mercy","origin":"https://mercy.peerivo.net","manager":{"type":"ytm","counterId":"113766177"}},
-    {"siteId":"food","origin":"https://food.peerivo.net","manager":{"type":"ytm","counterId":"REPLACE_WITH_DISTINCT_FOOD_COUNTER"}}
+    {"siteId":"mercy","origin":"https://mercy.peerivo.net","manager":{"type":"ytm","counterId":"113766177"}}
   ]
 }
 ```
