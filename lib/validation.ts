@@ -147,3 +147,79 @@ export const publicRequestSearchSchema = z.object({
   state: z.enum(["ACTIVE", "COMPLETED", "ALL"]).default("ACTIVE"),
   page: z.coerce.number().int().min(1).max(1000).default(1),
 });
+
+
+// Mercy MVP v1: staff-managed roles without any external identity provider.
+export const roleDirectorySearchSchema = z.object({
+  email: z.union([z.literal(""), z.email().max(320)]).default(""),
+});
+
+export const mercyRoleChangeSchema = z.object({
+  targetUser: z.string().uuid(),
+  role: z.enum(["VOLUNTEER", "CURATOR", "PATRON", "ADMIN"]),
+  enabled: z.boolean(),
+  reason: z.string().trim().min(3).max(500),
+  patronKind: z.enum(["", "PERSON", "SOLE_PROPRIETOR", "LEGAL_ENTITY", "GOVERNMENT"]).default(""),
+}).superRefine((value, ctx) => {
+  if (value.enabled && value.role === "PATRON" && !value.patronKind) {
+    ctx.addIssue({ code: "custom", path: ["patronKind"], message: "patron type required" });
+  }
+});
+
+export const volunteerDirectorySearchSchema = z.object({
+  city: z.string().trim().max(120).default(""),
+  status: z.enum(["", "ONBOARDING", "ACTIVE", "PAUSED", "SUSPENDED"]).default(""),
+  category: z.enum(["", "THINGS", "TRANSPORT", "FOOD", "CHILDCARE", "EDUCATION_WORK", "OTHER"]).default(""),
+  page: z.coerce.number().int().min(1).max(1000).default(1),
+});
+
+const volunteerCategory = z.enum(["THINGS", "TRANSPORT", "FOOD", "CHILDCARE", "EDUCATION_WORK", "OTHER"]);
+export const volunteerProfileSchema = z.object({
+  targetUser: z.string().uuid(),
+  status: z.enum(["ONBOARDING", "ACTIVE", "PAUSED", "SUSPENDED"]),
+  categories: z.array(volunteerCategory).max(12),
+  availableOnline: z.boolean(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const volunteerContactSchema = z.object({
+  targetUser: z.string().uuid(),
+  name: z.string().trim().min(2).max(160),
+  relationship: z.string().trim().min(2).max(120),
+  contact: z.string().trim().min(2).max(240),
+  linkedUser: z.union([z.literal(""), z.string().uuid()]).default(""),
+  consentConfirmed: z.literal(true),
+});
+
+export const volunteerContactRevokeSchema = z.object({
+  contactId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const volunteerAssignmentSchema = z.object({
+  caseId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  mode: z.enum(["REMOTE", "PUBLIC_PLACE", "HOME"]),
+  task: z.string().trim().min(3).max(500),
+});
+
+export const volunteerAssignmentFinishSchema = z.object({
+  assignmentId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  outcome: z.enum(["COMPLETED", "REVOKED"]),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const volunteerIncidentSchema = z.object({
+  targetUser: z.string().uuid(),
+  caseId: z.union([z.literal(""), z.string().uuid()]).default(""),
+  category: z.string().trim().min(3).max(80),
+  summary: z.string().trim().min(10).max(1000),
+});
+
+export const volunteerIncidentResolveSchema = z.object({
+  incidentId: z.string().uuid(),
+  targetUser: z.string().uuid(),
+  resolution: z.string().trim().min(3).max(1000),
+});
