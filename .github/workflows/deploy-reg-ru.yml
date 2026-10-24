@@ -343,6 +343,8 @@ jobs:
             docker run -d --name "${name}" --label "peerivo.mercy.release=${IMAGE_TAG}" \
               --restart "${restart}" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
               --network "${NETWORK_NAME}" --env-file "${env_file}" \
+              --mount "type=bind,source=${REMOTE_DIR}/analytics/site-registry.json,target=/app/analytics-registry.json,readonly" \
+              -e PEERIVO_ANALYTICS_REGISTRY_PATH=/app/analytics-registry.json \
               -p "127.0.0.1:${port}:3000" "${image}" >/dev/null
           }
 
@@ -475,6 +477,9 @@ jobs:
           # global Docker/firewall configuration on the host.
           ensure_network
 
+          # Read-only site-specific Metrica counter config required before candidate start.
+          test -r "${REMOTE_DIR}/analytics/site-registry.json"
+          test -s "${REMOTE_DIR}/analytics/site-registry.json"
           # The temporary candidate never takes the live container's name or port.
           armed=1
           start_container "${CANDIDATE_NAME}" "${IMAGE}" "${NEXT_ENV}" 3101
