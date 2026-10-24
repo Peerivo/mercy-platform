@@ -13,6 +13,7 @@ import { LocaleProvider } from "@/components/locale-provider";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { AuthEntry } from "@/components/auth-entry";
 import { MobileMenu } from "@/components/mobile-menu";
+import { AnalyticsConsent } from "@/components/analytics-consent";
 import { quickExitGuard } from "@/lib/quick-exit-guard";
 import { siteUrl } from "@/lib/config";
 
@@ -76,6 +77,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         </header>
 
         <main>{children}</main>
+        <AnalyticsConsent />
 
         <footer className="site-footer">
           <div className="page-shell site-footer-inner">
