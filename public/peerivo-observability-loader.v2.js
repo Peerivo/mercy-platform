@@ -46,12 +46,15 @@
       if (!response.ok) throw new Error("unavailable");
       const m = await response.json();
       if (!valid(m)) { signal("manifest_invalid"); return false; }
+      // Browser may have navigated to a private route during async manifest fetch.
+      if (!safePath(window.location.pathname)) return false;
       if (m.manager.type === "ytm") {
         const id = Number(m.manager.counterId);
         window.ym = window.ym || function () { (window.ym.a = window.ym.a || []).push(arguments); };
         window.ym.l = window.ym.l || Date.now();
         // Yandex Tag Manager is activated in this particular Metrica counter's UI.
-        window.ym(id, "init", { ssr: true, clickmap: false, trackLinks: false, trackHash: false, accurateTrackBounce: false, webvisor: false, sendTitle: false });
+        window.ym(id, "init", { ssr: true, defer: true, clickmap: false, trackLinks: false, trackHash: false, accurateTrackBounce: false, webvisor: false, sendTitle: false });
+        window.ym(id, "hit", window.location.origin + window.location.pathname);
         inject("https://mc.yandex.ru/metrika/tag.js?id=" + encodeURIComponent(m.manager.counterId), "ytm_load_failed");
       } else {
         window.dataLayer = window.dataLayer || [];
