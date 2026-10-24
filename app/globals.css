@@ -916,3 +916,38 @@ html[data-mercy-quick-exit-guard="1"] body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Explicit opt-in; isolated from requests/forms and never auto-consents. */
+.analytics-consent {
+  position: fixed;
+  z-index: 150;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  max-width: 520px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  padding: 16px;
+  border-radius: var(--radius);
+}
+.analytics-consent p { margin: 7px 0 12px; font-size: 14px; }
+.analytics-consent-actions {display:flex;flex-wrap:wrap;gap:8px;}
+.analytics-consent-actions .btn { min-height:44px;white-space:normal; }
+.analytics-consent-settings {
+  position: fixed;
+  z-index: 150;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  right: max(8px, env(safe-area-inset-right));
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+@media (max-width:540px) {
+  .analytics-consent {max-width:none;padding:12px;}
+  .analytics-consent-actions .btn { flex:1 1 150px; }
+}
