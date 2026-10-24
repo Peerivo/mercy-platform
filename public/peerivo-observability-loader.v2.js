@@ -6,7 +6,7 @@
   let enabled = false;
   let running = false;
   let activeManager = null;
-  const safePath = (pathname) => ["/", "/requests", "/nearby", "/volunteer", "/donate"].includes(pathname);
+  const safePath = (pathname) => ["/", "/requests", "/nearby"].includes(pathname);
 
   function signal(reason) {
     try { window.dispatchEvent(new CustomEvent("peerivo:observability-error", { detail: { reason } })); } catch {}

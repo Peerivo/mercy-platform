@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLocale } from "./locale-provider";
 import { analyticsCopy } from "@/lib/analytics-consent-copy";
 
@@ -16,7 +16,7 @@ declare global {
 
 const key = "peerivo_analytics_consent_v2";
 // Never activate for help forms, personal accounts, reports or request detail URLs.
-const safe = (path: string) => ["/", "/requests", "/nearby", "/volunteer", "/donate"].includes(path);
+const safe = (path: string) => ["/", "/requests", "/nearby"].includes(path);
 
 function loadAdapter(): Promise<void> {
   if (window.PeerivoObservability) return Promise.resolve();
@@ -30,25 +30,34 @@ function loadAdapter(): Promise<void> {
   });
 }
 
+const subscribe = (callback: () => void) => {
+  window.addEventListener("storage", callback);
+  window.addEventListener("peerivo-consent-change", callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener("peerivo-consent-change", callback);
+  };
+};
+const snapshot = (): "granted" | "denied" | null => {
+  try {
+    const value = window.localStorage.getItem(key);
+    return value === "granted" || value === "denied" ? value : null;
+  } catch { return null; }
+};
+const serverSnapshot = () => null;
+
 export function AnalyticsConsent() {
   const pathname = usePathname() ?? "";
   const { locale } = useLocale();
   const copy = analyticsCopy[locale];
-  const [choice, setChoice] = useState<"granted"|"denied"|null>(null);
-  const [ready, setReady] = useState(false);
+  const choice = useSyncExternalStore(subscribe, snapshot, serverSnapshot);
   const [showPanel, setShowPanel] = useState(false);
   const loaded = useRef(false);
   const lastPath = useRef<string|null>(null);
 
-  useEffect(() => {
-    let saved: string | null = null;
-    try { saved = window.localStorage.getItem(key); } catch { /* privacy mode: remain denied unless explicit choice */ }
-    setChoice(saved === "granted" || saved === "denied" ? saved : null);
-    setReady(true);
-  }, []);
 
   useEffect(() => {
-    if (!ready) return;
+    // Wait for browser consent state after hydration.
     if (!safe(pathname)) {
       // Third-party scripts already running cannot safely be unloaded in an SPA.
       // Isolate private surfaces in a fresh document with no analytics bootstrap.
@@ -68,18 +77,36 @@ export function AnalyticsConsent() {
       }
     }).catch(() => { /* analytics must never affect site availability */ });
     return () => {disposed = true;};
-  }, [choice,pathname,ready]);
+  }, [choice,pathname]);
+
+  useEffect(() => {
+    if (!loaded.current || choice !== "granted") return;
+    const forceHardNavigationToPrivate = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest("a[href]");
+      if (!anchor || anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return;
+      const url = new URL(anchor.href, window.location.href);
+      if (url.origin !== window.location.origin || safe(url.pathname)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.location.assign(url.href);
+    };
+    document.addEventListener("click", forceHardNavigationToPrivate, true);
+    return () => document.removeEventListener("click", forceHardNavigationToPrivate, true);
+  }, [choice]);
 
   function decide(next: "granted"|"denied") {
     try { window.localStorage.setItem(key,next); } catch { /* never block page or force analytics */ }
-    setChoice(next);
+    window.dispatchEvent(new Event("peerivo-consent-change"));
     setShowPanel(false);
     if (next === "denied" && loaded.current) {
       window.location.reload();
     }
   }
 
-  if (!ready || !safe(pathname)) return null;
+  if (!safe(pathname)) return null;
   return (
     <>
       {(choice === null || showPanel) && (
