@@ -1,16 +1,16 @@
 {
   "format": 1,
-  "postgresMajor": 17,
+  "postgresMajor": 15,
   "sourceDigests": {
     "20261005073345": "ee2bf27553ca0a71baa275ad607b7ddbf0893e9e64d5687d8029d94bf592b499",
     "20261006033844": "48292e5d1ae87aea8931cdd3cd8d28f1ffbef1795adc0e28c874eb0b6b5b7b34",
     "20261006055900": "57661d31ed4bc5f441b94a1b9f44b704e17ac6b98c390c8a4bddfcdd16a076a3"
   },
   "catalogDigests": {
-    "ledger": "08a8bae91b226608e38f7dea458236a0ddafb2e2569e59b559f2f956efb3637a",
+    "ledger": "b552275bc1167a2f80b4b30de4ef77df3e1b3e5784c3cc2e5246c88df4312607",
     "schemas9": "b7b31f4da52f6ef86e2fa332b4d800c7e74dfd93d520e8d412343261820efdaa",
-    "rate9": "b924be29d9fa39ff1ce5857ddc211425cc2a2794c8bdd607d865f324772b7a6f",
-    "entries9": "d809e1140ac7da059e3206c335d927e30ef69733e2edef678df087bd5fd043f4",
+    "rate9": "9a4f5fc4d75b0abd6e534845786897a959173f0411822f6f381460ec8f6c3383",
+    "entries9": "608dcf419e0f97d30d3824236179976d0730468bab21f47f94d1d0e1eaf39cb9",
     "publish9": "ca029b30eff1386e7063669dd36e9734a046fc540d3749780032e36c640413c4",
     "schemas10": "6d78abfd522988b89f5fd60b469235bd8607a9c87c9983be0d86d130e9a0cc77",
     "entries10": "c8ae4e77a641d7e4fc6c909b4ebc8d0a265e659e7334625209b9c933619de4c8",
@@ -89,5 +89,9 @@
         "menaion_feedback_private.protect_issue_transport_binding"
       ]
     }
+  },
+  "approvedExistingMigration": {
+    "version": "20261007125739",
+    "checksum": "c6e42138bc0f35590d6f444edb8553a3d7a5640e1cd3ce8243cd6c85573af4a7"
   }
 }

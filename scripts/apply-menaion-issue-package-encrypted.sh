@@ -21,7 +21,7 @@ check_hash() { test "$(sha256sum "$root/$1" | cut -d' ' -f1)" = "$2" || fail; }
 check_hash payload10.b64 '0462c0804ee37bb73edfbe468c16ccd5cfd5de69a7f1e1e108c4d50625e7fa57'
 check_hash payload12.b64 '1bc348d8c88f45815a34defd25e77b44aa589892a4be150ff3dddeb2ae5ebe68'
 check_hash manifest.json '613887b5920dcffae6cad1db2b107ba0f8e366ae8c21f809a0b31f7d2fbf91a6'
-check_hash contract.json 'd2ff79cf5ecf3818e807b58130e05835b43369b4665fd9fa14c4b9361e67a2ce'
+check_hash contract.json 'f0d33476ad932a2c06dc1760754a195426ad3cc7e46ff2cee8edc81bd11b7648'
 test "$("${docker_local[@]}" inspect -f '{{.State.Running}}' supabase-db)" = true || fail
 test -s "$HOME/.living-menaion/deploy-private.pem" || fail
 test -s "$HOME/.living-menaion/deploy-cert.pem" || fail

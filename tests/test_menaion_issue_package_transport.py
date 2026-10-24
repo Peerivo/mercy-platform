@@ -38,9 +38,17 @@ class IntegrityTests(unittest.TestCase):
         rows = builder.checked_manifest(MANIFEST)
         histories = builder.histories(rows) + builder.histories(rows, True)
         self.assertEqual(len(histories), 6)
+        existing = builder.APPROVED_EXISTING_MIGRATION['version']
         self.assertEqual([tuple(x['version'] for x in h[9:]) for h in histories], [
-            (), (builder.VERSION11,), (builder.VERSION10,), (builder.VERSION10,builder.VERSION11),
-            (builder.VERSION10,builder.VERSION12), (builder.VERSION10,builder.VERSION11,builder.VERSION12)])
+            (existing,), (builder.VERSION11,existing), (builder.VERSION10,existing),
+            (builder.VERSION10,builder.VERSION11,existing),
+            (builder.VERSION10,builder.VERSION12,existing),
+            (builder.VERSION10,builder.VERSION11,builder.VERSION12,existing)])
+        self.assertEqual(contract['postgresMajor'], 15)
+        self.assertEqual(contract['approvedExistingMigration'], builder.APPROVED_EXISTING_MIGRATION)
+        self.assertEqual(contract['catalogDigests']['ledger'], 'b552275bc1167a2f80b4b30de4ef77df3e1b3e5784c3cc2e5246c88df4312607')
+        self.assertIn("not between 150000 and 159999", builder.build_inspection(MANIFEST, CONTRACT))
+        self.assertNotIn("not between 170000 and 179999", builder.build_inspection(MANIFEST, CONTRACT))
         for index in range(0,len(CONTRACT),31):
             changed=bytearray(CONTRACT);changed[index]^=1
             with self.assertRaises(ValueError): builder.build_inspection(MANIFEST,bytes(changed))

@@ -12,10 +12,17 @@ SOURCE10_SHA = 'ee2bf27553ca0a71baa275ad607b7ddbf0893e9e64d5687d8029d94bf592b499
 SOURCE11_SHA = '48292e5d1ae87aea8931cdd3cd8d28f1ffbef1795adc0e28c874eb0b6b5b7b34'
 SOURCE12_SHA = '57661d31ed4bc5f441b94a1b9f44b704e17ac6b98c390c8a4bddfcdd16a076a3'
 MANIFEST_SHA = '613887b5920dcffae6cad1db2b107ba0f8e366ae8c21f809a0b31f7d2fbf91a6'
-CONTRACT_SHA = 'd2ff79cf5ecf3818e807b58130e05835b43369b4665fd9fa14c4b9361e67a2ce'
+CONTRACT_SHA = 'f0d33476ad932a2c06dc1760754a195426ad3cc7e46ff2cee8edc81bd11b7648'
 CIPHERTEXT10_SHA = '0462c0804ee37bb73edfbe468c16ccd5cfd5de69a7f1e1e108c4d50625e7fa57'
 CIPHERTEXT12_SHA = '1bc348d8c88f45815a34defd25e77b44aa589892a4be150ff3dddeb2ae5ebe68'
 CERTIFICATE_SHA = '1c445517d9fe95784a9caced337ce5f34b9132610afd1946f325bd5ad8d385c9'
+# Read-only verified against the live PG15 Beget predecessor on 24 Oct 2026.
+# This approved migration is NOT a generic relaxation of ledger history.
+APPROVED_EXISTING_MIGRATION = {
+    'version': '20261007125739',
+    'checksum': 'c6e42138bc0f35590d6f444edb8553a3d7a5640e1cd3ce8243cd6c85573af4a7',
+}
+
 TABLES10 = ['menaion_feedback_private.' + n for n in
     ('moderation_outbox', 'moderation_decisions', 'pronunciation_cache_invalidations')]
 TABLES12 = ['menaion_feedback_private.' + n for n in
@@ -79,6 +86,8 @@ def checked_contract(raw):
     contract = json.loads(raw)
     if contract['sourceDigests'] != {VERSION10: SOURCE10_SHA, VERSION11: SOURCE11_SHA, VERSION12: SOURCE12_SHA}:
         raise ValueError('Source contract mismatch')
+    if contract.get('postgresMajor') != 15 or contract.get('approvedExistingMigration') != APPROVED_EXISTING_MIGRATION:
+        raise ValueError('Unexpected PG15 target or historical migration identity')
     return contract
 
 
@@ -92,6 +101,7 @@ def histories(rows, complete=False):
             if ten: result.append({'version': VERSION10, 'checksum': SOURCE10_SHA})
             if eleven: result.append({'version': VERSION11, 'checksum': SOURCE11_SHA})
             if complete: result.append({'version': VERSION12, 'checksum': SOURCE12_SHA})
+            result.append(APPROVED_EXISTING_MIGRATION.copy())
             answer.append(result)
     return answer
 
@@ -190,7 +200,7 @@ begin
  if current_database()<>'living_menaion' or current_user<>'supabase_admin'
     or session_user<>'supabase_admin' or not exists(select from pg_roles where rolname=current_user and rolsuper)
  then raise exception 'Wrong fixed target or executor'; end if;
- if current_setting('server_version_num')::integer not between 170000 and 179999
+ if current_setting('server_version_num')::integer not between 150000 and 159999
  then raise exception 'Unreviewed PostgreSQL catalog version'; end if;
  if not exists(select from pg_class c join pg_namespace n on n.oid=c.relnamespace
    where n.nspname='public' and c.relname='living_menaion_schema_migrations'
