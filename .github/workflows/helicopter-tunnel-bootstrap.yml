@@ -78,11 +78,13 @@ jobs:
           set -euo pipefail
           beget_opts=(-i ~/.ssh/beget -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/beget_known_hosts -o ConnectTimeout=10)
           remote="$BEGET_SUPABASE_USER@$BEGET_SUPABASE_HOST"
-          printf '%s\n' "$TUNNEL_PUBLIC_KEY" | ssh "${beget_opts[@]}" "$remote" 'bash -s' <<'REMOTE'
+          key_body="$(printf '%s\n' "$TUNNEL_PUBLIC_KEY" | awk '{print $2}')"
+          [[ "$key_body" =~ ^[A-Za-z0-9+/=]+$ ]]
+          ssh "${beget_opts[@]}" "$remote" "bash -s -- '$key_body'" <<'REMOTE'
           set -euo pipefail
-          IFS= read -r key
-          [[ "$key" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+$ ]]
-          key_body="$(printf '%s\n' "$key" | awk '{print $2}')"
+          key_body="$1"
+          [[ "$key_body" =~ ^[A-Za-z0-9+/=]+$ ]]
+          key="ssh-ed25519 $key_body"
           line="from=\"95.163.223.68\",restrict,port-forwarding,permitopen=\"127.0.0.1:5432\",command=\"/bin/false\" $key helicopter-reg-ru1-to-beget-v2"
 
           umask 077
@@ -120,6 +122,8 @@ jobs:
           [[ "$gateway" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "$gateway" != "0.0.0.0"
           test "$gateway" != "127.0.0.1"
+
+          systemctl stop peerivo-helicopter-db-tunnel.service >/dev/null 2>&1 || true
 
           if ss -ltnH '( sport = :55432 )' | grep -q .; then
             existing="$(ss -ltnH '( sport = :55432 )' | awk '{print $4}')"
