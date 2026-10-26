@@ -1,4 +1,5 @@
 name: Deploy REG.RU production
+# One-shot PREPARE approval refreshed for base e0d4a0ab8bb1d74c74b3a2941d068cf8cb93d601.
 
 on:
   workflow_dispatch:
