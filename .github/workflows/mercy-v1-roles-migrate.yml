@@ -1,0 +1,151 @@
+name: Mercy v1 roles schema CHECK or APPLY (Beget)
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: CHECK (read-only) or APPLY (transactional production migration)
+        type: choice
+        required: true
+        options:
+          - CHECK
+          - APPLY
+      expected_sha:
+        description: Immutable 40-character reviewed main SHA
+        type: string
+        required: true
+      confirm:
+        description: Exact CHECK or APPLY_MERCY_V1_ROLES
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mercy-v1-roles-production-schema
+  cancel-in-progress: false
+
+jobs:
+  migration:
+    if: >-
+      ${{ github.ref == 'refs/heads/main' &&
+          ((inputs.operation == 'CHECK' && inputs.confirm == 'CHECK') ||
+           (inputs.operation == 'APPLY' && inputs.confirm == 'APPLY_MERCY_V1_ROLES')) }}
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BEGET_HOST: ${{ vars.BEGET_SUPABASE_HOST || secrets.BEGET_SUPABASE_HOST }}
+      BEGET_USER: ${{ vars.BEGET_SUPABASE_USER || secrets.BEGET_SUPABASE_USER }}
+      BEGET_KNOWN_HOSTS: ${{ vars.BEGET_SUPABASE_KNOWN_HOSTS || secrets.BEGET_SUPABASE_KNOWN_HOSTS }}
+      MIGRATION: supabase/migrations/20261008193000_mercy_v1_email_roles_volunteer_service.sql
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Verify reviewed main, migration and full regression CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.expected_sha }}" =~ ^[0-9a-f]{40}$ ]]
+          test "${{ inputs.expected_sha }}" = "$GITHUB_SHA"
+          git fetch -q --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
+          test -s "$MIGRATION"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&event=push&per_page=30" |
+            jq -e --arg sha "$GITHUB_SHA" '
+              [.workflow_runs[] |
+                select(.head_sha == $sha and .status == "completed" and
+                  .event == "push" and .conclusion == "success")] | length > 0'
+      - name: Set up Beget SSH with pinned known_hosts
+        env:
+          BEGET_SSH_KEY: ${{ secrets.BEGET_SUPABASE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$BEGET_HOST" && test -n "$BEGET_USER" &&
+            test -n "$BEGET_KNOWN_HOSTS" && test -n "$BEGET_SSH_KEY"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$BEGET_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$BEGET_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$BEGET_USER@$BEGET_HOST" true
+      - name: Read-only database preflight (no previous role schema)
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_USER@$BEGET_HOST"
+          output="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
+            "docker exec supabase-db psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -At" <<'SQL'
+          select (to_regclass('public.help_requests') is not null)::int,
+                 (to_regclass('public.staff_roles') is not null)::int,
+                 (to_regclass('public.mercy_role_grants') is not null)::int,
+                 (to_regclass('public.volunteer_case_assignments') is not null)::int,
+                 (to_regtype('public.mercy_role') is not null)::int;
+          SQL
+          )"
+          echo "Read-only database schema probe: $output"
+          if [ "$output" = "1|1|0|0|0" ]; then
+            echo "Schema pending; ready for exact SHA migration."
+          elif [ "$output" = "1|1|1|1|1" ]; then
+            echo "Role schema already present; no migration may be reapplied."
+            if [ "${{ inputs.operation }}" = "APPLY" ]; then
+              echo "::error::Role schema exists; APPLY refused (no duplicate migration)."
+              exit 1
+            fi
+          else
+            echo "::error::Unexpected partial / missing Beget schema; no changes made."
+            exit 1
+          fi
+          if [ "${{ inputs.operation }}" = "APPLY" ]; then
+            test "$output" = "1|1|0|0|0"
+          fi
+      - name: Apply one reviewed SQL file in a single PostgreSQL transaction
+        if: ${{ inputs.operation == 'APPLY' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_USER@$BEGET_HOST"
+          # No manual DB shell / no unrelated migrations. A failed statement rolls back all changes.
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
+            "docker exec -i supabase-db psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 --single-transaction" < "$MIGRATION"
+      - name: Post-migration verify roles, grants and row-level security
+        if: ${{ inputs.operation == 'APPLY' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$BEGET_USER@$BEGET_HOST"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
+            "docker exec -i supabase-db psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -At" <<'SQL'
+          do $verify$
+          declare
+            item text;
+          begin
+            foreach item in array array[
+              'mercy_role_grants','volunteer_profiles','patron_profiles',
+              'volunteer_contact_persons','volunteer_case_assignments','volunteer_incidents'
+            ] loop
+              if to_regclass('public.'||item) is null then
+                raise exception 'Missing role relation %', item;
+              end if;
+              if not (select relrowsecurity from pg_class where oid=('public.'||item)::regclass) then
+                raise exception 'RLS not enabled on %', item;
+              end if;
+              if has_table_privilege('anon','public.'||item,'SELECT') then
+                raise exception 'Anonymous reading of private relation %', item;
+              end if;
+            end loop;
+            if to_regprocedure('public.current_mercy_access()') is null then
+              raise exception 'Mercy role RPC missing';
+            end if;
+          end $verify$;
+          SQL
+      - name: Remove SSH key material
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
