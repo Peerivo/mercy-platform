@@ -145,13 +145,13 @@ export default async function RequestsPage({
     <section className="page-shell section requests-page">
       <div className="nav requests-page-heading">
         <div>
-          <h1>{t("Просьбы о помощи")}</h1>
-          <p className="muted requests-page-lead">{t("Здесь опубликованы просьбы людей, которым сейчас нужна помощь.")}</p>
+          <h1>{t("Хочу помочь")}</h1>
+          <p className="muted requests-page-lead">{t("Выберите просьбу, на которую готовы откликнуться, или предложите свою помощь.")}</p>
         </div>
 
         <span className="spacer" />
 
-        <Link className="btn requests-primary-action" href="/help">{t("Мне нужна помощь")}</Link>
+        <Link className="btn requests-primary-action" href="/volunteer">{t("Предложить помощь")}</Link>
       </div>
 
       <form method="get" className="card grid request-filters-card">
