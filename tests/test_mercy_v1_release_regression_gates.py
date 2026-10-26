@@ -28,7 +28,8 @@ class ReleaseRegressionGates(unittest.TestCase):
         for condition in ['APPLY_MERCY_V1_ROLES', 'head_sha=${GITHUB_SHA}',
                           'read-only database preflight', '--single-transaction',
                           "if: ${{ inputs.operation == 'APPLY' }}",
-                          'Row-level security']:
+                          'Row-level security',
+                          'docker exec -i supabase-db psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -At']:
             with self.subTest(condition=condition):
                 self.assertIn(condition.lower(), migration.lower())
 

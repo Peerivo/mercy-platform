@@ -82,7 +82,7 @@ jobs:
           set -euo pipefail
           remote="$BEGET_USER@$BEGET_HOST"
           output="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
-            "docker exec supabase-db psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -At" <<'SQL'
+            "docker exec -i supabase-db psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -At" <<'SQL'
           select (to_regclass('public.help_requests') is not null)::int,
                  (to_regclass('public.staff_roles') is not null)::int,
                  (to_regclass('public.mercy_role_grants') is not null)::int,
