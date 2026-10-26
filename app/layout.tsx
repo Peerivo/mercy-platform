@@ -33,9 +33,8 @@ export async function generateMetadata() {
 }
 
 const navigation = [
-  { href: "/requests", label: "Просьбы" },
+  { href: "/requests", label: "Хочу помочь" },
   { href: "/nearby", label: "Помощь рядом" },
-  { href: "/volunteer", label: "Хочу помочь" },
   { href: "/donate", label: "Поддержать" },
 ] as const;
 
