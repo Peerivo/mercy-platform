@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: mercy-reg-ru-production
@@ -81,6 +82,23 @@ jobs:
           current_main="$(git rev-parse refs/remotes/origin/main)"
           test "${current_main}" = "${GITHUB_SHA}" || {
             echo "::error::Dispatch revision is no longer current main"
+            exit 1
+          }
+
+      - name: Require all regression suites green on exact main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&event=push&per_page=30")"
+          echo "$response" | jq -e --arg sha "$GITHUB_SHA" '
+            [.workflow_runs[] |
+              select(.head_sha == $sha and .event == "push" and
+                .status == "completed" and .conclusion == "success")]
+            | length > 0
+          ' >/dev/null || {
+            echo "::error::Required lint/typecheck/unit/disposable DB/browser E2E CI not green for exact main."
             exit 1
           }
 
