@@ -30,5 +30,16 @@ export async function GET(req: Request) {
   jar.set(PEERIVO_VERIFIER_COOKIE, verifier, PEERIVO_COOKIE_OPTIONS);
   jar.set(PEERIVO_NEXT_COOKIE, next, PEERIVO_COOKIE_OPTIONS);
 
-  return NextResponse.redirect(buildPeerivoAuthorizeUrl({ state, codeChallenge: challenge }));
+  const authorize = buildPeerivoAuthorizeUrl({ state, codeChallenge: challenge });
+  const provider = requestUrl.searchParams.get("provider");
+  if (provider !== null && provider !== "google") {
+    return NextResponse.redirect(new URL("/auth?error=invalid_request", requestUrl));
+  }
+  if (provider === "google") {
+    const config = new URL(authorize);
+    const destination = new URL("/api/oauth/google", config.origin);
+    destination.searchParams.set("returnTo", config.pathname + config.search);
+    return NextResponse.redirect(destination);
+  }
+  return NextResponse.redirect(authorize);
 }
